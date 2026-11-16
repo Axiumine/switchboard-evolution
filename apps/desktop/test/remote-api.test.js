@@ -250,3 +250,40 @@ test('a module can run a method itself, with the calling phone first', async () 
 });
 
 function isIdLike(v) { return typeof v === 'string'; }
+
+test('a phone can search and replace in a folder, with only the known fields', async () => {
+  const calls = [];
+  const api = createRemoteApi({
+    getHandler: () => null,
+    localMethods: {
+      'search-project-files': (_client, root, opts) => { calls.push(['search', root, opts]); return { ok: true, files: [] }; },
+      'replace-in-project-files': (_client, root, opts) => { calls.push(['replace', root, opts]); return { ok: true, replaced: 1 }; },
+    },
+  });
+  const phone = { name: 'phone' };
+  const query = { query: 'greet', isRegex: false, matchCase: true, wholeWord: false };
+  assert.deepEqual((await api.call('search-project-files', ['/p/app', { ...query, include: 'src', maxResults: 2000 }], phone)).result, { ok: true, files: [] });
+  const match = { line: 3, column: 4, length: 5, text: 'greet' };
+  assert.equal((await api.call('replace-in-project-files', ['/p/app', { ...query, replace: 'hello', files: [{ path: 'src/a.js', matches: [match] }, { path: 'b.js' }] }], phone)).result.replaced, 1);
+  // A field the desktop does not know, a match out of range, or an absolute path is refused.
+  assert.match((await api.call('search-project-files', ['/p/app', { ...query, extra: 1 }], phone)).error, /Wrong parameter 2/);
+  assert.match((await api.call('replace-in-project-files', ['/p/app', { ...query, replace: '', files: [{ path: 'a.js', matches: [{ ...match, line: 0 }] }] }], phone)).error, /Wrong parameter 2/);
+  assert.match((await api.call('replace-in-project-files', ['/p/app', { ...query, replace: '', files: [{ path: '/etc/hosts' }] }], phone)).error, /Wrong parameter 2/);
+  assert.equal(calls.length, 2);
+});
+
+test('a phone can stage files and the picked lines of one side of a diff', async () => {
+  const { api, calls } = setup({
+    'get-project-git-diff': () => ({ ok: true }),
+    'stage-project-git-files': () => ({ ok: true }),
+    'stage-project-git-lines': () => ({ ok: true }),
+  });
+  const id = 'a'.repeat(40);
+  assert.ok((await api.call('get-project-git-diff', ['p1', '/r', 'a.js', 'staged'])).result.ok);
+  assert.ok((await api.call('stage-project-git-files', ['p1', '/r', ['a.js', 'old.js'], false])).result.ok);
+  assert.ok((await api.call('stage-project-git-files', ['p1', '/r', null, true])).result.ok);
+  assert.ok((await api.call('stage-project-git-lines', ['p1', '/r', 'a.js', 'unstaged', id, [5, 6]])).result.ok);
+  assert.match((await api.call('get-project-git-diff', ['p1', '/r', 'a.js', 'both'])).error, /Wrong parameter 4/);
+  assert.match((await api.call('stage-project-git-lines', ['p1', '/r', 'a.js', 'unstaged', 'not-a-sha', [5]])).error, /Wrong parameter 5/);
+  assert.equal(calls.length, 4);
+});
