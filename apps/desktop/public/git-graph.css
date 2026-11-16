@@ -588,7 +588,17 @@
 .gg-field-hint { font-size: 11px; color: #6f6f84; margin-left: 22px; }
 .gg-remote-list { display: flex; flex-direction: column; gap: 4px; margin-left: 4px; }
 .gg-remote-list .gg-remote-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #bcbccc; }
-.gg-dialog-error { color: #df7180; font-size: 12px; margin: 4px 0 8px; }
+.gg-dialog-error { color: #df7180; font-size: 12px; margin: 4px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* While the primary action runs: everything disabled, a spinner on the primary button. */
+.gg-dialog[aria-busy="true"] .gg-dialog-body { opacity: 0.6; }
+.gg-dialog[aria-busy="true"] button:disabled { cursor: progress; }
+.gg-dialog[aria-busy="true"] .gg-dialog-primary:disabled { opacity: 0.85; }
+.gg-dialog[aria-busy="true"] .gg-dialog-cancel:disabled { opacity: 0.45; }
+.gg-dialog .gg-dialog-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.gg-dialog-spinner { width: 11px; height: 11px; flex: none; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: gg-dialog-spin 0.7s linear infinite; }
+@keyframes gg-dialog-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gg-dialog-spinner { animation-duration: 2s; } }
 .gg-dialog-warning { color: #e0aa63; font-size: 13px; margin: 0 0 8px; }
 .gg-dialog-hint { color: #8989a0; font-size: 12px; margin: 0 0 8px; }
 .gg-dialog-primary-danger { background: rgba(223,113,128,0.18) !important; color: #df7180 !important; }

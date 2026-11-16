@@ -212,11 +212,12 @@ function openDialogNode() {
 
 // --- Defaults match GlobalPrefs.dialogDefaults exactly ---
 
-test('Add Tag opens with Annotated type unchecked Push-to-remote, matching the documented default', async () => {
+test('Add Tag opens with Lightweight type unchecked Push-to-remote, matching the documented default', async () => {
   setup();
   dialogs.gitGraphShowAddTagDialog({ projectId: 'p', folderPath: '/r', commitHash: 'h', commitShortHash: 'h1234' });
   const dialog = openDialogNode();
-  assert.equal(dialog.querySelector('#gg-addtag-type').value, 'annotated');
+  assert.equal(dialog.querySelector('#gg-addtag-type').value, 'lightweight');
+  assert.equal(dialog.querySelector('#gg-addtag-message').disabled, true);
   assert.equal(dialog.querySelector('#gg-addtag-push').checked, false);
   assert.match(dialog.querySelector('h3').textContent, /Add tag to commit h1234/);
 });
@@ -416,6 +417,7 @@ test('an invalid ref name is rejected before runGitGraphAction is ever called', 
   dialog.querySelector('.gg-dialog-primary').onclick();
   assert.equal(runCalls.length, 0);
   assert.equal(dialog.querySelector('.gg-dialog-error').hidden, false);
+  await flushAsync();
   dialog.querySelector('#gg-createbranch-name').value = 'fine-name';
   dialog.querySelector('.gg-dialog-primary').onclick();
   await promise;
@@ -541,6 +543,71 @@ test('Push Tag defaults to origin when multiple remotes exist and calls pushTag 
   dialog.querySelector('.gg-dialog-primary').onclick();
   await promise;
   assert.deepEqual(runCalls, [{ projectId: 'p', folderPath: '/r', actionId: 'pushTag', params: { tagName: 'v1', remotes: ['origin'] } }]);
+});
+
+test('Push Tag disables the dialog with a spinner while it pushes, then shows the error and allows a retry', async () => {
+  let finishPush;
+  let attempt = 0;
+  const { runCalls } = setup({
+    runGitGraphAction: () => {
+      attempt += 1;
+      if (attempt === 1) return new Promise(resolve => { finishPush = () => resolve({ error: 'fatal: could not read from remote' }); });
+      return { ok: true };
+    },
+  });
+  const promise = dialogs.gitGraphShowPushTagDialog({ projectId: 'p', folderPath: '/r', name: 'v1', remotes: [{ name: 'origin' }] });
+  const dialog = openDialogNode();
+  const primary = dialog.querySelector('.gg-dialog-primary');
+  const remote = dialog.querySelector('.gg-pushtag-remote');
+  primary.onclick();
+  await flushAsync();
+  // Pushing: everything disabled, a spinner on the button, Escape and a second click ignored.
+  assert.equal(dialog.getAttribute('aria-busy'), 'true');
+  assert.equal(primary.disabled, true);
+  assert.equal(remote.disabled, true);
+  assert.equal(dialog.querySelector('.gg-dialog-cancel').disabled, true);
+  assert.ok(primary.querySelector('.gg-dialog-spinner'));
+  global.document._dispatchKeydown({ key: 'Escape' });
+  primary.onclick();
+  assert.equal(runCalls.length, 1);
+  assert.ok(global.document.body.children.length > 0, 'the dialog is still open');
+  // The push fails: the error shows and the dialog can be used again.
+  finishPush();
+  await flushAsync();
+  assert.equal(dialog.getAttribute('aria-busy'), 'false');
+  assert.equal(primary.disabled, false);
+  assert.equal(remote.disabled, false);
+  assert.equal(primary.querySelector('.gg-dialog-spinner'), null);
+  assert.equal(primary.textContent, 'Push Tag');
+  assert.match(dialog.querySelector('.gg-dialog-error').textContent, /could not read from remote/);
+  // A retry pushes again and closes the dialog.
+  primary.onclick();
+  const result = await promise;
+  assert.deepEqual(result, { ok: true });
+  assert.equal(runCalls.length, 2);
+});
+
+test('Add Tag keeps a field the type disables disabled after a failed push, and a retry only pushes', async () => {
+  let pushes = 0;
+  const { runCalls } = setup({
+    runGitGraphAction: ({ actionId }) => {
+      if (actionId === 'pushTag') { pushes += 1; return pushes === 1 ? { error: 'rejected' } : { ok: true }; }
+      return { ok: true };
+    },
+  });
+  const promise = dialogs.gitGraphShowAddTagDialog({ projectId: 'p', folderPath: '/r', commitHash: 'h', remotes: [{ name: 'origin' }] });
+  const dialog = openDialogNode();
+  dialog.querySelector('#gg-addtag-name').value = 'v2';
+  dialog.querySelector('#gg-addtag-push').checked = true;
+  dialog.querySelector('.gg-dialog-primary').onclick();
+  await flushAsync();
+  assert.match(dialog.querySelector('.gg-dialog-error').textContent, /The tag v2 was created, but pushing it failed:\nrejected/);
+  // Lightweight: the message stays disabled once the dialog is enabled again.
+  assert.equal(dialog.querySelector('#gg-addtag-message').disabled, true);
+  assert.equal(dialog.querySelector('#gg-addtag-name').disabled, false);
+  dialog.querySelector('.gg-dialog-primary').onclick();
+  await promise;
+  assert.deepEqual(runCalls.map(c => c.actionId), ['addTag', 'pushTag', 'pushTag']);
 });
 
 // --- Checkout Commit: detached-HEAD warning + session "Always Accept" ---

@@ -27,7 +27,7 @@
 
 const GIT_GRAPH_DIALOG_DEFAULTS = {
   referenceInputSpaceSubstitution: 'none',
-  addTag: { type: 'annotated', pushToRemote: false },
+  addTag: { type: 'lightweight', pushToRemote: false },
   createBranch: { checkOut: false },
   cherryPick: { noCommit: false, recordOrigin: false },
   merge: { noFastForward: true, noCommit: false, squashCommits: false, squashMessageFormat: 'default' },
@@ -215,17 +215,51 @@ function gitGraphOpenDialog({ title, bodyHtml, primaryLabel = 'OK', cancelLabel 
   document.body.appendChild(overlay);
 
   let closed = false;
+  let busy = false;
   function close() {
     if (closed) return;
     closed = true;
     overlay.remove();
     document.removeEventListener('keydown', onKey, true);
   }
-  function cancel() { close(); if (onCancel) onCancel(); }
-  function submit() { if (onSubmit) onSubmit(); }
+  function cancel() { if (busy) return; close(); if (onCancel) onCancel(); }
+
+  // While the primary action runs (a push can take a while) every field and
+  // button is disabled and the primary button spins; when the action fails
+  // the dialog shows git's error and is enabled again, so it can be retried.
+  const primaryBtn = dialog.querySelector('.gg-dialog-primary');
+  const primaryHtml = escapeHtml(primaryLabel);
+  let disabledWhileBusy = [];
+  function setBusy(on) {
+    busy = on;
+    dialog.setAttribute('aria-busy', on ? 'true' : 'false');
+    if (on) {
+      disabledWhileBusy = Array.from(dialog.querySelectorAll('input,select,textarea,button')).filter(el => !el.disabled);
+      for (const el of disabledWhileBusy) el.disabled = true;
+      primaryBtn.innerHTML = `<span class="gg-dialog-spinner" aria-hidden="true"></span>${primaryHtml}`;
+    } else {
+      for (const el of disabledWhileBusy) el.disabled = false;
+      disabledWhileBusy = [];
+      primaryBtn.innerHTML = primaryHtml;
+    }
+  }
+  async function submit() {
+    if (busy || closed || !onSubmit) return;
+    hideError();
+    setBusy(true);
+    try {
+      await onSubmit();
+    } catch (err) {
+      if (!closed) showError(err && err.message ? err.message : String(err));
+    } finally {
+      if (!closed) setBusy(false);
+    }
+  }
 
   function onKey(e) {
     if (closed) return;
+    // A confirmation opened by the running action answers its own keys.
+    if (busy) return;
     if (e.key === 'Escape') { e.stopPropagation(); cancel(); return; }
     if (e.key === 'Enter') {
       if (e.isComposing || e.keyCode === 229) return;
@@ -238,7 +272,7 @@ function gitGraphOpenDialog({ title, bodyHtml, primaryLabel = 'OK', cancelLabel 
 
   const cancelBtn = dialog.querySelector('.gg-dialog-cancel');
   if (cancelBtn) cancelBtn.onclick = cancel;
-  dialog.querySelector('.gg-dialog-primary').onclick = submit;
+  primaryBtn.onclick = submit;
 
   const toFocus = dialog.querySelector(focusSelector || 'input,select,textarea');
   if (toFocus) { toFocus.focus(); if (toFocus.select) toFocus.select(); }
@@ -247,6 +281,11 @@ function gitGraphOpenDialog({ title, bodyHtml, primaryLabel = 'OK', cancelLabel 
     const err = dialog.querySelector('.gg-dialog-error');
     err.textContent = message;
     err.hidden = false;
+  }
+  function hideError() {
+    const err = dialog.querySelector('.gg-dialog-error');
+    err.textContent = '';
+    err.hidden = true;
   }
 
   return { overlay, dialog, close, cancel, showError };
@@ -282,11 +321,14 @@ function gitGraphShowAddTagDialog(params) {
     async function createTag(name) {
       return gitGraphRunDialogAction(params, 'addTag', { name, commit: params.commitHash, type: typeSelect.value, message: messageField.value });
     }
+    // The tag this dialog has already made when only its push failed: a
+    // retry pushes it again instead of asking to replace it.
+    let created = null;
     async function submit() {
       const name = gitGraphSubstituteSpaces(dialog.querySelector('#gg-addtag-name').value.trim(), spaceMode);
       const invalid = gitGraphValidateRefName(name);
       if (invalid) { showError(invalid); return; }
-      let result = await createTag(name);
+      let result = created && created.name === name ? created.result : await createTag(name);
       if (result.error) {
         if (/already exists/i.test(result.error) && await gitGraphConfirmDestructive(`A tag named "${name}" already exists. Replace it?`)) {
           const del = await gitGraphRunDialogAction(params, 'deleteTag', { name, remotes: [] });
@@ -295,13 +337,14 @@ function gitGraphShowAddTagDialog(params) {
           if (result.error) { showError(result.error); return; }
         } else { showError(result.error); return; }
       }
+      created = { name, result };
       if (pushCheckbox.checked && remotes.length) {
         const selected = remotes.length > 1
           ? Array.from(dialog.querySelectorAll('.gg-addtag-remote:checked')).map(el => el.value)
           : [remotes[0].name];
         if (selected.length) {
           const pushResult = await gitGraphRunDialogActionMulti(params, 'pushTag', selected.map(remote => ({ tagName: name, remotes: [remote] })));
-          if (pushResult.error) { showError(pushResult.error); return; }
+          if (pushResult.error) { showError(`The tag ${name} was created, but pushing it failed:\n${pushResult.error}`); return; }
         }
       }
       close(); resolve(result);

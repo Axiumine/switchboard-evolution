@@ -108,7 +108,7 @@ const DEFAULT_GLOBAL_PREFS = Object.freeze({
   fileViewType: 'tree',
   compactFolders: true,
   dialogDefaults: {
-    addTag: { type: 'annotated', pushToRemote: false },
+    addTag: { type: 'lightweight', pushToRemote: false },
     createBranch: { checkOut: false },
     cherryPick: { noCommit: false, recordOrigin: false },
     merge: { noFastForward: true, noCommit: false, squashCommits: false, squashMessageFormat: 'default' },
