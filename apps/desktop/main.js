@@ -35,6 +35,7 @@ const { runStatsCommand, refreshStatsCache } = require('./stats-refresh');
 const { readHead } = require('./jsonl-scan');
 const codexAuth = require('./codex-auth');
 const { copyOldUserData } = require('./user-data-migration');
+const { describeOpenWindows, windowsToRestore } = require('./window-restore');
 
 // SWITCHBOARD_DATA_DIR isolates a dev/test instance from the installed app:
 // db.js puts switchboard.db under it, and pointing userData there gives the
@@ -197,6 +198,9 @@ function createWindow() {
   }
 
   mainWindow.loadFile(path.join(__dirname, 'public', 'index.html'));
+  // The windows of their own that were open when it closed come back once
+  // the main window is there.
+  mainWindow.webContents.once('did-finish-load', restoreOpenWindows);
 
   // Open external links in the system browser instead of a child BrowserWindow
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -287,6 +291,8 @@ function createWindow() {
       activeSessions.delete(id);
     }
     taskManager.shutdown();
+    // They close with the main window, and open again with the next one.
+    freezeOpenWindows();
     for (const win of [...toolWindows.values(), ...projectWindows.values()]) if (!win.isDestroyed()) win.close();
     mainWindow = null;
   });
@@ -1526,7 +1532,7 @@ function saveToolWindowSettings(kind, patch) {
   setSetting('global', global);
 }
 
-function openToolWindow(kind) {
+function openToolWindow(kind, { bounds, inactive = false } = {}) {
   const spec = TOOL_WINDOWS[kind];
   if (!spec) return;
   const open = toolWindows.get(kind);
@@ -1534,12 +1540,14 @@ function openToolWindow(kind) {
     bringForward(open);
     return;
   }
-  const win = createPageWindow(kind, spec);
+  const win = createPageWindow(kind, spec, { bounds, inactive });
   toolWindows.set(kind, win);
   win.loadFile(path.join(__dirname, 'public', spec.page));
   win.on('closed', () => {
     if (toolWindows.get(kind) === win) toolWindows.delete(kind);
+    rememberOpenWindows();
   });
+  rememberOpenWindows();
 }
 
 function bringForward(win) {
@@ -1553,8 +1561,11 @@ function bringForward(win) {
  * size are remembered. `offset` moves it down and right from that place, so
  * a second window of the same kind does not hide the first.
  */
-function createPageWindow(kind, spec, { offset = 0 } = {}) {
-  const saved = toolWindowSettings(kind);
+function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inactive = false } = {}) {
+  // `place`: where this very window was (opened again at a start), rather
+  // than where its kind last was.
+  const saved = { ...toolWindowSettings(kind), ...(place || {}) };
+  if (place) offset = 0;
   const bounds = { width: saved.width || spec.width, height: saved.height || spec.height };
   const onScreen = saved.x != null && saved.y != null && screen.getAllDisplays().some(d => {
     const b = d.workArea;
@@ -1577,7 +1588,8 @@ function createPageWindow(kind, spec, { offset = 0 } = {}) {
     },
   });
   if (saved.onTop ?? spec.onTop) win.setAlwaysOnTop(true, 'floating');
-  win.once('ready-to-show', () => win.show());
+  // Opened again at a start, it does not take the focus from the main window.
+  win.once('ready-to-show', () => (inactive ? win.showInactive() : win.show()));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
@@ -1622,7 +1634,7 @@ addSink((channel, args) => {
   for (const win of projectWindows.values()) if (!win.isDestroyed()) win.webContents.send(channel, ...args);
 });
 
-function openProjectWindow(projectId, tab) {
+function openProjectWindow(projectId, tab, { bounds, inactive = false } = {}) {
   if (typeof projectId !== 'string' || !projectId || projectId.length > 200 || !PROJECT_WINDOW_TABS.has(tab)) return false;
   const key = `${projectId}\n${tab}`;
   const open = projectWindows.get(key);
@@ -1632,13 +1644,64 @@ function openProjectWindow(projectId, tab) {
   }
   const kind = `project-${tab}`;
   const sameKind = [...projectWindows.keys()].filter(k => k.endsWith(`\n${tab}`)).length;
-  const win = createPageWindow(kind, PROJECT_WINDOW_SPEC, { offset: 24 * sameKind });
+  const win = createPageWindow(kind, PROJECT_WINDOW_SPEC, { offset: 24 * sameKind, bounds, inactive });
   projectWindows.set(key, win);
   win.loadFile(path.join(__dirname, 'public', 'index.html'), { query: { projectWindow: projectId, tab } });
   win.on('closed', () => {
     if (projectWindows.get(key) === win) projectWindows.delete(key);
+    rememberOpenWindows();
   });
+  rememberOpenWindows();
   return true;
+}
+
+// --- The windows of their own open again at the next start ---
+// The list in the settings follows every window that opens or closes. When
+// the app quits, or the main window closes and takes the others with it,
+// the list is taken as it is and stays so (the closing that follows does
+// not empty it) until the next main window has opened them again.
+let openWindowsFrozen = true; // until the start has opened the saved ones
+
+function rememberOpenWindows() {
+  if (openWindowsFrozen) return;
+  try {
+    const global = getSetting('global') || {};
+    global.openWindows = describeOpenWindows(toolWindows, projectWindows);
+    setSetting('global', global);
+  } catch (err) {
+    log.warn(`[windows] could not remember the open windows: ${err.message}`);
+  }
+}
+
+function freezeOpenWindows() {
+  if (openWindowsFrozen) return;
+  rememberOpenWindows();
+  openWindowsFrozen = true;
+}
+
+function restoreOpenWindows() {
+  if (!openWindowsFrozen) return;
+  let list = [];
+  try {
+    list = windowsToRestore((getSetting('global') || {}).openWindows, {
+      toolKinds: new Set(Object.keys(TOOL_WINDOWS)),
+      projectTabs: PROJECT_WINDOW_TABS,
+      projectExists: id => !!dbModule.getProject(id),
+    });
+  } catch (err) {
+    log.warn(`[windows] could not read the windows to open again: ${err.message}`);
+  }
+  for (const entry of list) {
+    try {
+      if (entry.kind === 'project') openProjectWindow(entry.projectId, entry.tab, { bounds: entry.bounds, inactive: true });
+      else openToolWindow(entry.kind, { bounds: entry.bounds, inactive: true });
+    } catch (err) {
+      log.warn(`[windows] could not open ${entry.kind} again: ${err.message}`);
+    }
+  }
+  if (list.length) log.info(`[windows] opened again ${list.length} window(s) of their own`);
+  openWindowsFrozen = false;
+  rememberOpenWindows();
 }
 
 /** The kind of the tool window a page runs in ('project-git' for a project's Git tab), or null for the main window. */
@@ -3189,6 +3252,8 @@ app.on('before-quit', () => {
   // unload. Do not report the shutdown kills as user-initiated terminal exits,
   // or that renderer cleanup would delete the descriptors before restart.
   appIsQuitting = true;
+  // The windows still open come back at the next start.
+  freezeOpenWindows();
   remoteTunnels.stop();
   remoteServer.stop();
   // Shut down all MCP servers
