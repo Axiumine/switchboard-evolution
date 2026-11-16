@@ -20,9 +20,9 @@ function readLink(text: string): { payload: PairingPayload | null; error: string
 }
 
 /**
- * Pair with Switchboard on a computer: scan the QR code from its Mobile app
- * access dialog (or paste the link), then confirm. A switchboard://pair link
- * opened from outside lands here too.
+ * Pair with Switchboard Evolution on a computer: scan the QR code from its
+ * Mobile app access dialog (or paste the link), then confirm. A
+ * switchboard-e://pair link opened from outside lands here too.
  */
 export default function PairScreen() {
   const params = useLocalSearchParams<{ d?: string }>();
@@ -35,7 +35,7 @@ export default function PairScreen() {
   const [linkSeen, setLinkSeen] = useState<string | undefined>(undefined);
   if (params.d && params.d !== linkSeen) {
     setLinkSeen(params.d);
-    const result = readLink(`switchboard://pair?d=${params.d}`);
+    const result = readLink(`switchboard-e://pair?d=${params.d}`);
     setPayload(result.payload);
     setError(result.error);
   }
@@ -70,7 +70,7 @@ export default function PairScreen() {
     return (
       <View style={styles.screen}>
         <Text style={styles.heading}>Pair with {payload.desktopName}?</Text>
-        <Text style={styles.text}>This phone will be able to see and drive Switchboard on that computer while its Mobile app access switch is on.</Text>
+        <Text style={styles.text}>This phone will be able to see and drive Switchboard Evolution on that computer while its Mobile app access switch is on.</Text>
         <Text style={styles.label}>Name of this phone</Text>
         <TextInput value={name} onChangeText={setName} style={styles.input} placeholderTextColor={colors.textFaint} />
         <RoutePicker internet={payload.routes} value={route} onChange={setRoute} label="Pair through" />
@@ -88,7 +88,7 @@ export default function PairScreen() {
   return (
     <ScrollView style={styles.screenScroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.text}>
-        On the computer, turn on the Mobile app access switch in Switchboard&apos;s sidebar. Its pairing code appears on its own the first time; later, click the phone button next to the switch and choose Add a device.
+        On the computer, turn on the Mobile app access switch in Switchboard Evolution&apos;s sidebar. Its pairing code appears on its own the first time; later, click the phone button next to the switch and choose Add a device.
       </Text>
       {permission?.granted ? (
         <View style={styles.cameraFrame}>
@@ -109,7 +109,7 @@ export default function PairScreen() {
       <TextInput
         value={pasted}
         onChangeText={setPasted}
-        placeholder="switchboard://pair?d=…"
+        placeholder="switchboard-e://pair?d=…"
         placeholderTextColor={colors.textFaint}
         autoCapitalize="none"
         autoCorrect={false}

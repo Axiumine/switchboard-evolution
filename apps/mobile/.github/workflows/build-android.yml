@@ -102,7 +102,7 @@ jobs:
           url=$(node -e 'const b = require("./build.json"); const build = Array.isArray(b) ? b[0] : b; console.log(build.artifacts.buildUrl || build.artifacts.applicationArchiveUrl)')
           version=$(node -p 'require("./app.json").expo.version')
           mkdir -p out
-          curl -fsSL "$url" -o "out/Switchboard-Mobile-${version}.apk"
+          curl -fsSL "$url" -o "out/Switchboard-Evolution-${version}.apk"
           ls -l out
 
       - uses: actions/upload-artifact@v4

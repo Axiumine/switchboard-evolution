@@ -59,7 +59,9 @@ function pairingLink({ name, addresses, port, publicKey, code, expiresAt, access
     ...(routes && Object.keys(routes).length ? { r: routes } : {}),
   });
   const data = toBase64(encodeUtf8(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `switchboard://pair?d=${data}`;
+  // Switchboard Evolution's own scheme, so the phone camera opens its app,
+  // not the old one (the app reads both).
+  return `switchboard-e://pair?d=${data}`;
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);

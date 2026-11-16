@@ -516,6 +516,145 @@ async function fileDiff(dir, filePath) {
   return { path: relative, diff, truncated };
 }
 
+// --- Staging: files, hunks and lines -----------------------------------------
+// The Git tab stages and unstages like a Git client: whole files with git add /
+// git reset, and the lines picked in a diff with a patch of those lines that
+// git apply writes to the index (git-diff-model.js builds it). Everything runs
+// at the top of the checkout, where git status paths and diff paths start.
+
+const crypto = require('crypto');
+const { spawn } = require('child_process');
+const diffModel = require('./public/git-diff-model');
+
+/** Run git with `input` on its standard input. */
+function runWithInput(args, cwd, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, env: gitEnv() });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) { resolve(stdout); return; }
+      const error = new Error(String(stderr).trim() || `git ${args[0]} failed`);
+      error.code = code;
+      error.stderr = stderr;
+      reject(error);
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
+  });
+}
+
+/** The top of the checkout that holds dir, and a repository path checked to stay inside it. */
+async function stagingTarget(dir, filePath) {
+  const top = await repoRoot(dir);
+  if (filePath === undefined) return { top };
+  if (typeof filePath !== 'string' || !filePath || filePath.includes('\0')) throw new Error('File path is required');
+  const absolute = path.resolve(top, filePath);
+  const relative = path.relative(top, absolute);
+  if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) {
+    throw new Error('File is outside the repository');
+  }
+  return { top, relative: relative.split(path.sep).join('/') };
+}
+
+const DIFF_ARGS = ['diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--unified=3'];
+
+function diffId(diff) {
+  return crypto.createHash('sha1').update(diff).digest('hex');
+}
+
+/**
+ * One side of a changed file's diff: 'unstaged' (index → working tree; an
+ * untracked file shows as new) or 'staged' (HEAD → index; a staged rename with
+ * its old path). `diffId` names the exact text, so lines picked in it can be
+ * staged only while the file still has that diff.
+ */
+async function sideDiff(dir, filePath, side) {
+  if (side !== 'unstaged' && side !== 'staged') throw new Error('Unknown side of the diff');
+  const { top, relative } = await stagingTarget(dir, filePath);
+  const changes = parsePorcelain(await runRaw(['status', '--porcelain=v1', '-z', '--untracked-files=all'], top));
+  const change = changes.find(item => item.path === relative);
+  if (!change) throw new Error('File is not currently changed');
+  let diff;
+  if (side === 'unstaged' && change.status === 'untracked') {
+    const nullPath = process.platform === 'win32' ? 'NUL' : '/dev/null';
+    diff = await runRaw([...DIFF_ARGS, '--no-index', '--', nullPath, relative], top, { allowExitCodes: [1] });
+  } else if (side === 'unstaged') {
+    diff = await runRaw([...DIFF_ARGS, '--', relative], top);
+  } else {
+    const paths = change.oldPath ? [change.oldPath, relative] : [relative];
+    diff = await runRaw([...DIFF_ARGS, '--cached', '-M', '--', ...paths], top);
+  }
+  const truncated = diff.length > MAX_DIFF_LENGTH;
+  if (truncated) diff = diff.slice(0, MAX_DIFF_LENGTH) + '\n\n… diff truncated by Switchboard …\n';
+  return { path: relative, side, diff, truncated, diffId: diffId(diff), change };
+}
+
+/** Stage (git add) or unstage (git reset) whole files; `paths` null for every change. */
+async function stageFiles(dir, paths, stage) {
+  const { top } = await stagingTarget(dir);
+  let relatives = null;
+  if (paths !== null) {
+    if (!Array.isArray(paths) || !paths.length) throw new Error('No files to stage');
+    relatives = [];
+    for (const p of paths) relatives.push((await stagingTarget(top, p)).relative);
+  }
+  if (stage) {
+    // -A: a deleted file is staged as deleted, a conflicted one marked resolved.
+    await run(['add', '-A', '--', ...(relatives || ['.'])], top);
+    return;
+  }
+  const hasHead = await runOr(['rev-parse', '--verify', '-q', 'HEAD'], top, '');
+  if (hasHead.trim()) {
+    await run(['reset', '-q', '--', ...(relatives || ['.'])], top);
+  } else {
+    // Before the first commit there is nothing to reset to: take the files out of the index.
+    await run(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...(relatives || ['.'])], top);
+  }
+}
+
+/**
+ * Stage the picked lines of the unstaged diff, or unstage the picked lines
+ * of the staged diff. `lines` are indices in diff.split('\n') of the diff
+ * named by `expectedDiffId`; when the file's diff is no longer that one the
+ * call fails with code 'STALE' and nothing changes.
+ */
+async function stageLines(dir, filePath, side, expectedDiffId, lines) {
+  const current = await sideDiff(dir, filePath, side);
+  if (current.diffId !== expectedDiffId) {
+    const error = new Error('The file changed since its diff was shown. Look at it again and pick the lines again.');
+    error.code = 'STALE';
+    throw error;
+  }
+  if (current.truncated) throw new Error('This diff is too long to stage in parts: stage the whole file');
+  const parsed = diffModel.parseUnifiedDiff(current.diff);
+  if (!diffModel.canPickLines(parsed)) throw new Error('This change can only be staged as a whole file');
+  const changed = diffModel.changedLineIndices(parsed);
+  const picked = new Set((Array.isArray(lines) ? lines : []).filter(i => Number.isInteger(i)));
+  const chosen = changed.filter(i => picked.has(i));
+  if (!chosen.length) throw new Error('Pick the lines to stage first');
+  const { top } = await stagingTarget(dir);
+  const reverse = side === 'staged';
+  if (chosen.length === changed.length) {
+    // Every line: the same as the whole file, and git add / reset handle it best.
+    await stageFiles(top, [current.path, ...(current.change.oldPath ? [current.change.oldPath] : [])], !reverse);
+    return { whole: true };
+  }
+  const patch = diffModel.buildPartialPatch(parsed, new Set(chosen), { reverse });
+  const args = ['apply', '--cached', '--recount', '--whitespace=nowarn'];
+  if (reverse) args.push('--reverse');
+  args.push('-');
+  try {
+    await runWithInput(args, top, patch);
+  } catch (err) {
+    throw new Error(`Could not ${reverse ? 'unstage' : 'stage'} these lines: ${err.message}`);
+  }
+  return { whole: false };
+}
+
 // --- Git Graph read functions ---------------------------------------------
 // Everything below is read-only (git-actions.js is where mutation lives).
 // Every call adds --no-optional-locks (never contend with a write in
@@ -756,7 +895,7 @@ module.exports = {
   parseWorktreeList, worktreeList, worktreeLock, worktreeUnlock, worktreeMove, worktreePrune, worktreeRepair,
   deleteBranch, isUnmergedBranchError, isValidBranchName, listBranches, mergedBranches, defaultBranch, lastCommit,
   worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status,
-  parsePorcelain, snapshot, fileDiff,
+  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines,
   tagExists, toGitPath, safeRelativePath,
   logWithParents, forEachRef, stashList, remoteList, configListIncludes,
   blobAtRevision, isShallowRepo, rootCommitHashes, userDetails,

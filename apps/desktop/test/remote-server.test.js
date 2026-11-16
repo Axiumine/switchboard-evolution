@@ -212,7 +212,7 @@ test('the pairing link carries what the phone needs, URL-safe', () => {
   const publicKey = new Uint8Array(32).fill(251);
   const code = new Uint8Array(32).fill(7);
   const link = pairingLink({ name: 'Mac', addresses: ['192.168.1.20'], port: 47100, publicKey, code, expiresAt: 123 });
-  assert.match(link, /^switchboard:\/\/pair\?d=[A-Za-z0-9_-]+$/);
+  assert.match(link, /^switchboard-e:\/\/pair\?d=[A-Za-z0-9_-]+$/);
   const data = link.split('d=')[1].replace(/-/g, '+').replace(/_/g, '/');
   const payload = JSON.parse(Buffer.from(data, 'base64').toString('utf8'));
   assert.deepEqual(payload, { v: 1, n: 'Mac', a: ['192.168.1.20'], p: 47100, k: Buffer.from(publicKey).toString('base64'), c: Buffer.from(code).toString('base64'), x: 123 });

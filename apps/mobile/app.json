@@ -1,17 +1,17 @@
 {
   "expo": {
-    "name": "Switchboard",
-    "slug": "switchboard-mobile",
+    "name": "Switchboard Evolution",
+    "slug": "switchboard-e",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "switchboard",
+    "scheme": "switchboard-e",
     "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "io.github.vivi7.switchboard",
+      "bundleIdentifier": "io.github.vivi7.switchboard-e",
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "Switchboard connects to the Switchboard app on your computer over your local network.",
+        "NSLocalNetworkUsageDescription": "Switchboard Evolution connects to the Switchboard Evolution app on your computer over your local network.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -25,7 +25,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "io.github.vivi7.switchboard"
+      "package": "io.github.vivi7.switchboard_e"
     },
     "web": {
       "output": "server",
@@ -45,7 +45,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Switchboard uses the camera to scan the pairing code shown on your computer and to take photos you attach to a session.",
+          "cameraPermission": "Switchboard Evolution uses the camera to scan the pairing code shown on your computer and to take photos you attach to a session.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
@@ -53,8 +53,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Switchboard lets you attach photos to a session; they are saved on your computer.",
-          "cameraPermission": "Switchboard uses the camera to scan the pairing code shown on your computer and to take photos you attach to a session.",
+          "photosPermission": "Switchboard Evolution lets you attach photos to a session; they are saved on your computer.",
+          "cameraPermission": "Switchboard Evolution uses the camera to scan the pairing code shown on your computer and to take photos you attach to a session.",
           "microphonePermission": false
         }
       ],

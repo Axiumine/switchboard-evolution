@@ -184,7 +184,7 @@ export default function ProcessesScreen() {
     return <Empty title="Not connected" text="The Task Manager needs the computer online." />;
   }
   if (!supported) {
-    return <Empty title="Update Switchboard on the computer" text="The Task Manager needs a newer Switchboard on the computer. Update it there, then come back." />;
+    return <Empty title="Update Switchboard Evolution on the computer" text="The Task Manager needs a newer Switchboard Evolution on the computer. Update it there, then come back." />;
   }
 
   const summary = data ? memorySummary(data) : null;

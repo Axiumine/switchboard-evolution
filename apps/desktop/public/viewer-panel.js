@@ -252,6 +252,18 @@ class ViewerPanel {
     this.editorView.dispatch({ selection: { anchor: target.from + offset }, scrollIntoView: true });
   }
 
+  /** Select `length` characters at a 1-based line and 0-based column, centred in view (a search match). */
+  selectRange(line, column, length) {
+    if (!this.editorView || !Number.isSafeInteger(line) || line < 1) return;
+    if (this.previewMode) this._setPreview(false);
+    const doc = this.editorView.state.doc;
+    const target = doc.line(Math.min(line, doc.lines));
+    const from = target.from + Math.max(0, Math.min(Number(column) || 0, target.length));
+    const to = Math.min(target.to, from + Math.max(0, Number(length) || 0));
+    const effects = window.CMEditorView?.scrollIntoView ? [window.CMEditorView.scrollIntoView(from, { y: 'center' })] : [];
+    this.editorView.dispatch({ selection: { anchor: from, head: to }, effects, scrollIntoView: !effects.length });
+  }
+
   _createEditor(content, filePath) {
     if (this.opts.language === 'auto') {
       this.editorView = window.createEditableViewer(

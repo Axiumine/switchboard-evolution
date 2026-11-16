@@ -70,7 +70,7 @@ test('a file has the explorer menu of a code editor, without test runners or bui
   assert.deepEqual(folder.slice(0, 2), ['New File…', 'New Folder…']);
   assert.ok(folder.includes('Add Folder to Chat') && !folder.includes('Open to the Side'));
   const empty = labels(context.explorerMenuItems(project, '/code/app', null));
-  assert.deepEqual(empty, ['New File…', 'New Folder…', 'Open in Finder', 'Open in Integrated Terminal', 'Paste', 'Copy Path']);
+  assert.deepEqual(empty, ['New File…', 'New Folder…', 'Find in Folder…', 'Open in Finder', 'Open in Integrated Terminal', 'Paste', 'Copy Path']);
 });
 
 test('select for compare offers the comparison on another file only', () => {

@@ -222,8 +222,8 @@ export async function connectToDesktop(link: DesktopLink, options: ConnectOption
     }
   }
   throw new Error(route === 'lan'
-    ? `Switchboard is not reachable. Is the computer on the same network, with mobile app access turned on? (${lastError.message})`
-    : `Switchboard is not reachable through ${ROUTE_NAMES[route]}. Is the computer on, with mobile app access and ${ROUTE_NAMES[route]} turned on? (${lastError.message})`);
+    ? `Switchboard Evolution is not reachable. Is the computer on the same network, with mobile app access turned on? (${lastError.message})`
+    : `Switchboard Evolution is not reachable through ${ROUTE_NAMES[route]}. Is the computer on, with mobile app access and ${ROUTE_NAMES[route]} turned on? (${lastError.message})`);
 }
 
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];

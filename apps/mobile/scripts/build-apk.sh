@@ -10,9 +10,10 @@
 #   1.2.3      the app version (expo.version); app.json's when left out
 #   --install  install it on the phone connected with USB (adb)
 #
-# The APK goes to dist/. It is for arm64 phones, nearly all of them today: set
-# ANDROID_ABIS (e.g. "armeabi-v7a,arm64-v8a") for others. The version code is
-# the number of commits, so a newer build installs over an older one.
+# The APK goes to dist/Switchboard-Evolution-<version>.apk. It is for arm64
+# phones, nearly all of them today: set ANDROID_ABIS (e.g.
+# "armeabi-v7a,arm64-v8a") for others. The version code is the number of
+# commits, so a newer build installs over an older one.
 #
 # The signing key is made the first time, in ~/.config/switchboard-mobile/
 # (outside the repository): keep a copy of it. An update must be signed with
@@ -66,6 +67,9 @@ pin_app_json "$version" "$(git rev-list --count HEAD)"
 # The native project is made again from app.json every time (android/ is not
 # committed), so a change to app.json or a plugin always reaches the APK.
 # Prebuild also rewrites the android and ios scripts in package.json.
+#
+# When android/ was made for another package id (the app was renamed), prebuild
+# clears it and makes it afresh by itself, so the APK never keeps the old id.
 keep_file package.json
 CI=1 npx expo prebuild --platform android --no-install
 
@@ -77,7 +81,7 @@ CI=1 npx expo prebuild --platform android --no-install
   -Pandroid.injected.signing.key.password="$password")
 
 mkdir -p dist
-out="dist/Switchboard-Mobile-$version.apk"
+out="dist/Switchboard-Evolution-$version.apk"
 cp android/app/build/outputs/apk/release/app-release.apk "$out"
 echo "Built $out"
 

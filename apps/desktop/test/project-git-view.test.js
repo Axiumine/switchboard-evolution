@@ -297,3 +297,92 @@ test('the Git tab switches between Changes, History and Worktrees, in that order
   assert.deepEqual(labels, [['changes', 'Changes'], ['history', 'History'], ['worktrees', 'Worktrees']]);
   assert.match(html, /id="git-workspace-worktrees-tab" class="git-workspace-nav-btn active"/);
 });
+
+// --- Staging: lists by side, stage / unstage buttons ---
+
+const diffModelSource = fs.readFileSync(path.join(__dirname, '../public/git-diff-model.js'), 'utf8');
+
+function stagingContext(calls) {
+  const ctx = loadContext({ getItem() { return 'list'; }, setItem() {} });
+  ctx.window.api = {
+    stageProjectGitFiles: (...args) => { calls.push(['files', ...args]); return Promise.resolve({ ok: true }); },
+    stageProjectGitLines: (...args) => { calls.push(['lines', ...args]); return Promise.resolve({ ok: true }); },
+    getProjectGitInfo: () => Promise.resolve({ ok: false }),
+    getProjectGitDiff: () => new Promise(() => {}),
+  };
+  ctx.fileIconHtml = (name) => `<img data-icon="${name}">`;
+  vm.runInContext(diffModelSource, ctx);
+  // In the window, window is the global object; here the module lands on ctx.window.
+  ctx.GitDiffModel = ctx.window.GitDiffModel;
+  return ctx;
+}
+
+test('gitSideLists groups like VS Code: merge, staged, and changes (a file can be in both)', () => {
+  const ctx = loadContext();
+  const lists = plain(ctx.gitSideLists([
+    change('both.js', { indexStatus: 'M', worktreeStatus: 'M' }),
+    change('staged.js', { indexStatus: 'A', worktreeStatus: ' ', status: 'added' }),
+    change('new.txt', { indexStatus: '?', worktreeStatus: '?', status: 'untracked' }),
+    change('clash.js', { indexStatus: 'U', worktreeStatus: 'U', status: 'conflicted' }),
+  ]));
+  assert.deepEqual(lists.merge.map(c => c.path), ['clash.js']);
+  assert.deepEqual(lists.staged.map(c => c.path), ['both.js', 'staged.js']);
+  assert.deepEqual(lists.unstaged.map(c => c.path), ['both.js', 'new.txt']);
+  assert.equal(ctx.gitSideCode(change('n', { status: 'untracked', indexStatus: '?', worktreeStatus: '?' }), 'unstaged'), 'U');
+  assert.equal(ctx.gitSideCode(change('d', { indexStatus: 'D', worktreeStatus: ' ' }), 'staged'), 'D');
+});
+
+test('with staging, the list has a heading per side and a stage or unstage button per file', async () => {
+  const calls = [];
+  const ctx = stagingContext(calls);
+  const repo = { path: '/repo', changes: [
+    change('src/both.js', { indexStatus: 'M', worktreeStatus: 'M' }),
+    change('new.txt', { indexStatus: '?', worktreeStatus: '?', status: 'untracked' }),
+  ] };
+  const list = fakeList();
+  const state = ctx.gitTabState('p');
+  const body = Object.assign(fakeBody(list), { classList: { add() {}, remove() {} } });
+  ctx.paintGitChanges({ id: 'p' }, state, repo, body, { repaintDiff: false });
+  const groups = list.children.filter(c => c.className === 'git-file-group');
+  assert.deepEqual(groups.map(g => /git-file-group-label">([^<]+)</.exec(g.innerHTML)[1]), ['Staged Changes', 'Changes']);
+  const rows = list.children.filter(c => String(c.className).includes('git-file-row'));
+  assert.deepEqual(rows.map(r => r.dataset.key), ['staged\u0000src/both.js', 'unstaged\u0000src/both.js', 'unstaged\u0000new.txt']);
+  assert.match(rows[0].innerHTML, /data-act="unstage"/);
+  assert.match(rows[2].innerHTML, /data-act="stage"/);
+  assert.match(rows[2].innerHTML, /git-file-code untracked">U</);
+  assert.match(rows[2].innerHTML, /data-icon="new.txt"/);
+  // The first row is selected when nothing was.
+  assert.equal(state.selectedFiles.get('/repo'), 'staged\u0000src/both.js');
+
+  // The stage button stages that file (and only reaches the button's handler).
+  const button = { dataset: { act: 'stage' } };
+  rows[2].onclick({ target: { closest: () => button }, stopPropagation() {} });
+  assert.deepEqual(plain(calls[0]), ['files', 'p', '/repo', ['new.txt'], true]);
+});
+
+test('after a file leaves its list the selection lands on the file now at that place', () => {
+  const ctx = loadContext();
+  const state = ctx.gitTabState('p');
+  const repo = { path: '/repo' };
+  state.selectedFiles.set('/repo', 'unstaged\u0000a.js');
+  state.selectionHint.set('/repo', { side: 'unstaged', path: 'a.js', index: 0 });
+  const items = [
+    { side: 'staged', change: change('a.js') },
+    { side: 'unstaged', change: change('b.js') },
+  ];
+  assert.equal(ctx.gitSelectedItem(state, repo, items).change.path, 'b.js');
+  state.selectionHint.set('/repo', { side: 'unstaged', path: 'a.js', index: 3 });
+  assert.equal(ctx.gitSelectedItem(state, repo, items.slice(0, 1)).change.path, 'a.js', 'then the same file on the other side');
+});
+
+test('the hunks of a diff can be picked line by line, and a hunk staged as a whole', () => {
+  const ctx = stagingContext([]);
+  const diff = ['diff --git a/f b/f', '--- a/f', '+++ b/f', '@@ -1,3 +1,3 @@ fn', ' a', '-b', '+B', ' c', ''].join('\n');
+  const parsed = ctx.GitDiffModel.parseUnifiedDiff(diff);
+  const html = ctx.gitHunksHtml(parsed, new Set([6]), 'unstaged');
+  assert.match(html, /git-dl remove" data-index="5"/);
+  assert.match(html, /git-dl add picked" data-index="6"/);
+  assert.match(html, /Stage Hunk/);
+  assert.match(ctx.gitHunksHtml(parsed, new Set(), 'staged'), /Unstage Hunk/);
+  assert.equal(ctx.gitDiffNote(ctx.GitDiffModel.parseUnifiedDiff('diff --git a/x b/x\nnew file mode 100644\n--- /dev/null\n+++ b/x\n')), 'New file');
+});

@@ -1,8 +1,8 @@
 @AGENTS.md
 
-# OmniboardV mobile
+# Switchboard Evolution mobile
 
-Companion app for the OmniboardV desktop app (`../desktop`, an Electron app). It talks to the desktop's remote-access API over the user's Tailscale network. The app still carries the Switchboard name and ids until the rebrand (phase 71 of the plan).
+Companion app for the Switchboard Evolution desktop app (`../desktop`, an Electron app). It talks to the desktop's remote-access API over the user's Tailscale network. Since 1.6.6 it is named Switchboard Evolution with its own ids (io.github.vivi7.switchboard_e on Android, io.github.vivi7.switchboard-e on iOS) and the `switchboard-e://` scheme; its new look comes with phase 71 of the plan.
 
 - Treat this code as public. Never commit tailnet addresses, hostnames, tokens, pairing codes or other personal data. The desktop address only ever comes from the pairing QR code at runtime.
 - The wire protocol is defined by the desktop side (`remote-api.js` in `../desktop`). Keep the TypeScript types in this app in step with it, and check the protocol version in the `hello` handshake.

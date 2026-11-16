@@ -1874,12 +1874,37 @@ async function projectGitInfo(projectId) {
   return { ok: true, repositories };
 }
 
-/** Diff one changed file, restricted to a folder already attached to the project. */
-async function projectGitDiff(projectId, folderPath, filePath) {
+/**
+ * Diff one changed file, restricted to a folder already attached to the
+ * project: against HEAD, or one side ('unstaged' / 'staged') to stage from.
+ */
+async function projectGitDiff(projectId, folderPath, filePath, side) {
   if (!db.getProject(projectId)) throw new Error('Project not found');
   const folder = db.listProjectFolders(projectId).find(item => item.path === folderPath);
   if (!folder) throw new Error('Repository is not attached to this project');
+  if (side === 'unstaged' || side === 'staged') {
+    const { change, ...diff } = await git.sideDiff(folder.path, filePath, side);
+    return { ok: true, ...diff };
+  }
   return { ok: true, ...(await git.fileDiff(folder.path, filePath)) };
+}
+
+/** Stage or unstage whole files of an attached repository (`paths` null: every change). */
+async function stageProjectGitFiles(projectId, folderPath, paths, stage) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  await git.stageFiles(folder.path, paths, !!stage);
+  return { ok: true };
+}
+
+/** Stage (side 'unstaged') or unstage (side 'staged') the picked lines of a file's diff. */
+async function stageProjectGitLines(projectId, folderPath, filePath, side, diffId, lines) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  try {
+    return { ok: true, ...(await git.stageLines(folder.path, filePath, side, diffId, lines)) };
+  } catch (err) {
+    if (err.code === 'STALE') return { ok: false, code: 'STALE', error: err.message };
+    throw err;
+  }
 }
 
 // --- Git Graph tab: mutating + extended read operations ---
@@ -1990,7 +2015,7 @@ module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief,
   createProject, updateProject, deleteProject, attachFolder, detachFolder,
-  folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff,
+  folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
   projectGitGraphFileAtRevision, projectGitGraphFileDiffBetween,
   projectGitGraphRepoConfig, setProjectGitGraphRepoConfig, trustProjectGitGraphRepoConfig,

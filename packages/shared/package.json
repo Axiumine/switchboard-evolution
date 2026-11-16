@@ -1,7 +1,7 @@
 {
-  "name": "@omniboardv/shared",
+  "name": "@switchboard-e/shared",
   "version": "0.0.0",
   "private": true,
-  "description": "Modules shared by the OmniboardV desktop and mobile apps",
+  "description": "Modules shared by the Switchboard Evolution desktop and mobile apps",
   "license": "MIT"
 }

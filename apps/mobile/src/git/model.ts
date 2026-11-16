@@ -8,6 +8,10 @@ export type Change = {
   path: string;
   oldPath?: string | null;
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+  /** The two letters of `git status --porcelain=v1`, and each of them: the index's and the working tree's. */
+  code?: string;
+  indexStatus?: string;
+  worktreeStatus?: string;
   staged: boolean;
 };
 

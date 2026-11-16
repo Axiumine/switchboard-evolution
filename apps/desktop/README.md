@@ -1,4 +1,4 @@
-> **OmniboardV note.** This README still describes Switchboard, which this app is derived from. It will be rewritten for OmniboardV.
+> **Switchboard Evolution note.** This README still describes Switchboard, which this app is derived from. It will be rewritten for Switchboard Evolution (switchboard-e, formerly OmniboardV).
 
 # Switchboard
 

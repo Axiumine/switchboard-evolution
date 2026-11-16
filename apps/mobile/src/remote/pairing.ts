@@ -38,12 +38,13 @@ function fromBase64Url(text: string): Uint8Array {
 }
 
 /**
- * Read a pairing link: switchboard://pair?d=<base64url JSON>. Throws a
- * PairingLinkError with a message the user can act on.
+ * Read a pairing link: switchboard-e://pair?d=<base64url JSON>, or the
+ * switchboard:// of the computers before the rename. Throws a PairingLinkError
+ * with a message the user can act on.
  */
 export function parsePairingLink(link: string, now = Date.now()): PairingPayload {
-  const match = /^switchboard:\/\/pair\?(?:.*&)?d=([A-Za-z0-9_-]+)/.exec(link.trim());
-  if (!match) throw new PairingLinkError('This is not a Switchboard pairing code.');
+  const match = /^switchboard(?:-e)?:\/\/pair\?(?:.*&)?d=([A-Za-z0-9_-]+)/.exec(link.trim());
+  if (!match) throw new PairingLinkError('This is not a Switchboard Evolution pairing code.');
   let raw: any;
   try {
     raw = JSON.parse(decodeUtf8(fromBase64Url(match[1])));
@@ -52,8 +53,8 @@ export function parsePairingLink(link: string, now = Date.now()): PairingPayload
   }
   if (raw?.v !== PROTOCOL_VERSION) {
     throw new PairingLinkError(raw?.v > PROTOCOL_VERSION
-      ? 'Switchboard on the computer is newer than this app. Update the app.'
-      : 'Switchboard on the computer is older than this app. Update Switchboard.');
+      ? 'Switchboard Evolution on the computer is newer than this app. Update the app.'
+      : 'Switchboard Evolution on the computer is older than this app. Update Switchboard Evolution.');
   }
   const addresses = Array.isArray(raw.a) ? raw.a.filter((a: unknown) => typeof a === 'string' && a.length > 0) : [];
   let desktopKey: Uint8Array;

@@ -7,6 +7,7 @@ import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, fol
 import { highlightSelectionMatches } from '@codemirror/search';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
 import { tags } from '@lezer/highlight';
+import TextSearchLib from './text-search.js';
 import { MergeView, unifiedMergeView } from '@codemirror/merge';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -35,8 +36,12 @@ const appThemePatch = EditorView.theme({
   },
 }, { dark: true });
 
-// ── Custom floating search bar (matches xterm search bar style) ──────
+// ── Find and replace bar, as VS Code's find widget ───────────────────
+// Match Case, Match Whole Word, Use Regular Expression (text-search.js, the
+// same rules as the Files tab's Search), and in an editable editor a Replace
+// row: Replace (the current match) and Replace All, both undoable.
 
+const isMacPlatform = () => /Mac|iPhone|iPad/.test(navigator.platform);
 const setSearchQuery = StateEffect.define();
 const searchQueryField = StateField.define({
   create() { return null; },
@@ -46,98 +51,203 @@ const searchQueryField = StateField.define({
   },
 });
 
+/** Every match of `regex` in the document, as [{ from, to }]; empty matches are skipped. */
+function findAllMatches(doc, regex, limit = 20000) {
+  const text = doc.toString();
+  const out = [];
+  regex.lastIndex = 0;
+  let m;
+  while (out.length < limit && (m = regex.exec(text)) !== null) {
+    if (m[0].length === 0) { regex.lastIndex = m.index + 1; if (regex.lastIndex > text.length) break; continue; }
+    out.push({ from: m.index, to: m.index + m[0].length });
+  }
+  regex.lastIndex = 0;
+  return out;
+}
+
 const searchHighlighter = ViewPlugin.fromClass(class {
   constructor(view) { this.decorations = this._build(view); }
   update(update) {
-    if (update.docChanged || update.state.field(searchQueryField) !== update.startState.field(searchQueryField)) {
+    if (update.docChanged || update.selectionSet || update.state.field(searchQueryField) !== update.startState.field(searchQueryField)) {
       this.decorations = this._build(update.view);
     }
   }
   _build(view) {
     const q = view.state.field(searchQueryField);
-    if (!q) return Decoration.none;
-    const decs = [];
-    const doc = view.state.doc.toString();
-    const term = q.toLowerCase();
-    let pos = 0;
-    while ((pos = doc.toLowerCase().indexOf(term, pos)) !== -1) {
-      decs.push(Decoration.mark({ class: 'cm-find-match' }).range(pos, pos + term.length));
-      pos += term.length;
-    }
+    if (!q || !q.regex) return Decoration.none;
+    const sel = view.state.selection.main;
+    const decs = findAllMatches(view.state.doc, q.regex).map(({ from, to }) => Decoration.mark({
+      class: from === sel.from && to === sel.to ? 'cm-find-match cm-find-match-active' : 'cm-find-match',
+    }).range(from, to));
     return Decoration.set(decs);
   }
 }, { decorations: v => v.decorations });
 
 const cmSearchTheme = EditorView.theme({
   '.cm-find-match': { backgroundColor: '#515C6A', borderRadius: '2px' },
-  '.cm-find-match-active': { backgroundColor: '#EAA549', borderRadius: '2px' },
+  '.cm-find-match-active': { backgroundColor: '#EAA549', color: '#171717', borderRadius: '2px' },
 });
 
 function cmFloatingSearch() {
   return [searchQueryField, searchHighlighter, cmSearchTheme];
 }
 
+const FIND_ICONS = {
+  chevronRight: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
+  chevronDown: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  matchCase: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M7.5 12.5h-1.2l-.9-2.6H2.3l-.9 2.6H.2L3.2 4h1.3zm-2.5-3.6L3.9 5.6 2.7 8.9zM14.5 12.5h-1.1v-.8c-.5.6-1 1-1.9 1-1.1 0-1.9-.7-1.9-1.8 0-1.1.8-1.8 2.3-1.9l1.5-.1v-.4c0-.7-.4-1.1-1.2-1.1-.6 0-1.1.2-1.6.6l-.5-.8c.6-.5 1.3-.8 2.2-.8 1.4 0 2.2.7 2.2 2zm-1.1-2.7-1.3.1c-.9.1-1.3.4-1.3.9 0 .6.4.9 1 .9.9 0 1.6-.6 1.6-1.4z"/></svg>',
+  wholeWord: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 11h1v2h14v-2h1v3H0z"/><path d="M6.8 10.5h-1v-.6c-.4.5-.9.7-1.6.7-1 0-1.6-.6-1.6-1.4 0-.9.7-1.5 2-1.6l1.2-.1v-.3c0-.6-.3-.9-1-.9-.5 0-.9.2-1.3.5l-.4-.7c.5-.4 1.1-.6 1.8-.6 1.2 0 1.9.6 1.9 1.7zm-1-2.3-1 .1c-.7.1-1.1.3-1.1.8 0 .4.3.7.8.7.8 0 1.3-.5 1.3-1.2zM9 10.5H8V3h1v3.6c.4-.5.9-.8 1.6-.8 1.2 0 2 1 2 2.4 0 1.5-.8 2.5-2.1 2.5-.6 0-1.1-.3-1.5-.8zm0-1.9c0 .7.5 1.3 1.3 1.3s1.3-.6 1.3-1.6-.4-1.6-1.2-1.6S9 7.3 9 8.1z"/></svg>',
+  regex: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 1.5h1v2.3l2-1.2.5.9-2 1.1 2 1.1-.5.9-2-1.2v2.3h-1V5.4l-2 1.2-.5-.9 2-1.1-2-1.1.5-.9 2 1.2zM2 11h3v3H2z"/></svg>',
+  replaceOne: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.6 2.7 10.5 1.6l.7-.7 2.3 2.3-2.3 2.3-.7-.7 1.1-1.1H9.5a2 2 0 0 0-2 2v.5h-1v-.5a3 3 0 0 1 3-3zM3 9h4v1H3zm6 0h4v5H9zm1 1v3h2v-3zM3 11h4v1H3zm0 2h4v1H3z"/></svg>',
+  replaceAll: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.6 2.7 10.5 1.6l.7-.7 2.3 2.3-2.3 2.3-.7-.7 1.1-1.1H9.5a2 2 0 0 0-2 2v.5h-1v-.5a3 3 0 0 1 3-3zM1 9h6v1H1zm0 2h6v1H1zm0 2h6v1H1zm8-4h6v6H9zm1 1v4h4v-4z"/></svg>',
+};
+
 function createCMSearchBar(parent, view) {
+  const editable = () => view.state.facet(EditorView.editable) && !view.state.readOnly;
+  const mac = isMacPlatform();
+  const keyHint = (m, o) => (mac ? m : o);
   const bar = document.createElement('div');
-  bar.className = 'terminal-search-bar';
+  bar.className = 'terminal-search-bar cm-find-bar';
   bar.style.display = 'none';
   bar.innerHTML = `
-    <input type="text" class="terminal-search-input" placeholder="Find..." />
-    <span class="terminal-search-count"></span>
-    <button class="terminal-search-prev" title="Previous (Shift+Enter)">&#x25B2;</button>
-    <button class="terminal-search-next" title="Next (Enter)">&#x25BC;</button>
-    <button class="terminal-search-close" title="Close (Escape)">&times;</button>
+    <button type="button" class="cm-find-toggle" title="Toggle Replace" aria-label="Toggle Replace" aria-expanded="false">${FIND_ICONS.chevronRight}</button>
+    <div class="cm-find-rows">
+      <div class="cm-find-row">
+        <span class="cm-find-box">
+          <input type="text" class="terminal-search-input cm-find-input" placeholder="Find" aria-label="Find" spellcheck="false" />
+          <button type="button" class="cm-find-opt" data-opt="matchCase" title="Match Case (${keyHint('⌥⌘C', 'Alt+C')})" aria-pressed="false">${FIND_ICONS.matchCase}</button>
+          <button type="button" class="cm-find-opt" data-opt="wholeWord" title="Match Whole Word (${keyHint('⌥⌘W', 'Alt+W')})" aria-pressed="false">${FIND_ICONS.wholeWord}</button>
+          <button type="button" class="cm-find-opt" data-opt="isRegex" title="Use Regular Expression (${keyHint('⌥⌘R', 'Alt+R')})" aria-pressed="false">${FIND_ICONS.regex}</button>
+        </span>
+        <span class="terminal-search-count"></span>
+        <button type="button" class="terminal-search-prev" title="Previous Match (Shift+Enter)">&#x25B2;</button>
+        <button type="button" class="terminal-search-next" title="Next Match (Enter)">&#x25BC;</button>
+        <button type="button" class="terminal-search-close" title="Close (Escape)">&times;</button>
+      </div>
+      <div class="cm-find-row cm-replace-row" hidden>
+        <span class="cm-find-box"><input type="text" class="terminal-search-input cm-replace-input" placeholder="Replace" aria-label="Replace" spellcheck="false" /></span>
+        <button type="button" class="cm-replace-one" title="Replace (Enter)" aria-label="Replace">${FIND_ICONS.replaceOne}</button>
+        <button type="button" class="cm-replace-all" title="Replace All (${keyHint('⌘Enter', 'Ctrl+Alt+Enter')})" aria-label="Replace All">${FIND_ICONS.replaceAll}</button>
+      </div>
+    </div>
   `;
   parent.style.position = 'relative';
   parent.appendChild(bar);
 
-  const input = bar.querySelector('.terminal-search-input');
+  const input = bar.querySelector('.cm-find-input');
+  const replaceInput = bar.querySelector('.cm-replace-input');
+  const replaceRow = bar.querySelector('.cm-replace-row');
+  const toggle = bar.querySelector('.cm-find-toggle');
   const countEl = bar.querySelector('.terminal-search-count');
+  const options = { matchCase: false, wholeWord: false, isRegex: false };
+  let regex = null;
   let matches = [];
   let activeIdx = -1;
 
+  function buildRegex() {
+    if (!input.value) return null;
+    try {
+      countEl.title = '';
+      return TextSearchLib.buildSearchRegExp({ query: input.value, ...options });
+    } catch (err) {
+      countEl.title = err.message;
+      return undefined;
+    }
+  }
+
   function findAll() {
-    const q = input.value;
+    regex = buildRegex();
     matches = [];
     activeIdx = -1;
-    if (!q) {
+    bar.classList.toggle('is-invalid', regex === undefined);
+    if (!regex) {
       view.dispatch({ effects: setSearchQuery.of(null) });
-      countEl.textContent = '';
+      countEl.textContent = regex === undefined ? 'Invalid' : '';
       return;
     }
-    view.dispatch({ effects: setSearchQuery.of(q) });
-    const doc = view.state.doc.toString();
-    const term = q.toLowerCase();
-    let pos = 0;
-    while ((pos = doc.toLowerCase().indexOf(term, pos)) !== -1) {
-      matches.push(pos);
-      pos += term.length;
-    }
+    view.dispatch({ effects: setSearchQuery.of({ regex }) });
+    matches = findAllMatches(view.state.doc, regex);
     countEl.textContent = matches.length > 0 ? `${matches.length} found` : 'No results';
   }
 
   function goTo(idx) {
     if (matches.length === 0) return;
     activeIdx = ((idx % matches.length) + matches.length) % matches.length;
-    const pos = matches[activeIdx];
-    const q = input.value;
-    view.dispatch({
-      selection: { anchor: pos, head: pos + q.length },
-      scrollIntoView: true,
-    });
+    const { from, to } = matches[activeIdx];
+    view.dispatch({ selection: { anchor: from, head: to }, effects: EditorView.scrollIntoView(from, { y: 'center' }) });
     countEl.textContent = `${activeIdx + 1} of ${matches.length}`;
   }
 
-  function open() {
+  /** The first match at or after `pos` (wrapping round), for after a replace. */
+  function goToFrom(pos) {
+    if (!matches.length) { countEl.textContent = 'No results'; return; }
+    const idx = matches.findIndex(m => m.from >= pos);
+    goTo(idx < 0 ? 0 : idx);
+  }
+
+  function replacementAt(from) {
+    const replace = replaceInput.value;
+    if (!options.isRegex) return replace;
+    const sticky = new RegExp(regex.source, regex.flags.replace('g', '') + 'y');
+    sticky.lastIndex = from;
+    const m = sticky.exec(view.state.doc.toString());
+    return m ? TextSearchLib.expandReplacement(replace, m) : replace;
+  }
+
+  function replaceOne() {
+    if (!editable() || !regex || !matches.length) return;
+    const sel = view.state.selection.main;
+    let current = matches.findIndex(m => m.from === sel.from && m.to === sel.to);
+    // The first press selects the match, as VS Code does when the cursor is elsewhere.
+    if (current < 0) { goToFrom(sel.from); return; }
+    const { from, to } = matches[current];
+    const insert = replacementAt(from);
+    view.dispatch({ changes: { from, to, insert }, userEvent: 'input.replace' });
+    findAll();
+    goToFrom(from + insert.length);
+  }
+
+  function replaceAll() {
+    if (!editable() || !regex || !matches.length) return;
+    const changes = matches.map(({ from, to }) => ({ from, to, insert: replacementAt(from) }));
+    view.dispatch({ changes, userEvent: 'input.replace.all' });
+    const count = changes.length;
+    findAll();
+    countEl.textContent = `Replaced ${count}`;
+  }
+
+  function showReplace(show) {
+    const on = show && editable();
+    replaceRow.hidden = !on;
+    toggle.innerHTML = on ? FIND_ICONS.chevronDown : FIND_ICONS.chevronRight;
+    toggle.setAttribute('aria-expanded', String(on));
+    bar.classList.toggle('has-replace', on);
+  }
+
+  function setOption(opt) {
+    options[opt] = !options[opt];
+    const button = bar.querySelector(`.cm-find-opt[data-opt="${opt}"]`);
+    button.classList.toggle('on', options[opt]);
+    button.setAttribute('aria-pressed', String(options[opt]));
+    findAll();
+    if (matches.length) goToFrom(view.state.selection.main.from);
+  }
+
+  function open({ replace = false } = {}) {
+    toggle.style.display = editable() ? '' : 'none';
     bar.style.display = 'flex';
-    input.focus();
+    if (replace) showReplace(true);
     const sel = view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
-    if (sel) { input.value = sel; findAll(); if (matches.length) goTo(0); }
+    if (sel && !sel.includes('\n')) input.value = sel;
+    findAll();
+    if (matches.length) goToFrom(view.state.selection.main.from);
+    const target = replace && input.value ? replaceInput : input;
+    target.focus();
+    target.select();
   }
 
   function close() {
     bar.style.display = 'none';
-    input.value = '';
     matches = [];
     activeIdx = -1;
     view.dispatch({ effects: setSearchQuery.of(null) });
@@ -145,39 +255,51 @@ function createCMSearchBar(parent, view) {
     view.focus();
   }
 
-  const isMacPlatform = /Mac|iPhone|iPad/.test(navigator.platform);
-  input.addEventListener('input', () => { findAll(); if (matches.length) goTo(0); });
-  input.addEventListener('keydown', (e) => {
-    const mod = isMacPlatform ? e.metaKey : e.ctrlKey;
-    if (e.key === 'Escape') { close(); e.preventDefault(); }
-    else if (e.key === 'g' && mod) { openGotoLine(view); e.preventDefault(); }
-    else if (e.key === 's' && mod) { view.dom.dispatchEvent(new CustomEvent('cm-save', { bubbles: true })); e.preventDefault(); }
-    else if (e.key === 'Enter' && e.shiftKey) { goTo(activeIdx - 1); e.preventDefault(); }
-    else if (e.key === 'Enter') { goTo(activeIdx + 1); e.preventDefault(); }
-  });
+  function onKey(e) {
+    const mod = mac ? e.metaKey : e.ctrlKey;
+    const optKey = mac ? (e.altKey && e.metaKey) : (e.altKey && !e.ctrlKey);
+    if (e.key === 'Escape') { close(); e.preventDefault(); return; }
+    if (optKey && e.code === 'KeyC') { setOption('matchCase'); e.preventDefault(); return; }
+    if (optKey && e.code === 'KeyW') { setOption('wholeWord'); e.preventDefault(); return; }
+    if (optKey && e.code === 'KeyR') { setOption('isRegex'); e.preventDefault(); return; }
+    if (e.key === 'g' && mod) { openGotoLine(view); e.preventDefault(); return; }
+    if (e.key === 's' && mod) { view.dom.dispatchEvent(new CustomEvent('cm-save', { bubbles: true })); e.preventDefault(); return; }
+    if (e.key === 'f' && mod && e.altKey) { showReplace(true); replaceInput.focus(); e.preventDefault(); return; }
+    if (e.key === 'h' && e.ctrlKey && !mac) { showReplace(true); replaceInput.focus(); e.preventDefault(); return; }
+    if (e.key === 'f' && mod) { input.focus(); input.select(); e.preventDefault(); return; }
+    if (e.target === replaceInput && e.key === 'Enter' && (mac ? e.metaKey : (e.ctrlKey && e.altKey))) { replaceAll(); e.preventDefault(); return; }
+    if (e.target === replaceInput && e.key === 'Enter') { replaceOne(); e.preventDefault(); return; }
+    if (e.key === 'Enter' && e.shiftKey) { goTo(activeIdx - 1); e.preventDefault(); return; }
+    if (e.key === 'Enter') { goTo(activeIdx + 1); e.preventDefault(); }
+  }
+
+  input.addEventListener('input', () => { findAll(); if (matches.length) goToFrom(view.state.selection.main.from); });
+  bar.addEventListener('keydown', onKey);
+  toggle.addEventListener('click', () => showReplace(replaceRow.hidden));
+  bar.querySelectorAll('.cm-find-opt').forEach(b => b.addEventListener('click', () => setOption(b.dataset.opt)));
   bar.querySelector('.terminal-search-next').addEventListener('click', () => goTo(activeIdx + 1));
   bar.querySelector('.terminal-search-prev').addEventListener('click', () => goTo(activeIdx - 1));
   bar.querySelector('.terminal-search-close').addEventListener('click', close);
+  bar.querySelector('.cm-replace-one').addEventListener('click', replaceOne);
+  bar.querySelector('.cm-replace-all').addEventListener('click', replaceAll);
 
   return { open, close, bar };
 }
 
-const cmFindKeymap = keymap.of([{
-  key: 'Mod-f',
-  run(view) {
-    openCMSearch(view);
-    return true;
-  },
-}]);
+const cmFindKeymap = keymap.of([
+  { key: 'Mod-f', run(view) { openCMSearch(view); return true; } },
+  // Replace: ⌥⌘F on macOS, Ctrl+H elsewhere, as in VS Code.
+  { mac: 'Mod-Alt-f', win: 'Ctrl-h', linux: 'Ctrl-h', run(view) { openCMSearch(view, { replace: true }); return true; } },
+]);
 
-function openCMSearch(view) {
+function openCMSearch(view, opts = {}) {
   const parent = view.dom.parentElement;
   // Close goto-line if open
   if (parent._cmGotoLine) parent._cmGotoLine.close();
   if (!parent._cmSearchBar) {
     parent._cmSearchBar = createCMSearchBar(parent, view);
   }
-  parent._cmSearchBar.open();
+  parent._cmSearchBar.open(opts);
 }
 
 // DOM-level Cmd/Ctrl+F listener for read-only editors where CM keymaps don't fire

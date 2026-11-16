@@ -239,8 +239,8 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   if (!supported && online) {
     return (
       <View style={styles.center}>
-        <Text style={styles.emptyTitle}>Update Switchboard on the computer</Text>
-        <Text style={styles.emptyText}>Managing worktrees from this phone needs a newer Switchboard on the computer. Update it there, then come back.</Text>
+        <Text style={styles.emptyTitle}>Update Switchboard Evolution on the computer</Text>
+        <Text style={styles.emptyText}>Managing worktrees from this phone needs a newer Switchboard Evolution on the computer. Update it there, then come back.</Text>
       </View>
     );
   }

@@ -44,6 +44,8 @@ const FICONS = {
   copy: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   cut: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9"/><path d="M14.5 14.5 20 20"/><path d="M8.1 8.1 12 12"/></svg>`,
   paste: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>`,
+  explorer: (s = 15) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7Z"/><path d="M15 2v5h5"/><path d="M3 7v13a2 2 0 0 0 2 2h10"/></svg>`,
+  more: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>`,
 };
 
 const isMacPlatform = () => window.api.platform === 'darwin';
@@ -414,9 +416,10 @@ async function renderFileTree(project, list, state) {
     row.tabIndex = 0;
     row.setAttribute('role', 'treeitem');
     if (isDir) row.setAttribute('aria-expanded', String(open));
-    row.style.paddingLeft = `${10 + depth * 14}px`;
+    row.style.paddingLeft = `${4 + depth * 12}px`;
     row.title = entry.type === 'file' && entry.viewable === false ? entry.relativePath + '\nOpen in default application' : entry.relativePath;
-    row.innerHTML = `<span class="ws-file-icon">${isDir ? (open ? '&#9662;' : '&#9656;') : ''}</span><span class="ws-file-name">${escapeHtml(entry.name)}</span>`;
+    const twistie = isDir ? (open ? PICONS.chevronDown(12) : PICONS.chevronRight(12)) : '';
+    row.innerHTML = `<span class="ws-file-twistie">${twistie}</span>${fileIconHtml(entry.name, { dir: isDir, open })}<span class="ws-file-name">${escapeHtml(entry.name)}</span>`;
     const activate = async () => {
       if (isDir) {
         if (open) state.expanded.delete(entry.relativePath); else state.expanded.add(entry.relativePath);
@@ -444,6 +447,9 @@ function onExplorerKey(event, project, root, entry, row, activate) {
   const mod = isMacPlatform() ? event.metaKey : event.ctrlKey;
   const key = event.key;
   const act = (fn) => { event.preventDefault(); event.stopPropagation(); fn(); };
+  if (event.altKey && event.shiftKey && !event.metaKey && !event.ctrlKey && event.code === 'KeyF' && (!entry || entry.type === 'directory')) {
+    return act(() => openFilesSearch(project, { root, include: entry?.relativePath || '' }));
+  }
   if (key === 'ContextMenu' || (event.shiftKey && key === 'F10')) {
     return act(() => showContextMenu(explorerMenuItems(project, root, entry), entry ? { anchor: row } : { x: 40, y: 120 }));
   }
@@ -679,6 +685,8 @@ function explorerMenuItems(project, root, entry) {
       { label: 'New File…', icon: FICONS.newFile(14), onClick: () => explorerNewEntry(project, root, rel, 'file') },
       { label: 'New Folder…', icon: FICONS.newFolder(14), onClick: () => explorerNewEntry(project, root, rel, 'folder') },
       { sep: true },
+      { label: 'Find in Folder…', icon: PICONS.search(14), hint: filesKeyHint('⌥⇧F', 'Shift+Alt+F'), onClick: () => openFilesSearch(project, { root, include: rel }) },
+      { sep: true },
     );
   } else {
     items.push(
@@ -878,13 +886,17 @@ function timelineMenuItems(project, state, item) {
 
 // --- The tab ---
 
+// The narrowest the side panel gets: its header still holds the view switch,
+// two actions and the "More Actions" button.
+const FILES_TREE_MIN_WIDTH = 180;
+
 function bindFilesDivider(project, container) {
   const handle = container.querySelector('.ws-files-divider');
   const storageKey = `project-files-tree-width:${project.id}`;
   const saved = Number(localStorage.getItem(storageKey));
   const resize = (width) => {
     const max = Math.max(0, Math.min(600, container.getBoundingClientRect().width * 0.6));
-    const next = Math.round(Math.max(Math.min(160, max), Math.min(max, width)));
+    const next = Math.round(Math.max(Math.min(FILES_TREE_MIN_WIDTH, max), Math.min(max, width)));
     container.style.setProperty('--files-tree-width', `${next}px`);
     handle.setAttribute('aria-valuenow', String(next));
     return next;
@@ -925,26 +937,72 @@ function filesRootTabsHtml(project, current) {
   }).join('');
 }
 
+// The side panel's two views, as VS Code's activity bar has them.
+const FILES_SIDE_VIEWS = ['explorer', 'search'];
+
+function filesSideView(project) {
+  const view = filesUi(project).view;
+  return FILES_SIDE_VIEWS.includes(view) ? view : 'explorer';
+}
+
+/**
+ * The buttons of the side panel's header for a view. `fold` ones go into the
+ * "More Actions" menu when the panel is too narrow for all of them (CSS
+ * container queries hide them; the menu lists every action).
+ */
+function filesHeadActions(view) {
+  if (view === 'search') {
+    return [
+      { act: 'search-refresh', label: 'Refresh', icon: PICONS.refresh(14) },
+      { act: 'search-clear', label: 'Clear Search Results', icon: PICONS.x(13), fold: true },
+      { act: 'search-collapse', label: 'Collapse All', icon: FICONS.collapse(14), fold: true },
+    ];
+  }
+  return [
+    { act: 'new-file', label: 'New File…', icon: FICONS.newFile(14) },
+    { act: 'new-folder', label: 'New Folder…', icon: FICONS.newFolder(14) },
+    { act: 'refresh', label: 'Refresh Explorer', icon: PICONS.refresh(14), fold: true },
+    { act: 'collapse', label: 'Collapse Folders', icon: FICONS.collapse(14), fold: true },
+    { act: 'open', label: 'Open Folder', icon: PICONS.open(14), fold: true },
+  ];
+}
+
+function filesHeadHtml(project, root, view) {
+  const isProject = root === project.root;
+  const title = view === 'search' ? 'Search' : isProject ? 'Project folder' : pathBasename(root);
+  const viewButton = (name, label, icon) => `<button type="button" class="ws-files-view${view === name ? ' on' : ''}" data-view="${name}" role="tab" aria-selected="${view === name}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</button>`;
+  const actions = filesHeadActions(view).map(a => `<button type="button" class="ws-ghost ws-files-action${a.fold ? ' is-foldable' : ''}" data-act="${a.act}" title="${escapeHtml(a.label)}" aria-label="${escapeHtml(a.label)}">${a.icon}</button>`).join('');
+  return `
+    <div class="ws-files-head">
+      <span class="ws-files-views" role="tablist" aria-label="Side panel">${viewButton('explorer', `Explorer (${filesKeyHint('⇧⌘E', 'Ctrl+Shift+E')})`, FICONS.explorer(15))}${viewButton('search', `Search (${filesKeyHint('⇧⌘F', 'Ctrl+Shift+F')})`, PICONS.search(14))}</span>
+      <span class="ws-card-title ws-files-title" title="${escapeHtml(view === 'search' ? root : root)}">${escapeHtml(title)}</span>
+      <span class="ws-files-actions">${actions}<button type="button" class="ws-ghost ws-files-action ws-files-more" data-act="more" title="More Actions…" aria-label="More Actions">${FICONS.more(14)}</button></span>
+    </div>`;
+}
+
+function setFilesSideView(project, body, view) {
+  if (!FILES_SIDE_VIEWS.includes(view) || filesSideView(project) === view) return false;
+  filesUi(project).view = view;
+  renderFilesTab(project, body);
+  return true;
+}
+
 async function renderFilesTab(project, body) {
   body.classList.add('ws-body--files');
   const root = currentFilesRoot(project);
   const isProject = root === project.root;
+  const view = filesSideView(project);
+  const side = view === 'search'
+    ? `<div class="ws-search" id="ws-search" data-root="${escapeHtml(root)}"></div>`
+    : `<div class="ws-files-list" id="ws-files-list" role="tree" tabindex="-1" data-root="${escapeHtml(root)}"></div>
+        ${isProject ? '<div class="ws-help ws-files-hint">CLAUDE.md is the brief every session reads. The agent creates plan.md, plan-tracker.md, todos.md and memory.md when it needs them. Each attached folder has its own tab above.</div>' : ''}
+        <div class="ws-timeline" id="ws-timeline" data-root="${escapeHtml(root)}" hidden></div>`;
   body.innerHTML = `
     <div class="ws-files-roots" role="tablist" aria-label="Folders">${filesRootTabsHtml(project, root)}</div>
     <div class="ws-files">
-      <div class="ws-files-side">
-        <div class="ws-files-head">
-          <span class="ws-card-title" title="${escapeHtml(root)}">${isProject ? 'Project folder' : escapeHtml(pathBasename(root))}</span>
-          <span class="ws-flex"></span>
-          <button type="button" class="ws-ghost ws-files-action" data-act="new-file" title="New File…" aria-label="New File">${FICONS.newFile(14)}</button>
-          <button type="button" class="ws-ghost ws-files-action" data-act="new-folder" title="New Folder…" aria-label="New Folder">${FICONS.newFolder(14)}</button>
-          <button type="button" class="ws-ghost ws-files-action" data-act="refresh" id="ws-files-refresh" title="Refresh Explorer" aria-label="Refresh files">${PICONS.refresh(14)}</button>
-          <button type="button" class="ws-ghost ws-files-action" data-act="collapse" title="Collapse Folders" aria-label="Collapse Folders">${FICONS.collapse(14)}</button>
-          <button type="button" class="ws-ghost ws-files-action" data-act="open" id="ws-files-open" title="Open folder" aria-label="Open folder">${PICONS.open(14)}</button>
-        </div>
-        <div class="ws-files-list" id="ws-files-list" role="tree" tabindex="-1" data-root="${escapeHtml(root)}"></div>
-        ${isProject ? '<div class="ws-help ws-files-hint">CLAUDE.md is the brief every session reads. The agent creates plan.md, plan-tracker.md, todos.md and memory.md when it needs them. Each attached folder has its own tab above.</div>' : ''}
-        <div class="ws-timeline" id="ws-timeline" data-root="${escapeHtml(root)}" hidden></div>
+      <div class="ws-files-side" data-view="${view}">
+        ${filesHeadHtml(project, root, view)}
+        ${side}
       </div>
       <div class="ws-files-divider" role="separator" aria-label="Resize file tree" aria-orientation="vertical" tabindex="0"></div>
       <div class="ws-editor-area">
@@ -961,46 +1019,70 @@ async function renderFilesTab(project, body) {
       renderFilesTab(project, body);
     };
   });
-  const list = body.querySelector('#ws-files-list');
-  const act = (name, fn) => { body.querySelector(`.ws-files-head [data-act="${name}"]`).onclick = fn; };
-  act('open', async () => {
-    const result = await window.api.openPath(root);
-    if (result?.error) alert(result.error);
+  body.querySelectorAll('.ws-files-view').forEach(button => {
+    button.onclick = () => {
+      if (!setFilesSideView(project, body, button.dataset.view) && button.dataset.view === 'search') focusFilesSearch(body);
+    };
   });
-  act('refresh', async () => {
-    state.cache.clear();
-    await renderFileTree(project, list, state);
+  const handlers = view === 'search' ? filesSearchHeadHandlers(project, root, body) : explorerHeadHandlers(project, root, body, state);
+  const head = body.querySelector('.ws-files-head');
+  head.querySelectorAll('[data-act]').forEach(button => {
+    const act = button.dataset.act;
+    if (act === 'more') {
+      button.onclick = () => showContextMenu(filesHeadActions(view).map(a => ({ label: a.label, icon: a.icon, onClick: handlers[a.act] })), { anchor: button });
+    } else if (handlers[act]) {
+      button.onclick = handlers[act];
+    }
   });
-  act('collapse', async () => {
-    state.expanded.clear();
-    await renderFileTree(project, list, state);
-  });
-  act('new-file', () => explorerNewEntry(project, root, selectedFolderOf(state), 'file'));
-  act('new-folder', () => explorerNewEntry(project, root, selectedFolderOf(state), 'folder'));
-  // The empty part of the tree acts on the folder itself.
-  list.addEventListener('contextmenu', (event) => {
-    if (event.target.closest('.ws-file-row')) return;
-    event.preventDefault();
-    showContextMenu(explorerMenuItems(project, root, null), { x: event.clientX, y: event.clientY });
-  });
-  list.addEventListener('keydown', (event) => { if (event.target === list) onExplorerKey(event, project, root, null, null, () => {}); });
 
   // The editors and a diff belong to the page: put back whichever is open.
   const host = body.querySelector('#ws-editor');
   const ed = projectEditor;
   if (projectDiffView?.projectId === project.id) host.replaceChildren(projectDiffView.el);
   else if (ed?.projectId === project.id && ed.panel.filePath) host.replaceChildren(ed.host);
-  const side = projectSideEditor;
-  if (side?.projectId === project.id && side.panel.filePath) {
+  const sideEditor = projectSideEditor;
+  if (sideEditor?.projectId === project.id && sideEditor.panel.filePath) {
     const pane = body.querySelector('#ws-editor-side');
     pane.hidden = false;
-    pane.replaceChildren(side.host);
+    pane.replaceChildren(sideEditor.host);
     body.querySelector('.ws-editor-area').classList.add('has-side');
   }
-  renderTimeline(project, state);
-  await renderFileTree(project, list, state);
+  if (view === 'search') {
+    renderFilesSearch(project, root, body.querySelector('#ws-search'));
+  } else {
+    const list = body.querySelector('#ws-files-list');
+    // The empty part of the tree acts on the folder itself.
+    list.addEventListener('contextmenu', (event) => {
+      if (event.target.closest('.ws-file-row')) return;
+      event.preventDefault();
+      showContextMenu(explorerMenuItems(project, root, null), { x: event.clientX, y: event.clientY });
+    });
+    list.addEventListener('keydown', (event) => { if (event.target === list) onExplorerKey(event, project, root, null, null, () => {}); });
+    renderTimeline(project, state);
+    await renderFileTree(project, list, state);
+  }
   const hasEditor = projectDiffView?.projectId === project.id || (ed?.projectId === project.id && ed.panel.filePath);
   if (!hasEditor && state.selected && selectedProject()?.id === project.id) await openFileInProjectEditor(project, state.selected, { root });
+}
+
+function explorerHeadHandlers(project, root, body, state) {
+  const list = () => body.querySelector('#ws-files-list');
+  return {
+    open: async () => {
+      const result = await window.api.openPath(root);
+      if (result?.error) alert(result.error);
+    },
+    refresh: async () => {
+      state.cache.clear();
+      if (list()) await renderFileTree(project, list(), state);
+    },
+    collapse: async () => {
+      state.expanded.clear();
+      if (list()) await renderFileTree(project, list(), state);
+    },
+    'new-file': () => explorerNewEntry(project, root, selectedFolderOf(state), 'file'),
+    'new-folder': () => explorerNewEntry(project, root, selectedFolderOf(state), 'folder'),
+  };
 }
 
 /** Where the toolbar's New File puts it: the selected folder, or the selected file's folder. */

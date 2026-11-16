@@ -91,7 +91,9 @@ contextBridge.exposeInMainWorld('api', {
   getProjectsRoot: () => ipcRenderer.invoke('get-projects-root'),
   getProjectGitStatus: (id, opts) => ipcRenderer.invoke('get-project-git-status', id, opts),
   getProjectGitInfo: (id) => ipcRenderer.invoke('get-project-git-info', id),
-  getProjectGitDiff: (id, folderPath, filePath) => ipcRenderer.invoke('get-project-git-diff', id, folderPath, filePath),
+  getProjectGitDiff: (id, folderPath, filePath, side) => ipcRenderer.invoke('get-project-git-diff', id, folderPath, filePath, side),
+  stageProjectGitFiles: (id, folderPath, paths, stage) => ipcRenderer.invoke('stage-project-git-files', id, folderPath, paths, stage),
+  stageProjectGitLines: (id, folderPath, filePath, side, diffId, lines) => ipcRenderer.invoke('stage-project-git-lines', id, folderPath, filePath, side, diffId, lines),
   getFolderGitStatus: (folderPath) => ipcRenderer.invoke('get-folder-git-status', folderPath),
 
   // Git Graph tab
@@ -275,6 +277,8 @@ contextBridge.exposeInMainWorld('api', {
   resolveTerminalFiles: (references, context) => ipcRenderer.invoke('resolve-terminal-files', references, context),
   listProjectDirectory: (projectPath, relativePath) => ipcRenderer.invoke('list-project-directory', projectPath, relativePath),
   readProjectFile: (projectPath, relativePath) => ipcRenderer.invoke('read-project-file', projectPath, relativePath),
+  searchProjectFiles: (root, options) => ipcRenderer.invoke('search-project-files', root, options),
+  replaceInProjectFiles: (root, options) => ipcRenderer.invoke('replace-in-project-files', root, options),
   manageProjectEntry: (projectPath, relativePath, action, newName) => ipcRenderer.invoke('manage-project-entry', projectPath, relativePath, action, newName),
   createProjectEntry: (projectPath, folderRelative, name, kind) => ipcRenderer.invoke('create-project-entry', projectPath, folderRelative, name, kind),
   duplicateProjectEntry: (projectPath, relativePath) => ipcRenderer.invoke('duplicate-project-entry', projectPath, relativePath),

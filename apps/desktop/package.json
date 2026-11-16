@@ -1,9 +1,9 @@
 {
-  "name": "omniboardv",
-  "productName": "OmniboardV",
-  "version": "1.6.5",
+  "name": "switchboard-e",
+  "productName": "Switchboard Evolution",
+  "version": "1.6.6",
   "private": true,
-  "description": "OmniboardV: a desktop app for running and managing coding-agent sessions across projects",
+  "description": "Switchboard Evolution: a desktop app for running and managing coding-agent sessions across projects",
   "author": "Vincenzo Favara",
   "license": "MIT",
   "main": "main.js",
@@ -39,6 +39,7 @@
     "electron-updater": "^6.8.9",
     "jsonc-parser": "^3.3.1",
     "marked": "^17.0.4",
+    "material-icon-theme": "5.40.0",
     "morphdom": "^2.7.8",
     "node-pty": "^1.0.0",
     "qrcode-generator": "^2.0.4",
@@ -63,8 +64,8 @@
     "png2icons": "^2.0.1"
   },
   "build": {
-    "appId": "io.github.vivi7.omniboardv",
-    "productName": "OmniboardV",
+    "appId": "io.github.vivi7.switchboard-e",
+    "productName": "Switchboard Evolution",
     "files": [
       "*.js",
       "harnesses/**/*",
@@ -94,7 +95,7 @@
           ]
         }
       ],
-      "artifactName": "OmniboardV-${version}-${arch}.${ext}",
+      "artifactName": "Switchboard-Evolution-${version}-${arch}.${ext}",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "hardenedRuntime": true,
@@ -112,7 +113,7 @@
           ]
         }
       ],
-      "artifactName": "OmniboardV-${version}-${arch}.${ext}"
+      "artifactName": "Switchboard-Evolution-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -122,12 +123,12 @@
       ],
       "icon": "build/icons",
       "category": "Development",
-      "executableName": "omniboardv",
-      "artifactName": "OmniboardV-${version}-${arch}.${ext}"
+      "executableName": "switchboard-e",
+      "artifactName": "Switchboard-Evolution-${version}-${arch}.${ext}"
     },
     "pacman": {
-      "packageName": "omniboardv",
-      "artifactName": "omniboardv-${version}.${ext}",
+      "packageName": "switchboard-e",
+      "artifactName": "switchboard-e-${version}.${ext}",
       "depends": [
         "gtk3",
         "nss",

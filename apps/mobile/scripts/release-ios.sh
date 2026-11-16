@@ -26,6 +26,6 @@ command -v fastlane >/dev/null 2>&1 || fail "fastlane not found: brew install fa
 
 release_prepare
 
-out="dist/Switchboard-Mobile-$version.ipa"
+out="dist/Switchboard-Evolution-$version.ipa"
 eas_cli build --platform ios --profile production --local --output "$out"
 release_submit ios "$out"

@@ -1703,6 +1703,37 @@ body { display: flex; flex-direction: column; }
   color: #cdd6f4;
 }
 
+/* The editor's find bar: toggles in the field, a Replace row in editable editors. */
+.cm-find-bar { align-items: flex-start; padding: 4px 6px 4px 2px; gap: 2px; }
+.cm-find-bar.is-invalid .cm-find-box { border-color: rgba(255,110,110,0.7); }
+.cm-find-bar .cm-find-toggle { align-self: stretch; padding: 0 2px; display: inline-flex; align-items: center; }
+.cm-find-rows { display: flex; flex-direction: column; gap: 4px; }
+.cm-find-row { display: flex; align-items: center; gap: 4px; }
+.cm-find-row[hidden] { display: none; }
+.cm-find-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  width: 236px;
+  padding-right: 2px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+}
+.cm-find-box:focus-within { border-color: rgba(128,136,255,0.5); }
+.cm-find-box .terminal-search-input { flex: 1; min-width: 0; width: auto; border: 0; background: transparent; }
+.terminal-search-bar .cm-find-opt {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+.terminal-search-bar .cm-find-opt.on { color: #e8e8ff; background: rgba(128,136,255,0.24); border-color: rgba(128,136,255,0.6); }
+.terminal-search-bar .cm-replace-one, .terminal-search-bar .cm-replace-all { padding: 2px 3px; display: inline-flex; align-items: center; }
+
 /* ========== SESSION GRID ========== */
 .message-search-bar { top: 44px; max-width: calc(100% - 24px); right: 12px; }
 .message-search-bar .terminal-search-input { min-width: 40px; flex: 1; }
@@ -5988,6 +6019,96 @@ body { display: flex; flex-direction: column; }
 .git-diff-line.add { color: #91d19d; background: rgba(58,155,76,0.075); }
 .git-diff-line.remove { color: #e2939e; background: rgba(185,63,82,0.075); }
 
+/* Staging: lists by side with stage / unstage buttons, and a diff whose
+   hunks and lines can be staged on their own. */
+.git-file-group { display: flex; align-items: center; gap: 6px; padding: 10px 8px 5px 12px; }
+.git-file-group-count {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.07);
+  color: #9a9ab0;
+  font-size: 9.5px;
+  letter-spacing: 0;
+}
+.git-row-acts { margin-left: auto; display: inline-flex; gap: 2px; flex-shrink: 0; visibility: hidden; }
+.git-file-row:hover .git-row-acts,
+.git-file-row:focus-within .git-row-acts,
+.git-file-row:focus .git-row-acts,
+.git-file-row.selected .git-row-acts,
+.git-file-group:hover .git-row-acts { visibility: visible; }
+.git-row-act {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #9a9ab0;
+  cursor: pointer;
+}
+.git-row-act:hover { background: rgba(255,255,255,0.09); color: #e6e6fa; }
+.git-row-act:focus-visible { outline: 1px solid #8088ff; visibility: visible; }
+div.git-file-row { align-items: center; gap: 6px; padding: 4px 8px 4px 10px; }
+div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px); }
+.git-file-row:focus-visible { outline: 1px solid rgba(128,136,255,0.7); outline-offset: -1px; }
+.git-file-row .git-file-code { padding-top: 0; }
+.git-file-row:not(.tree) .git-file-path { flex: 0 1 auto; min-width: 0; }
+.git-file-dir { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #5f5f74; font-size: 10px; }
+.git-folder-row .file-type-icon { width: 15px; height: 15px; }
+
+.git-diff-pane .git-diff-title { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; }
+.git-diff-file { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-diff-side {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  color: #a0a0b8;
+  font: 700 9px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.git-diff-side.staged { background: rgba(80,200,120,0.14); color: #8fd6a0; }
+.git-diff-side.merge { background: rgba(223,113,128,0.16); color: #e8a0aa; }
+.git-diff-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.git-diff-actions .ws-ghost { border-color: rgba(255,255,255,0.1); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.git-diff-actions .ws-ghost[hidden] { display: none; }
+.git-pick-act:not([disabled]) { color: #e4e4fa; background: rgba(128,136,255,0.2); border-color: rgba(128,136,255,0.5); }
+.git-pick-act[disabled] { opacity: 0.45; cursor: default; }
+.git-diff-note { padding: 6px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); color: #8a8aa0; font-size: 10.5px; }
+.git-diff-note.is-warning { color: #e6c07a; background: rgba(230,192,122,0.08); }
+
+.git-hunks { padding-bottom: 14px; color: #9999aa; font: 10.5px/1.55 'SF Mono', 'Fira Code', Menlo, monospace; tab-size: 2; }
+.git-hunk + .git-hunk { margin-top: 8px; }
+.git-hunk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 8px 2px 12px;
+  background: rgba(100,112,215,0.08);
+  color: #8992dc;
+}
+.git-hunk-section { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6f72a8; }
+.git-hunk-act.ws-ghost { flex-shrink: 0; border-color: rgba(255,255,255,0.1); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.git-dl { display: flex; min-height: 1.55em; }
+.git-dl-gutter { flex-shrink: 0; display: inline-flex; color: #55556a; user-select: none; }
+.git-dl-num { width: 38px; padding-right: 6px; text-align: right; }
+.git-dl-sign { width: 16px; text-align: center; }
+.git-dl[data-index] .git-dl-gutter { cursor: pointer; }
+.git-dl-text { flex: 1; min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.git-dl.add { background: rgba(58,155,76,0.075); color: #91d19d; }
+.git-dl.remove { background: rgba(185,63,82,0.075); color: #e2939e; }
+.git-dl.eof { color: #6a6a80; font-style: italic; }
+.git-dl[data-index]:hover .git-dl-gutter { background: rgba(255,255,255,0.06); color: #a8a8c8; }
+.git-dl.picked .git-dl-gutter { background: rgba(128,136,255,0.38); color: #f0f0ff; box-shadow: inset 3px 0 0 #8c94ff; }
+.git-dl.add.picked { background: rgba(58,155,76,0.2); }
+.git-dl.remove.picked { background: rgba(185,63,82,0.2); }
+.git-tab-body.is-busy .git-changes { opacity: 0.7; pointer-events: none; }
+
 .git-diff-empty,
 .git-empty-row {
   padding: 18px 14px;
@@ -6919,18 +7040,217 @@ body { display: flex; flex-direction: column; }
 .ws-files-head {
   display: flex;
   align-items: center;
-  padding: 10px 12px 6px;
-  gap: 4px;
+  padding: 8px 8px 6px;
+  gap: 2px;
+  min-width: 0;
 }
 
-.ws-files-head .ws-card-title { white-space: nowrap; }
-.ws-files-head .ws-files-action {
-  flex: 0 0 26px;
+/* The header keeps its buttons however narrow the panel: the title gives way
+   first, then the less used actions move into "More Actions". */
+.ws-files-side { container: files-side / inline-size; }
+.ws-files-views {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.035);
+}
+.ws-files-view {
   width: 26px;
-  height: 26px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #7a7a96;
+  cursor: pointer;
+}
+.ws-files-view:hover { color: #d0d0e8; background: rgba(255,255,255,0.06); }
+.ws-files-view.on { color: #e4e4fa; background: rgba(128,136,255,0.2); }
+.ws-files-view:focus-visible { outline: 1px solid #8088ff; outline-offset: 1px; }
+.ws-files-head .ws-files-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-files-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: auto; }
+.ws-files-head .ws-files-action {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   justify-content: center;
 }
+.ws-files-head .ws-files-more { display: none; }
+@container files-side (max-width: 300px) {
+  .ws-files-head .ws-files-title { display: none; }
+}
+@container files-side (max-width: 212px) {
+  .ws-files-head .ws-files-action.is-foldable { display: none; }
+  .ws-files-head .ws-files-more { display: inline-flex; }
+}
+
+/* Twistie, file-type icon (Material Icon Theme) and name, as in VS Code's explorer. */
+.ws-file-twistie {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a8aa8;
+}
+.file-type-icon { width: 16px; height: 16px; flex-shrink: 0; display: block; }
+
+/* The Search view: query, replace, files to include / exclude, results by file. */
+.ws-search { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ws-search-form { display: flex; gap: 2px; padding: 2px 8px 4px 4px; }
+.ws-search-replace-toggle {
+  width: 16px;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8a8aa8;
+  cursor: pointer;
+}
+.ws-search-replace-toggle:hover { background: rgba(255,255,255,0.06); color: #d8d8f0; }
+.ws-search-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ws-search-box {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding-right: 3px;
+  background: #121218;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 6px;
+}
+.ws-search-box:focus-within { border-color: rgba(128,136,255,0.6); }
+.ws-search-box[hidden], .ws-search-details[hidden] { display: none; }
+.ws-search-box input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e0e0ee;
+  font: inherit;
+  font-size: 12px;
+}
+.ws-search-opts { display: inline-flex; gap: 1px; flex-shrink: 0; }
+.ws-search-opt {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #8a8aa8;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ws-search-opt:hover { background: rgba(255,255,255,0.07); color: #d8d8f0; }
+.ws-search-opt.on { color: #e8e8ff; background: rgba(128,136,255,0.24); border-color: rgba(128,136,255,0.6); }
+.ws-search-opt:focus-visible, .ws-search-replace-toggle:focus-visible, .ws-search-details-toggle:focus-visible { outline: 1px solid #8088ff; outline-offset: 0; }
+.ws-search-details-row { display: flex; justify-content: flex-end; margin: -2px 0 -2px; }
+.ws-search-details-toggle {
+  width: 24px;
+  height: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #6f6f88;
+  cursor: pointer;
+}
+.ws-search-details-toggle:hover, .ws-search-details-toggle.on { color: #d8d8f0; }
+.ws-search-details { display: flex; flex-direction: column; gap: 6px; }
+.ws-search-label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #8a8aa0; }
+.ws-search-label input {
+  padding: 5px 6px;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 6px;
+  outline: 0;
+  background: #121218;
+  color: #e0e0ee;
+  font: inherit;
+  font-size: 12px;
+}
+.ws-search-label input:focus { border-color: rgba(128,136,255,0.6); }
+.ws-search-summary { padding: 2px 12px 6px 24px; font-size: 11.5px; color: #8a8aa0; overflow-wrap: anywhere; }
+.ws-search-summary:empty { display: none; }
+.ws-search-summary.is-error { color: #ff9a9a; }
+.ws-search-results { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 8px; }
+.ws-search-results::-webkit-scrollbar { width: 5px; }
+.ws-search-results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+.ws-search-file, .ws-search-match {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 22px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ws-search-file { padding: 0 6px 0 4px; color: #c8c8dc; }
+.ws-search-match { padding: 0 6px 0 38px; color: #a8a8c0; }
+.ws-search-file:hover, .ws-search-match:hover { background: rgba(255,255,255,0.04); }
+.ws-search-match.selected { background: rgba(120,130,255,0.14); color: #d8d8f0; }
+.ws-search-file:focus-visible, .ws-search-match:focus-visible { outline: 1px solid rgba(128,136,255,0.7); outline-offset: -1px; }
+.ws-search-file-name { flex-shrink: 0; max-width: 65%; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.ws-search-file-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #6f6f84; font-size: 11px; }
+.ws-search-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgba(255,255,255,0.08);
+  color: #c0c0d8;
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+}
+.ws-search-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ws-search-line mark { padding: 0 1px; border-radius: 2px; background: rgba(234,165,73,0.38); color: #fbfbff; }
+.ws-search-line del { padding: 0 1px; border-radius: 2px; background: rgba(255,90,90,0.24); color: #f2c4c4; }
+.ws-search-line ins { padding: 0 1px; border-radius: 2px; background: rgba(80,200,120,0.24); color: #c8f2d4; text-decoration: none; }
+.ws-search-acts { display: none; gap: 1px; flex-shrink: 0; }
+.ws-search-file:hover .ws-search-acts, .ws-search-match:hover .ws-search-acts,
+.ws-search-file:focus-within .ws-search-acts, .ws-search-match:focus-within .ws-search-acts { display: inline-flex; }
+.ws-search-act.ws-ghost { width: 20px; height: 20px; padding: 0; justify-content: center; }
+.ws-search-more {
+  margin: 6px 0 0 38px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: #c0c0d8;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ws-search-more:hover { background: rgba(255,255,255,0.08); }
 
 .viewer-media-preview {
   flex: 1;
@@ -7000,8 +7320,8 @@ body { display: flex; flex-direction: column; }
 .ws-file-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 4px;
+  padding: 3px 8px;
   border-radius: 6px;
   font-size: 12px;
   color: #b0b0c4;

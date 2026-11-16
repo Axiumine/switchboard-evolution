@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
 import { fileLinkPress, markdownParser, pathCodeRule, taskItemRule } from '@/components/chat/ChatMarkdown';
@@ -11,6 +11,7 @@ import { DownloadBar } from '@/components/files/DownloadBar';
 import { HeaderButton } from '@/components/HeaderButton';
 import { downloadSupported, shareProjectFile, type KnownContent } from '@/files/download';
 import { joinPath, parentRelative } from '@/files/model';
+import { splitAtLine } from '@/files/search';
 import { act } from '@/projects/queries';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -19,20 +20,28 @@ type FileData = { ok: boolean; error?: string; previewType?: 'text' | 'html' | '
 
 const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
+const CODE_LINE_HEIGHT = 18;
+/** Lines of the file kept above the line a search result points at. */
+const SCROLL_CONTEXT = 3;
+
 /**
  * A project file: text and Markdown to read or edit, images to look at, and
  * any file to share. `inline` draws its own bar (beside the tree of the Files
  * tab on a wide screen); otherwise its buttons go in the screen's header.
  * Give it a `key` per file, so another file starts with no edit in progress.
+ * With `line` (a search result) a text file opens scrolled to that line, which
+ * is marked; a Markdown file then opens as raw text, where lines are lines.
  */
-export function FileView({ root, path, inline = false }: { root: string; path: string; inline?: boolean }) {
+export function FileView({ root, path, line, inline = false }: { root: string; path: string; line?: number; inline?: boolean }) {
   const online = useConnection((s) => s.status.state === 'online');
   const file = useQuery({
     queryKey: ['file', root, path],
     queryFn: () => request<FileData>('read-project-file', [root, path]),
     enabled: online && !!root && !!path,
   });
-  const [raw, setRaw] = useState(false);
+  const [raw, setRaw] = useState(!!line);
+  const scroller = useRef<ScrollViewInstance>(null);
+  const scrolled = useRef(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const name = (path || '').split('/').pop() || 'File';
@@ -67,7 +76,7 @@ export function FileView({ root, path, inline = false }: { root: string; path: s
   const canShare = !!data && downloadSupported();
   const share = () => {
     if (!known && !canDownload) {
-      Alert.alert('Share', 'Sharing this kind of file needs a newer Switchboard on the computer (Switchboard Fork 1.1 or later). Update it there, then try again.');
+      Alert.alert('Share', 'Sharing this kind of file needs a newer Switchboard Evolution on the computer. Update it there, then try again.');
       return;
     }
     shareProjectFile(root, path, name, known)
@@ -120,10 +129,28 @@ export function FileView({ root, path, inline = false }: { root: string; path: s
   } else if (data.previewType === 'image' && data.base64) {
     body = <ScrollView maximumZoomScale={4} minimumZoomScale={1} contentContainerStyle={styles.imageBox}><Image source={{ uri: `data:${data.mimeType};base64,${data.base64}` }} style={styles.image} resizeMode="contain" /></ScrollView>;
   } else if (isText) {
+    const marked = line && !(isMarkdown && !raw) ? splitAtLine(data.content || '', line) : null;
     body = (
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        ref={scroller}
+        contentContainerStyle={styles.content}
+        onContentSizeChange={() => {
+          // Once, when the text is laid out: the line a few lines down from the top. Lines do not wrap, so each is one line high.
+          if (!marked || scrolled.current) return;
+          scrolled.current = true;
+          scroller.current?.scrollTo({ y: Math.max(0, spacing.lg + (line! - 1 - SCROLL_CONTEXT) * CODE_LINE_HEIGHT), animated: false });
+        }}
+      >
         {isMarkdown && !raw ? <Markdown style={markdownStyles} rules={links.rules} onLinkPress={links.onLinkPress} markdownit={markdownParser}>{data.content || ''}</Markdown> : (
-          <ScrollView horizontal><Text style={styles.code} selectable>{data.content}</Text></ScrollView>
+          <ScrollView horizontal>
+            {marked ? (
+              <Text style={styles.code} selectable>
+                {marked.before}
+                <Text style={styles.markedLine}>{marked.target || ' '}</Text>
+                {marked.after}
+              </Text>
+            ) : <Text style={styles.code} selectable>{data.content}</Text>}
+          </ScrollView>
         )}
       </ScrollView>
     );
@@ -162,7 +189,8 @@ const styles = StyleSheet.create({
   headerButton: { color: colors.accent, fontSize: 16, fontWeight: '600' },
   headerButtonDim: { color: colors.textDim, fontSize: 16 },
   content: { padding: spacing.lg },
-  code: { color: colors.text, fontFamily: mono, fontSize: 12, lineHeight: 18 },
+  code: { color: colors.text, fontFamily: mono, fontSize: 12, lineHeight: CODE_LINE_HEIGHT },
+  markedLine: { backgroundColor: 'rgba(128,136,255,0.28)' },
   editor: { flex: 1, color: colors.text, fontFamily: mono, fontSize: 13, lineHeight: 19, padding: spacing.lg },
   imageBox: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', aspectRatio: 1 },

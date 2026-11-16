@@ -133,8 +133,8 @@ export async function pickAttachments(source: AttachmentSource, limit: number = 
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       throw new Error(permission.canAskAgain
-        ? 'Switchboard needs the camera to take a photo.'
-        : 'Camera access is off for Switchboard. Turn it on in Settings to take a photo.');
+        ? 'Switchboard Evolution needs the camera to take a photo.'
+        : 'Camera access is off for Switchboard Evolution. Turn it on in Settings to take a photo.');
     }
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
     if (result.canceled) return [];

@@ -41,6 +41,39 @@ const codexAuth = require('./codex-auth');
 // userData), so both can run side by side.
 if (process.env.SWITCHBOARD_DATA_DIR) {
   app.setPath('userData', path.resolve(process.env.SWITCHBOARD_DATA_DIR, 'electron'));
+} else {
+  migrateUserDataFrom(['OmniboardV']);
+}
+
+/**
+ * Switchboard Evolution was called OmniboardV: on its first start its own
+ * Application Support folder does not exist yet, so the old app's is copied
+ * there (the window's preferences, sizes and layout, the tools it unpacked).
+ * The data of the sessions and projects is in ~/.switchboard and is shared.
+ * Caches and the old app's single-instance lock are left behind.
+ */
+function migrateUserDataFrom(oldNames) {
+  if (!app.isPackaged || app.name !== 'Switchboard Evolution') return;
+  let target;
+  try { target = app.getPath('userData'); } catch { return; }
+  if (fs.existsSync(target)) return;
+  const skip = new Set(['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'Cache', 'Code Cache', 'GPUCache',
+    'DawnGraphiteCache', 'DawnWebGPUCache', 'Crashpad', 'ShaderCache', 'GrShaderCache']);
+  for (const name of oldNames) {
+    const source = path.join(app.getPath('appData'), name);
+    if (source === target || !fs.existsSync(source)) continue;
+    try {
+      fs.cpSync(source, target, {
+        recursive: true,
+        verbatimSymlinks: true,
+        filter: (from) => !skip.has(path.basename(from)),
+      });
+      log.info(`[startup] copied the settings of ${name} into ${target}`);
+    } catch (err) {
+      log.warn(`[startup] could not copy the settings of ${name}: ${err.message}`);
+    }
+    return;
+  }
 }
 
 log.transports.file.level = app.isPackaged ? 'info' : 'debug';
@@ -72,6 +105,7 @@ const { resolveEffectiveSettings } = require('./resolve-effective-settings');
 const { listProjectDirectory, readProjectFile, readPreviewFile, openFileExternally, resolveProjectEntry } = require('./project-files');
 const { manageProjectEntry, revealFile, shareFile, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
 const fileTimeline = require('./file-timeline');
+const projectSearch = require('./project-search');
 const { resolveTerminalFiles } = require('./terminal-file-links');
 const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('./preview-assets');
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
@@ -161,7 +195,7 @@ function createWindow() {
     }
   }
 
-  // A build with a name of its own (OmniboardV) shows that name as the window
+  // A build with a name of its own (Switchboard Evolution) shows that name as the window
   // title too; a dev run is called "switchboard" (package.json) and keeps
   // the usual title.
   const windowTitle = app.name && app.name !== 'switchboard' ? app.name : 'Switchboard';
@@ -567,7 +601,9 @@ ipcMain.handle('delete-track', guarded((id, options = {}) => {
 ipcMain.handle('get-projects-root', guarded(() => projects.projectsRoot()));
 ipcMain.handle('get-project-git-status', guarded((id, opts) => projects.folderGitStatus(id, opts || {})));
 ipcMain.handle('get-project-git-info', guarded((id) => projects.projectGitInfo(id)));
-ipcMain.handle('get-project-git-diff', guarded((id, folderPath, filePath) => projects.projectGitDiff(id, folderPath, filePath)));
+ipcMain.handle('get-project-git-diff', guarded((id, folderPath, filePath, side) => projects.projectGitDiff(id, folderPath, filePath, side)));
+ipcMain.handle('stage-project-git-files', guarded((id, folderPath, paths, stage) => projects.stageProjectGitFiles(id, String(folderPath || ''), paths ?? null, !!stage)));
+ipcMain.handle('stage-project-git-lines', guarded((id, folderPath, filePath, side, diffId, lines) => projects.stageProjectGitLines(id, String(folderPath || ''), filePath, side, String(diffId || ''), Array.isArray(lines) ? lines : [])));
 ipcMain.handle('get-folder-git-status', guarded((folderPath) => projects.folderGitInfo(String(folderPath || ''))));
 
 // --- IPC: Git Graph tab ---
@@ -819,6 +855,10 @@ ipcMain.handle('open-file-with-app', explorerAction(async (filePath, projectRoot
   });
   return { appPath: app, appName: path.basename(app, '.app') };
 }));
+
+// Search and replace across a folder's files, as VS Code's Search view does.
+ipcMain.handle('search-project-files', (_event, root, options) => projectSearch.search(String(root || ''), options || {}));
+ipcMain.handle('replace-in-project-files', (_event, root, options) => projectSearch.replace(String(root || ''), options || {}));
 
 ipcMain.handle('read-project-file', async (_event, projectPath, relativePath) => {
   try {
@@ -1895,6 +1935,8 @@ const remoteLocalMethods = {
   'paste-project-entry': (_client, sourcePath, sourceRelative, targetPath, targetRelative, mode) => phoneFiles.paste(sourcePath, sourceRelative, targetPath, targetRelative, mode),
   'get-file-timeline': (_client, projectPath, relativePath) => phoneFiles.timeline(projectPath, relativePath),
   'get-file-timeline-diff': (_client, projectPath, relativePath, hash, repoPath, oldPath) => phoneFiles.timelineDiff(projectPath, relativePath, hash, repoPath, oldPath),
+  'search-project-files': (client, root, options) => phoneFiles.search(root, options, client),
+  'replace-in-project-files': (_client, root, options) => phoneFiles.replace(root, options),
   'add-project-file-bytes': (_client, projectId, name, base64) => projects.addProjectFileBytes(projectId, name, Buffer.from(base64, 'base64')),
   'save-session-attachment': (_client, sessionId, name, base64) => phoneAttachments.save(sessionId, name, Buffer.from(base64, 'base64')),
   ...phoneTasks.methods,
@@ -1966,7 +2008,7 @@ function remoteAccessStatus(status = remoteServer.status()) {
   return { enabled, port, paired: remoteAuth.listDevices().length, running: status.running, error: status.error, clients: status.clients || [], tunnels: remoteTunnels.status() };
 }
 
-// A port held by another copy of the app (Switchboard, an older OmniboardV)
+// A port held by another copy of the app (Switchboard, an older Switchboard Evolution or OmniboardV)
 // frees up when that one quits. While access is switched on, keep trying,
 // so paired phones get back in without anyone touching the switch.
 const REMOTE_RETRY_MS = 5000;

@@ -92,7 +92,7 @@ export default function ScheduleScreen() {
           <Text style={styles.switchLabel}>On</Text>
           <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: colors.accent }} />
         </View>
-        <Text style={styles.hint}>Runs on the computer while Switchboard is open, with the options set for it there.</Text>
+        <Text style={styles.hint}>Runs on the computer while Switchboard Evolution is open, with the options set for it there.</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

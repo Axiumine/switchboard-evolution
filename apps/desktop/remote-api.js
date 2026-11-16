@@ -159,6 +159,17 @@ allow('paste-project-entry', [isPath, isRelative, isPath, isRelative, oneOf('cop
 // The Timeline of a file: the commits that changed it, and the file before and after one (hash null: uncommitted).
 allow('get-file-timeline', [isPath, isRelative], { local: true });
 allow('get-file-timeline-diff', [isPath, isRelative, v => v === null || isString(64)(v), optional(isString(4096)), optional(isString(4096))], { local: true });
+// Search and replace across a folder, as the Files tab's Search does.
+const isSearchQuery = {
+  query: isString(1000), isRegex: optional(isBool), matchCase: optional(isBool), wholeWord: optional(isBool),
+  include: optional(isString(2000)), exclude: optional(isString(2000)),
+};
+const isReplaceMatch = fields({ line: isInt(1, 100_000_000), column: isInt(0, 100_000_000), length: isInt(0, 100_000_000), text: isString(100_000) }, ['line', 'column', 'text']);
+allow('search-project-files', [isPath, fields({ ...isSearchQuery, maxResults: optional(isInt(1, 20000)) }, ['query'])], { local: true });
+allow('replace-in-project-files', [isPath, fields({
+  ...isSearchQuery, replace: isString(100_000),
+  files: arrayOf(fields({ path: isRelative, matches: optional(arrayOf(isReplaceMatch, 20000)) }, ['path']), 20000),
+}, ['query', 'replace', 'files'])], { local: true });
 // Bytes into the project's added-files folder.
 allow('add-project-file-bytes', [isId, isString(255), isBase64], { local: true });
 // A photo or file for a session, saved under the data folder (remote-attachments.js); the answer carries the path to paste.
@@ -181,7 +192,10 @@ allow('run-schedule', [isId], { local: true });
 allow('get-schedule-context', [fields({ projectId: optional(isId), trackId: optional(isId), cwd: optional(isPath), cli: optional(isString(40)) })]);
 allow('get-project-git-status', [isId, optional(isPlainObject)]);
 allow('get-project-git-info', [isId]);
-allow('get-project-git-diff', [isId, isPath, isString(4096)]);
+allow('get-project-git-diff', [isId, isPath, isString(4096), optional(oneOf('unstaged', 'staged'))]);
+// Staging, as the Git tab does it: whole files, or the picked lines of one side's diff.
+allow('stage-project-git-files', [isId, isPath, v => v === null || arrayOf(isString(4096), 5000)(v), isBool]);
+allow('stage-project-git-lines', [isId, isPath, isString(4096), oneOf('unstaged', 'staged'), isVersion, arrayOf(isInt(0, 10_000_000), 200_000)]);
 
 // Usage and app
 allow('get-usage');

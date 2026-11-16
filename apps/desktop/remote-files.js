@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const { manageProjectEntry, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
 const fileTimeline = require('./file-timeline');
+const projectSearch = require('./project-search');
 const { resolveProjectEntry, isViewableFile, previewType, readProjectFile, listProjectDirectory, MAX_PREVIEW_BYTES } = require('./project-files');
 
 // A phone gets the whole file in one message.
@@ -225,6 +226,10 @@ function createPhoneFiles({ roots, readRoots = () => [], shell }) {
     timeline: (projectPath, relativePath) => guard([projectPath], () => fileTimeline.getFileTimeline(projectPath, relativePath)),
     timelineDiff: (projectPath, relativePath, hash, repoPath, oldPath) => guard([projectPath],
       () => fileTimeline.getFileTimelineDiff(projectPath, relativePath, hash, repoPath, oldPath)),
+    // Search and replace across one of the folders; a phone's new search stops its previous one.
+    search: (projectPath, options, client) => (known(projectPath)
+      ? projectSearch.search(projectPath, options, { caller: `phone:${client?.device?.id || 'phone'}` }) : refused),
+    replace: (projectPath, options) => (known(projectPath) ? projectSearch.replace(projectPath, options) : refused),
   };
 
   async function guard(paths, fn) {

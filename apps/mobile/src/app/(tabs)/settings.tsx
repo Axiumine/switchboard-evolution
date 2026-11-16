@@ -31,7 +31,7 @@ export default function SettingsScreen() {
 
   const confirmForget = () => Alert.alert(
     `Forget ${desktop.name}?`,
-    'This phone deletes its key for that computer. To be sure it can never connect again, also remove it in Switchboard on the computer (right-click the Mobile app access switch, then Phones and port).',
+    'This phone deletes its key for that computer. To be sure it can never connect again, also remove it in Switchboard Evolution on the computer (right-click the Mobile app access switch, then Phones and port).',
     [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Forget', style: 'destructive', onPress: async () => { await forget(); router.replace('/pair'); } },
@@ -48,7 +48,7 @@ export default function SettingsScreen() {
         <Text style={styles.status} selectable>{describe(status)}</Text>
       </View>
       <RoutePicker internet={desktop.internet} value={desktop.route ?? 'lan'} onChange={setRoute} style={styles.card} />
-      {hello ? <Row label="Switchboard" value={`version ${hello.appVersion}`} /> : null}
+      {hello ? <Row label="Switchboard Evolution" value={`version ${hello.appVersion}`} /> : null}
       {hello ? <Row label="This phone on the computer" value={hello.device.name} /> : null}
       <Row label="Addresses" value={`${desktop.addresses.join(', ')} (port ${desktop.port})`} />
       <Row label="Paired" value={new Date(desktop.pairedAt).toLocaleString()} />

@@ -101,7 +101,7 @@ export function wakeProject(project: Project) {
 
 /** Forget the project; its folder and sessions stay. `after` runs once it is gone. */
 export function removeProject(project: Project, after?: () => void) {
-  Alert.alert(`Remove ${project.name} from Switchboard?`, `The folder ${project.root} and all sessions stay on disk.`, [
+  Alert.alert(`Remove ${project.name} from Switchboard Evolution?`, `The folder ${project.root} and all sessions stay on disk.`, [
     { text: 'Cancel', style: 'cancel' },
     {
       text: 'Remove', style: 'destructive',

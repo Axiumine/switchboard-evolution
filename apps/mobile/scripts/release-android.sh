@@ -21,6 +21,6 @@ release_args "$@"
 android_toolchain
 release_prepare
 
-out="dist/Switchboard-Mobile-$version.aab"
+out="dist/Switchboard-Evolution-$version.aab"
 eas_cli build --platform android --profile production --local --output "$out"
 release_submit android "$out"

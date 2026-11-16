@@ -22,6 +22,9 @@ const modules = {
   'plan-parser.js': 'apps/desktop/public/plan-parser.js',
   'snooze.js': 'apps/desktop/public/snooze.js',
   'git-graph-layout.js': 'apps/desktop/public/git-graph-layout.js',
+  'git-diff-model.js': 'apps/desktop/public/git-diff-model.js',
+  'text-search.js': 'apps/desktop/public/text-search.js',
+  'file-icons.js': 'apps/desktop/public/file-icons.js',
 };
 
 const header = (file) =>

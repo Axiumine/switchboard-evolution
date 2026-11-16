@@ -7,6 +7,8 @@ import { ActivityIndicator, Alert, FlatList, Platform, Pressable, RefreshControl
 import { create } from 'zustand';
 
 import { DownloadBar } from '@/components/files/DownloadBar';
+import { FileIcon } from '@/components/files/FileIcon';
+import { SearchPanel } from '@/components/files/SearchPanel';
 import { FileView } from '@/components/files/FileView';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
@@ -29,10 +31,6 @@ type Listing = { ok: boolean; entries?: FileEntry[]; error?: string };
 
 /** What Cut or Copy picked, for Paste: in this tab or another project's. */
 const useFilesClipboard = create<{ clip: { mode: 'copy' | 'cut'; root: string; rel: string; name: string } | null }>(() => ({ clip: null }));
-
-const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  image: 'image-outline', pdf: 'document-outline', text: 'document-text-outline', html: 'code-slash-outline',
-};
 
 const NONE: string[] = [];
 
@@ -74,7 +72,14 @@ export function FilesTab({ project }: { project: Project }) {
     timeline: useCapability('get-file-timeline'),
     manage: useCapability('manage-project-entry'),
     download: useCapability('read-project-file-chunk'),
+    search: useCapability('search-project-files'),
+    replace: useCapability('replace-in-project-files'),
   };
+  // Search mode replaces the tree in the list; its form is kept while the tab is on screen, so closing it and opening it again finds what was typed.
+  const [searching, setSearching] = useState(false);
+  const [searchOpened, setSearchOpened] = useState(false);
+  const [selectedLine, setSelectedLine] = useState<number | null>(null);
+  const searchOn = searching && can.search;
 
   const patchFiles = useCallback((partial: { root?: string; expanded?: Record<string, string[]>; selected?: Record<string, string | null> }) => {
     patchUi({ files: { ...ui, ...partial } });
@@ -110,8 +115,14 @@ export function FilesTab({ project }: { project: Project }) {
 
   const open = (entry: FileEntry) => {
     if (entry.type === 'directory') { toggle(entry.relativePath); return; }
-    if (wide) select(entry.relativePath);
+    if (wide) { setSelectedLine(null); select(entry.relativePath); }
     else router.push({ pathname: '/file', params: { root, path: entry.relativePath } });
+  };
+
+  /** A search result: the file open at the line of the match. */
+  const openAtLine = (path: string, line: number) => {
+    if (wide) { setSelectedLine(line); select(path); }
+    else router.push({ pathname: '/file', params: { root, path, line: String(line) } });
   };
 
   // --- Actions ---
@@ -252,10 +263,10 @@ export function FilesTab({ project }: { project: Project }) {
           ? { label: 'Download', hint: byteSize(entry.size), onPress: () => download(entry) }
           : {
             label: 'Download',
-            hint: 'update Switchboard on the computer first',
+            hint: 'update Switchboard Evolution on the computer first',
             onPress: () => Alert.alert(
-              'Update Switchboard on the computer',
-              'Downloading a file to this phone needs a newer Switchboard on the computer (Switchboard Fork 1.1 or later). Update it there, then try again.',
+              'Update Switchboard Evolution on the computer',
+              'Downloading a file to this phone needs a newer Switchboard Evolution on the computer. Update it there, then try again.',
             ),
           });
       }
@@ -291,6 +302,7 @@ export function FilesTab({ project }: { project: Project }) {
       <Text style={styles.toolbarTitle} numberOfLines={1}>{root === project.root ? 'Project folder' : root.split('/').pop()}</Text>
       {can.create ? <ToolButton icon="document-outline" label="New file" onPress={() => newEntry('', 'file')} /> : null}
       {can.create ? <ToolButton icon="folder-outline" label="New folder" onPress={() => newEntry('', 'folder')} /> : null}
+      {can.search ? <ToolButton icon="search-outline" label="Search in this folder" onPress={() => { setSearchOpened(true); setSearching(true); }} /> : null}
       {can.paste && clip ? <ToolButton icon="clipboard-outline" label={`Paste ${clip.name}`} onPress={() => paste(null)} /> : null}
       <ToolButton icon="remove-circle-outline" label="Collapse folders" onPress={() => setExpanded([])} />
       <ToolButton icon="ellipsis-horizontal" label="Folder actions" onPress={() => setMenu('root')} />
@@ -316,7 +328,7 @@ export function FilesTab({ project }: { project: Project }) {
             accessibilityLabel={`${entry.name}${isDir ? (isOpen ? ', open folder' : ', folder') : ''}`}
           >
             <View style={styles.chevron}>{isDir ? <Ionicons name={isOpen ? 'chevron-down' : 'chevron-forward'} size={13} color={colors.textFaint} /> : null}</View>
-            <Ionicons name={isDir ? (isOpen ? 'folder-open-outline' : 'folder-outline') : ICONS[entry.previewType || ''] || 'document-outline'} size={16} color={isDir ? colors.accent : dim ? colors.textFaint : colors.textDim} />
+            <View style={dim && styles.dimIcon}><FileIcon name={entry.name} dir={isDir} open={isOpen} size={18} /></View>
             <Text style={[styles.name, isDir && styles.folderName, dim && { color: colors.textFaint }]} numberOfLines={1}>{entry.name}</Text>
           </Pressable>
         );
@@ -331,11 +343,27 @@ export function FilesTab({ project }: { project: Project }) {
     <View style={styles.screen}>
       {rootTabs}
       <PaneLayout
-        list={<>{toolbar}{list}</>}
-        detail={selected ? <FileView key={`${root}:${selected}`} root={root} path={selected} inline /> : null}
+        list={(
+          <>
+            <View style={[styles.fill, searchOn && styles.hidden]}>{toolbar}{list}</View>
+            {searchOpened && can.search ? (
+              <View style={[styles.fill, !searchOn && styles.hidden]}>
+                <SearchPanel
+                  root={root}
+                  folderName={root === project.root ? 'the project folder' : root.split('/').pop() || root}
+                  canReplace={can.replace}
+                  onOpen={openAtLine}
+                  onClose={() => setSearching(false)}
+                />
+              </View>
+            ) : null}
+          </>
+        )}
+        detail={selected ? <FileView key={`${root}:${selected}:${selectedLine ?? ''}`} root={root} path={selected} line={selectedLine ?? undefined} inline /> : null}
         placeholder="Pick a file to read or edit it here."
         minWidth={TWO_PANE}
-        listWidth={(width) => (width >= 840 ? 290 : 250)}
+        // Search needs more room than the tree.
+        listWidth={(width) => (searchOn ? Math.min(Math.round(width * 0.5), 440) : width >= 840 ? 290 : 250)}
       />
       <DownloadBar />
 
@@ -368,6 +396,8 @@ function ToolButton({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyp
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  fill: { flex: 1 },
+  hidden: { display: 'none' },
   roots: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   rootsContent: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   rootTab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, paddingHorizontal: spacing.md, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, maxWidth: 220 },
@@ -381,6 +411,7 @@ const styles = StyleSheet.create({
   rowSelected: { backgroundColor: 'rgba(120,130,255,0.14)' },
   pressed: { backgroundColor: colors.surface },
   chevron: { width: 13, alignItems: 'center' },
+  dimIcon: { opacity: 0.5 },
   name: { color: colors.text, fontSize: 14.5, flex: 1 },
   folderName: { fontWeight: '500' },
   empty: { color: colors.textFaint, textAlign: 'center', marginTop: spacing.xl, paddingHorizontal: spacing.lg },

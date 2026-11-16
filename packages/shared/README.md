@@ -1,4 +1,4 @@
-# @omniboardv/shared
+# @switchboard-e/shared
 
 Modules both apps use, written once here:
 

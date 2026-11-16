@@ -147,7 +147,7 @@ export const KIND_LABELS: Record<WorktreeKind, string> = { main: 'Main', switchb
 
 export const KIND_HELP: Record<WorktreeKind, string> = {
   main: 'The repository\'s main checkout',
-  switchboard: 'A worktree of this Switchboard project',
+  switchboard: 'A worktree of this Switchboard Evolution project',
   claude: 'Made by claude --worktree, in .claude/worktrees',
   codex: 'Made by Codex, in its worktrees folder',
   classic: 'Next to the repository, in <repo>.worktrees',
