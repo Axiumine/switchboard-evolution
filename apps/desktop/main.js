@@ -34,6 +34,7 @@ const { fetchAndTransformUsage } = require('./claude-auth');
 const { runStatsCommand, refreshStatsCache } = require('./stats-refresh');
 const { readHead } = require('./jsonl-scan');
 const codexAuth = require('./codex-auth');
+const { copyOldUserData } = require('./user-data-migration');
 
 // SWITCHBOARD_DATA_DIR isolates a dev/test instance from the installed app:
 // db.js puts switchboard.db under it, and pointing userData there gives the
@@ -41,38 +42,13 @@ const codexAuth = require('./codex-auth');
 // userData), so both can run side by side.
 if (process.env.SWITCHBOARD_DATA_DIR) {
   app.setPath('userData', path.resolve(process.env.SWITCHBOARD_DATA_DIR, 'electron'));
-} else {
-  migrateUserDataFrom(['OmniboardV']);
-}
-
-/**
- * Switchboard Evolution was called OmniboardV: on its first start its own
- * Application Support folder does not exist yet, so the old app's is copied
- * there (the window's preferences, sizes and layout, the tools it unpacked).
- * The data of the sessions and projects is in ~/.switchboard and is shared.
- * Caches and the old app's single-instance lock are left behind.
- */
-function migrateUserDataFrom(oldNames) {
-  if (!app.isPackaged || app.name !== 'Switchboard Evolution') return;
-  let target;
-  try { target = app.getPath('userData'); } catch { return; }
-  if (fs.existsSync(target)) return;
-  const skip = new Set(['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'Cache', 'Code Cache', 'GPUCache',
-    'DawnGraphiteCache', 'DawnWebGPUCache', 'Crashpad', 'ShaderCache', 'GrShaderCache']);
-  for (const name of oldNames) {
-    const source = path.join(app.getPath('appData'), name);
-    if (source === target || !fs.existsSync(source)) continue;
-    try {
-      fs.cpSync(source, target, {
-        recursive: true,
-        verbatimSymlinks: true,
-        filter: (from) => !skip.has(path.basename(from)),
-      });
-      log.info(`[startup] copied the settings of ${name} into ${target}`);
-    } catch (err) {
-      log.warn(`[startup] could not copy the settings of ${name}: ${err.message}`);
-    }
-    return;
+} else if (app.isPackaged && app.name === 'Switchboard Evolution') {
+  // Switchboard Evolution was called OmniboardV: its first start takes the old
+  // app's settings (user-data-migration.js).
+  try {
+    copyOldUserData(app.getPath('userData'), [path.join(app.getPath('appData'), 'OmniboardV')], log);
+  } catch (err) {
+    log.warn(`[startup] could not copy the settings of OmniboardV: ${err.message}`);
   }
 }
 
