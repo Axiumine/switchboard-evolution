@@ -8620,4 +8620,5 @@ body.tm-window #stats-viewer { position: fixed; inset: 0; display: flex; }
   flex-shrink: 0;
 }
 .ctx-item:hover .ctx-side, .ctx-side:focus-visible { opacity: 1; }
+.ctx-side--always { opacity: 0.55; }
 .ctx-side:hover { background: rgba(128,136,255,0.18); color: #c4c8ff; }

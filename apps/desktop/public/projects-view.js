@@ -3082,11 +3082,12 @@ function buildMenu(items, depth = 0) {
       (item.hint ? `<span class="ctx-hint">${escapeHtml(item.hint)}</span>` : '') +
       (item.submenu ? `<span class="ctx-arrow">${PICONS.chevronRight(10)}</span>` : '');
     // A second action at the right of the row, shown while it is pointed at
-    // (the Task Manager's "open in a window of its own"): { icon, title, onClick }.
+    // (the Task Manager's "open in a window of its own"): { icon, title, onClick },
+    // and always in sight, dimmed, with `always`.
     if (item.side && !item.disabled) {
       const side = document.createElement('button');
       side.type = 'button';
-      side.className = 'ctx-side';
+      side.className = 'ctx-side' + (item.side.always ? ' ctx-side--always' : '');
       side.title = item.side.title || '';
       side.setAttribute('aria-label', item.side.title || '');
       side.innerHTML = item.side.icon || '';
@@ -3237,6 +3238,26 @@ function stopAllMenuItems(project) {
   }];
 }
 
+/**
+ * A row of the project menu that opens one of its tabs (Files, Git,
+ * Settings) on the project's page, with the button at its right that opens
+ * the tab in a window of its own instead, as beside the tab itself.
+ */
+function projectTabMenuItem(project, tab, icon) {
+  const label = PROJECT_WINDOW_TAB_LABELS[tab];
+  return {
+    label,
+    icon,
+    onClick: () => selectProject(project.id, { tab }),
+    side: {
+      icon: ICONS.popOut(12),
+      title: `Open ${label} in a window of its own`,
+      always: true,
+      onClick: () => window.api.openProjectWindow(project.id, tab),
+    },
+  };
+}
+
 function projectMenuItems(project, { fromPage = false } = {}) {
   const isDone = project.status === 'done';
   return [
@@ -3247,7 +3268,9 @@ function projectMenuItems(project, { fromPage = false } = {}) {
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameProjectFlow(project) },
     { label: 'Attach folder…', icon: PICONS.folder(14), onClick: () => attachFolderAsk(project) },
     { label: 'New scheduled task…', icon: PICONS.clock(14), onClick: () => showScheduleDialog({ projectId: project.id, trackId: null, project }) },
-    { label: 'Settings', icon: ICONS.gear(14), onClick: () => selectProject(project.id, { tab: 'settings' }) },
+    projectTabMenuItem(project, 'files', PICONS.file(14)),
+    projectTabMenuItem(project, 'git', PICONS.branch(14)),
+    projectTabMenuItem(project, 'settings', ICONS.gear(14)),
     { label: 'Open project folder', icon: PICONS.open(14), onClick: () => window.api.openPath(project.root) },
     { sep: true },
     ...snoozeMenuItems(project),
