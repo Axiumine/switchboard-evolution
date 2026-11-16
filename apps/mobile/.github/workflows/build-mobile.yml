@@ -1,0 +1,107 @@
+name: Build mobile
+
+# One entry point for a release: push a tag, get an Android APK and an iOS IPA
+# in a draft GitHub release. The build logic lives in build-android.yml and
+# build-ios.yml, which also run on their own from the Actions tab.
+#
+# Tag grammar: v<MAJOR>.<MINOR>.<PATCH>[-android|-ios][-notest]
+#
+#   v1.2.3            both platforms
+#   v1.2.3-android    Android only
+#   v1.2.3-ios        iOS only
+#   …-notest          same, without the test gate (always last)
+#
+# The numeric part becomes expo.version (scripts/ci-set-app-version.sh); the
+# integer build number is EAS's (appVersionSource remote + autoIncrement).
+# See docs/releasing.md.
+#
+# Android builds on EAS (an APK, the `preview` profile) and needs the
+# EXPO_TOKEN secret. iOS builds here, on a macOS runner, unsigned: a free Apple
+# ID cannot sign for distribution, so the IPA is installed with Sideloadly or
+# AltStore, which sign it with your own Apple ID.
+#
+# Two explicit jobs rather than a matrix: a reusable workflow's `uses:` path is
+# resolved before the matrix expands.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: What to build
+        type: choice
+        options: [both, android, ios]
+        default: both
+      test:
+        description: Run the tests first
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-mobile-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: test
+    # Tests run unless the tag ends in -notest or the dispatch unticked them.
+    if: ${{ !(inputs.test == false || (github.event_name == 'push' && contains(github.ref_name, '-notest'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  android:
+    needs: test
+    # A skipped test must not skip the build; a failed one must. A tag naming
+    # iOS skips Android, and the other way round below.
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name == 'push' && !contains(github.ref_name, '-ios') || github.event_name != 'push' && inputs.platform != 'ios') }}
+    uses: ./.github/workflows/build-android.yml
+    secrets: inherit
+
+  ios:
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name == 'push' && !contains(github.ref_name, '-android') || github.event_name != 'push' && inputs.platform != 'android') }}
+    uses: ./.github/workflows/build-ios.yml
+
+  release:
+    name: draft release
+    needs: [android, ios]
+    # On a tag, once every build that ran has finished well. The release stays
+    # a draft: publishing it is a decision made on GitHub.
+    if: ${{ always() && github.event_name == 'push' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#v}"; version="${version%%-*}"
+          cat > notes.md <<NOTES
+          Switchboard Mobile ${version}.
+
+          - **Android**: install the APK (allow installs from this source when asked).
+          - **iPhone**: the IPA is not signed. Install it with Sideloadly or AltStore, which sign it with your Apple ID; with a free Apple ID it runs for 7 days, then install it again.
+          NOTES
+          gh release create "$TAG" --repo "$REPO" --draft --title "Switchboard Mobile $version" --notes-file notes.md dist/*

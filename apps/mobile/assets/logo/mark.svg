@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Switchboard Mobile: a chat bubble (the phone talking to its sessions) holding the
+       terminal prompt of the desktop's icon, with the orange dot of a session that needs you.
+       Drawn inside the central circle Android keeps for adaptive icons. -->
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <linearGradient id="bubble" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9aa0ff"/>
+      <stop offset="1" stop-color="#7078f5"/>
+    </linearGradient>
+  </defs>
+  <g id="glows" opacity="0.55" filter="url(#glow)">
+    <path d="M375 322 H649 A88 88 0 0 1 737 410 V584 A88 88 0 0 1 649 672 H452 L352 748 L366 672 A88 88 0 0 1 287 584 V410 A88 88 0 0 1 375 322 Z" fill="none" stroke="#8088ff" stroke-width="34" stroke-linejoin="round"/>
+    <path d="M384 432 L456 497 L384 562" fill="none" stroke="#5fe3f0" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M498 562 H604" fill="none" stroke="#5fe3f0" stroke-width="40" stroke-linecap="round"/>
+    <circle cx="726" cy="334" r="50" fill="#ff8a4c"/>
+  </g>
+  <path d="M375 322 H649 A88 88 0 0 1 737 410 V584 A88 88 0 0 1 649 672 H452 L352 748 L366 672 A88 88 0 0 1 287 584 V410 A88 88 0 0 1 375 322 Z" fill="#171724" fill-opacity="0.85" stroke="url(#bubble)" stroke-width="34" stroke-linejoin="round"/>
+  <path d="M384 432 L456 497 L384 562" fill="none" stroke="#6ee9f5" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M498 562 H604" fill="none" stroke="#6ee9f5" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="726" cy="334" r="62" fill="#161624"/>
+  <circle cx="726" cy="334" r="46" fill="#ff8a4c"/>
+  <circle cx="712" cy="320" r="14" fill="#ffc29e" opacity="0.7"/>
+</svg>

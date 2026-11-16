@@ -1,0 +1,52 @@
+diff --git a/node_modules/expo-router/build/react-navigation/stack/views/Header/Header.js b/node_modules/expo-router/build/react-navigation/stack/views/Header/Header.js
+index 310c71c..5aebe59 100644
+--- a/node_modules/expo-router/build/react-navigation/stack/views/Header/Header.js
++++ b/node_modules/expo-router/build/react-navigation/stack/views/Header/Header.js
+@@ -97,7 +97,10 @@ const Header = /*#__PURE__*/ _react().memo(function Header({ back, layout, progr
+     }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     const goBack = _react().useCallback((0, _throttle.throttle)(()=>{
+-        if (navigation.isFocused() && navigation.canGoBack()) {
++        // Switchboard Mobile: back from a screen with another one over it too. On a
++        // Surface Duo that is the left screen, whose back takes both screens away
++        // (AppStack); on one screen the next one covers its header.
++        if (navigation.canGoBack()) {
+             navigation.dispatchSync({
+                 ..._native.StackActions.pop(),
+                 source: route.key
+diff --git a/node_modules/expo-router/build/react-navigation/stack/views/Header/HeaderContainer.js b/node_modules/expo-router/build/react-navigation/stack/views/Header/HeaderContainer.js
+index 328213f..b29dcb8 100644
+--- a/node_modules/expo-router/build/react-navigation/stack/views/Header/HeaderContainer.js
++++ b/node_modules/expo-router/build/react-navigation/stack/views/Header/HeaderContainer.js
+@@ -103,7 +103,11 @@ function HeaderContainer({ mode, scenes, layout, getPreviousScene, getFocusedRou
+                     "aria-hidden": !isFocused,
+                     style: [
+                         {
+-                            pointerEvents: isFocused ? 'box-none' : 'none'
++                            // Switchboard Mobile: a screen's own header stays touchable with
++                            // another screen over it, like the screen (see CardContainer). On
++                            // a Surface Duo that screen is the left one; on one screen the
++                            // next one covers it.
++                            pointerEvents: isFocused || mode === 'screen' ? 'box-none' : 'none'
+                         },
+                         // Otherwise accessibility tools don't seem to be able to find it
+                         mode === 'float' && !isFocused || headerTransparent ? styles.header : null
+diff --git a/node_modules/expo-router/build/react-navigation/stack/views/Stack/CardContainer.js b/node_modules/expo-router/build/react-navigation/stack/views/Stack/CardContainer.js
+index fa47a5f..508bbed 100644
+--- a/node_modules/expo-router/build/react-navigation/stack/views/Stack/CardContainer.js
++++ b/node_modules/expo-router/build/react-navigation/stack/views/Stack/CardContainer.js
+@@ -146,8 +146,12 @@ function CardContainerInner({ interpolationIndex, index, active, opening, closin
+     };
+     const { colors } = (0, _native.useTheme)();
+     _react().useEffect(()=>{
+-        const listener = scene.progress.next?.addListener?.(({ value })=>{
+-            wrapperRef.current?.setInert(value > EPSILON);
++        // Switchboard Mobile: a screen with another one over it stays touchable.
++        // On a Surface Duo the stack shows the two side by side (AppStack), and
++        // the one on the left must take touches; on one screen it is hidden
++        // under the next one anyway.
++        const listener = scene.progress.next?.addListener?.(()=>{
++            wrapperRef.current?.setInert(false);
+         });
+         return ()=>{
+             if (listener) {

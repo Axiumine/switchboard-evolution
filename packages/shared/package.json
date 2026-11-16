@@ -1,0 +1,7 @@
+{
+  "name": "@omniboardv/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Modules shared by the OmniboardV desktop and mobile apps",
+  "license": "MIT"
+}

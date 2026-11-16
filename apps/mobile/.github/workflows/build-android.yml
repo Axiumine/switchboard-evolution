@@ -1,0 +1,112 @@
+name: Build Android
+
+# An Android APK, built on EAS (the `preview` profile in eas.json: internal
+# distribution, an APK rather than a Play Store bundle). Reusable:
+# build-mobile.yml calls it for a tag; it also runs on its own from the Actions
+# tab.
+#
+# This one waits for the build (`--wait`, not just queueing it) and
+# downloads the APK, so it lands in the GitHub release next to the iOS IPA.
+# Actions minutes are free on a public repository.
+#
+# On a tag, the tag stamps expo.version (scripts/ci-set-app-version.sh); the
+# versionCode is EAS's, incremented on every build, so each APK installs over
+# the previous one.
+#
+# One-time setup, on your computer (see docs/releasing.md):
+#   1. npx eas-cli@latest login
+#   2. npx eas-cli@latest init        links an EAS project: commit the
+#                                     projectId and owner it writes to app.json
+#   3. npx eas-cli@latest build -p android --profile preview
+#                                     answers the prompts once (EAS makes and
+#                                     keeps the signing key), so CI can build
+#                                     with --non-interactive
+#   4. GitHub › Settings › Secrets › Actions: EXPO_TOKEN, an access token from
+#      expo.dev/settings/access-tokens
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: preview
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: eas.json build profile
+        type: choice
+        options: [preview, production]
+        default: preview
+
+permissions:
+  contents: read
+
+concurrency:
+  # The build runs on EAS: cancelling this job would not stop it, only orphan it.
+  group: build-android-${{ github.ref }}-${{ inputs.profile }}
+  cancel-in-progress: false
+
+jobs:
+  eas:
+    name: eas · ${{ inputs.profile }}
+    runs-on: ubuntu-latest
+    # Queue plus build on EAS's free tier can take a while.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check the one-time setup
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::The EXPO_TOKEN secret is missing. See the one-time setup in docs/releasing.md."
+            exit 1
+          fi
+          if ! node -e 'process.exit(require("./app.json").expo?.extra?.eas?.projectId ? 0 : 1)'; then
+            echo "::error::app.json has no EAS project yet: run 'npx eas-cli@latest init' once and commit app.json. See docs/releasing.md."
+            exit 1
+          fi
+
+      - name: Set up EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      # Before the build: eas build packs this checkout as it is.
+      - name: Pin app version to the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: bash scripts/ci-set-app-version.sh "$TAG"
+
+      # Inputs go through env, never interpolated into the shell.
+      - name: EAS Build
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: eas build --platform android --profile "$PROFILE" --non-interactive --wait --json > build.json
+
+      - name: Download the APK
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          url=$(node -e 'const b = require("./build.json"); const build = Array.isArray(b) ? b[0] : b; console.log(build.artifacts.buildUrl || build.artifacts.applicationArchiveUrl)')
+          version=$(node -p 'require("./app.json").expo.version')
+          mkdir -p out
+          curl -fsSL "$url" -o "out/Switchboard-Mobile-${version}.apk"
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: out/*.apk
+          if-no-files-found: error

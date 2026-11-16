@@ -1,0 +1,105 @@
+import { expect, test } from '@jest/globals';
+
+import { noticesFrom, type LiveState } from '@/sessions/model';
+import { groupProjects, launchTarget, phaseItemPrompt, phasePrompt, projectRowStats, projectSessions, rollupState, scheduleFields, scheduleSummary, todoPrompt, type Project, type ProjectPlan, type Schedule } from '../model';
+
+const now = Date.parse('2026-11-01T15:00:00Z');
+const project = (id: string, extra: Partial<Project> = {}): Project => ({
+  id, name: id, root: `/Users/alex/Switchboard/${id}`, status: 'active', snoozedUntil: null, defaultCwd: null,
+  folders: [], tracks: [], schedules: [], sessions: [], ...extra,
+});
+
+test('projects split into active, snoozed and done; a snoozed one needing you is active again', () => {
+  const projects = [
+    project('web'),
+    project('later', { snoozedUntil: '2026-11-02T08:00:00Z' }),
+    project('woke', { snoozedUntil: '2026-11-01T14:00:00Z' }),
+    project('asks', { snoozedUntil: '2026-11-02T08:00:00Z', sessions: [{ sessionId: 's-asks', projectPath: '/p' }] }),
+    project('old', { status: 'done' }),
+  ];
+  const attention = noticesFrom({ attention: ['s-asks'] });
+  const groups = groupProjects(projects, { now, live: {}, notices: attention });
+  expect(groups.active.map((p) => p.id)).toEqual(['web', 'woke', 'asks']);
+  expect(groups.snoozed.map((p) => p.id)).toEqual(['later']);
+  expect(groups.done.map((p) => p.id)).toEqual(['old']);
+});
+
+test('a project reads as its most urgent session', () => {
+  const p = project('web', {
+    sessions: [{ sessionId: 'a', projectPath: '/p' }],
+    tracks: [{ id: 't1', name: 'API', status: 'active', cwd: null, cli: null, sessions: [{ sessionId: 'b', projectPath: '/p' }, { sessionId: 'c', projectPath: '/p' }] }],
+  });
+  expect(projectSessions(p).map((s) => s.sessionId)).toEqual(['a', 'b', 'c']);
+  const idle: LiveState = { busy: false, attention: false, exited: false, starting: false };
+  const notices = noticesFrom({ ready: ['a'] });
+  expect(rollupState(projectSessions(p), {}, notices)).toBe('unread');
+  expect(rollupState(projectSessions(p), { b: { ...idle, busy: true } }, notices)).toBe('busy');
+  expect(rollupState(projectSessions(p), { b: { ...idle, busy: true }, c: { ...idle, attention: true } }, notices)).toBe('attention');
+  expect(rollupState([], {}, notices)).toBe('idle');
+});
+
+test('a session starts in the track\'s folder, then the project\'s default, then its own folder', () => {
+  const track = { id: 't1', name: 'API', status: 'active' as const, cwd: '/code/api', cli: null, sessions: [] };
+  expect(launchTarget(project('web'), null)).toEqual({ projectPath: '/Users/alex/Switchboard/web', projectId: 'web', trackId: null });
+  expect(launchTarget(project('web', { defaultCwd: '/code/web' }), null).projectPath).toBe('/code/web');
+  expect(launchTarget(project('web', { defaultCwd: '/code/web' }), track)).toEqual({ projectPath: '/code/api', projectId: 'web', trackId: 't1' });
+});
+
+test('prompts for a phase, an item of a phase and a todo are the desktop\'s', () => {
+  const plan = { trackerPath: '/r/plan-tracker.md', planPath: '/r/plan.md', todosPath: '/r/todos.md', hasPlan: true } as ProjectPlan;
+  const phase = { title: 'Phase 2: API', line: 4, headingDone: false, ticked: 1, done: false, items: [{ line: 5, text: 'Routes', done: true }, { line: 6, text: 'Auth', done: false }] };
+  expect(phasePrompt(plan, phase)).toBe([
+    'Work on this phase of the plan. The tracker is /r/plan-tracker.md and the plan itself is /r/plan.md.',
+    '', 'Phase: Phase 2: API', '', 'Open items:', '- Auth', '',
+    'When an item is finished, tick it in the tracker. Tick the phase heading once the whole phase is done.',
+  ].join('\n'));
+  expect(phasePrompt({ ...plan, hasPlan: false }, { ...phase, items: [] })).toBe(
+    'Work on this phase of the plan. The tracker is /r/plan-tracker.md.\n\nPhase: Phase 2: API\n\nWhen an item is finished, tick it in the tracker. Tick the phase heading once the whole phase is done.');
+  expect(phaseItemPrompt(plan, phase, phase.items[1])).toBe(
+    'Work on this item from phase "Phase 2: API" of the plan. The tracker is /r/plan-tracker.md.\n\nAuth\n\nWhen it is done, tick it in the tracker.');
+  expect(todoPrompt(plan, { line: 2, text: 'Write docs', done: false })).toBe(
+    'Work on this todo from /r/todos.md:\n\nWrite docs\n\nWhen it is done, tick it in todos.md.');
+});
+
+test('a schedule reads as when it runs', () => {
+  const s = (extra: Partial<Schedule>): Schedule => ({ id: 'x', name: 'x', prompt: '', every: 'day', atHour: 9, atMinute: 0, weekday: null, cron: null, enabled: true, cli: null, trackId: null, projectId: null, cwd: null, lastRunAt: null, ...extra });
+  expect(scheduleSummary(s({ every: '15m' }))).toBe('Every 15 minutes');
+  expect(scheduleSummary(s({ every: 'hour', atMinute: 5 }))).toBe('Every hour at :05');
+  expect(scheduleSummary(s({ every: 'day', atHour: 9, atMinute: 30 }))).toBe('Every day at 09:30');
+  expect(scheduleSummary(s({ every: 'weekdays', atHour: 18, atMinute: 0 }))).toBe('Weekdays at 18:00');
+  expect(scheduleSummary(s({ every: 'week', weekday: 1, atHour: 9, atMinute: 0 }))).toBe('Mondays at 09:00');
+  expect(scheduleSummary(s({ every: 'cron', cron: '0 3 * * *' }))).toBe('Cron 0 3 * * *');
+  expect(scheduleSummary(s({ enabled: false }))).toBe('Every day at 09:00 (paused)');
+});
+
+test('saving a schedule sends its timing only when it was changed, so a cron one keeps its cron', () => {
+  const cron = { id: 's', name: 'Imported', prompt: 'p', every: 'cron', atHour: null, atMinute: null, weekday: null, cron: '0 */2 * * 1-5', enabled: true, cli: null, trackId: null, projectId: 'p1', cwd: null, lastRunAt: null } as Schedule;
+  const form = { name: 'Renamed', prompt: 'p', every: 'day' as const, time: '9:00', minute: '0', weekday: 1, trackId: null, cli: null, enabled: true };
+  expect(scheduleFields(cron, { ...form, timingChanged: false })).toEqual({ fields: { name: 'Renamed', prompt: 'p', trackId: null, cli: null, enabled: true } });
+  expect(scheduleFields(cron, { ...form, timingChanged: true })).toEqual({ fields: { name: 'Renamed', prompt: 'p', trackId: null, cli: null, enabled: true, every: 'day', atHour: 9, atMinute: 0 } });
+  expect(scheduleFields(undefined, { ...form, every: 'week', time: '18:30', weekday: 5, timingChanged: false }).fields).toMatchObject({ every: 'week', atHour: 18, atMinute: 30, weekday: 5 });
+  expect(scheduleFields(undefined, { ...form, every: 'hour', minute: '15', timingChanged: false }).fields).toMatchObject({ every: 'hour', atMinute: 15 });
+  expect(scheduleFields(undefined, { ...form, every: '15m', timingChanged: false }).fields).toMatchObject({ every: '15m' });
+  expect(scheduleFields(undefined, { ...form, time: '25:00', timingChanged: false })).toEqual({ error: 'Write the time as 9:30' });
+  expect(scheduleFields(undefined, { ...form, every: 'hour', minute: '61', timingChanged: false })).toEqual({ error: 'The minute goes from 0 to 59' });
+  expect(scheduleFields(undefined, { ...form, name: ' ', timingChanged: false })).toEqual({ error: 'A schedule needs a name and a prompt' });
+});
+
+test("a project row counts plan phases done, open todos, open tracks and sessions, as numbers", () => {
+  const phase = (done: boolean) => ({ title: 'Phase', line: 0, headingDone: null, items: [], ticked: 0, done });
+  const item = (done: boolean) => ({ line: 0, text: 'x', done });
+  const p = project('web', {
+    sessions: [{ sessionId: 'a', projectPath: '/p' }, { sessionId: 'z', projectPath: '/p', archived: 1 }],
+    tracks: [
+      { id: 't1', name: 'API', status: 'active', cwd: null, cli: null, sessions: [{ sessionId: 'b', projectPath: '/p' }] },
+      { id: 't2', name: 'Old', status: 'done', cwd: null, cli: null, sessions: [] },
+    ],
+  });
+  const plan = { plan: { phases: [phase(true), phase(false), phase(false)], done: 1, total: 3, next: null }, todos: [item(false), item(true), item(false)] };
+  const values = (rows: ReturnType<typeof projectRowStats>) => rows.map((row) => `${row.label} ${row.value}`);
+  expect(values(projectRowStats(p, plan))).toEqual(['Plan 1/3', 'Todos 2/3', 'Tracks 1', 'Sessions 2']);
+  expect(values(projectRowStats(project('empty'), { plan: { phases: [], done: 0, total: 0, next: null }, todos: [] })))
+    .toEqual(['Plan —', 'Todos —', 'Tracks —', 'Sessions —']);
+  expect(values(projectRowStats(project('empty'), undefined)).slice(0, 2)).toEqual(['Plan …', 'Todos …']);
+  expect(values(projectRowStats(project('empty'), null)).slice(0, 2)).toEqual(['Plan —', 'Todos —']);
+});

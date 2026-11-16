@@ -1,0 +1,13 @@
+{
+  "name": "omniboardv-monorepo",
+  "private": true,
+  "description": "OmniboardV: desktop and mobile apps for running coding-agent sessions across projects",
+  "license": "MIT",
+  "scripts": {
+    "sync-shared": "node scripts/sync-shared.mjs",
+    "check-shared": "node scripts/sync-shared.mjs --check",
+    "test": "npm run check-shared && npm --prefix apps/desktop test && npm --prefix apps/mobile test",
+    "typecheck": "npm --prefix apps/mobile run typecheck",
+    "lint": "npm --prefix apps/mobile run lint"
+  }
+}

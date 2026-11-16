@@ -1,0 +1,294 @@
+// --- Plans & Memory viewers ---
+// Depends on globals: cachedPlans, plansContent, planPanel, planViewer,
+// memoryContent, memoryPanel, memoryViewer, placeholder, terminalArea,
+// statsViewer, settingsViewer, processViewer, jsonlViewer (app.js)
+// Depends on: formatDate (utils.js)
+
+let currentPlanContent = "";
+let currentPlanFilePath = "";
+let currentPlanFilename = "";
+let cachedMemoryData = { global: { files: [] }, projects: [] };
+let currentMemoryFilePath = null;
+let currentMemoryContent = "";
+const memoryCollapsedState = new Map();
+
+// --- Plans ---
+async function loadPlans() {
+  cachedPlans = await window.api.getPlans();
+  renderPlans();
+}
+
+function renderPlans(plans) {
+  plans = plans || cachedPlans;
+  plansContent.innerHTML = '';
+  if (plans.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'plans-empty';
+    empty.textContent = 'No plans found in ~/.claude/plans/';
+    plansContent.appendChild(empty);
+    return;
+  }
+  for (const plan of plans) {
+    plansContent.appendChild(buildPlanItem(plan));
+  }
+}
+
+function buildPlanItem(plan) {
+  const item = document.createElement('div');
+  item.className = 'session-item plan-item';
+
+  const row = document.createElement('div');
+  row.className = 'session-row';
+
+  const info = document.createElement('div');
+  info.className = 'session-info';
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'session-summary';
+  titleEl.textContent = plan.title;
+
+  const filenameEl = document.createElement('div');
+  filenameEl.className = 'session-id';
+  filenameEl.textContent = plan.filename;
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'session-meta';
+  metaEl.textContent = formatDate(new Date(plan.modified));
+
+  info.appendChild(titleEl);
+  info.appendChild(filenameEl);
+  info.appendChild(metaEl);
+  row.appendChild(info);
+
+  // A plan-mode plan can become a project's plan.md. The tracker is left for
+  // a session to derive; the project page says so.
+  const projects = (typeof cachedProjectTreeAll !== 'undefined' ? cachedProjectTreeAll?.projects : []) || [];
+  const active = projects.filter(p => p.status === 'active');
+  if (active.length && typeof showContextMenu === 'function') {
+    const actions = document.createElement('div');
+    actions.className = 'session-actions';
+    const adoptBtn = document.createElement('button');
+    adoptBtn.className = 'session-move-btn';
+    adoptBtn.title = 'Adopt into a project as plan.md';
+    adoptBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M9 13h6"/><path d="m12 10 3 3-3 3"/></svg>';
+    adoptBtn.onclick = (e) => {
+      e.stopPropagation();
+      showContextMenu([{ head: 'Adopt into project' }, ...active.map(p => ({
+        label: p.name, onClick: () => adoptPlanInto(p, plan),
+      }))], { anchor: adoptBtn });
+    };
+    actions.appendChild(adoptBtn);
+    row.appendChild(actions);
+  }
+  item.appendChild(row);
+
+  item.addEventListener('click', () => openPlan(plan));
+  return item;
+}
+
+async function adoptPlanInto(project, plan) {
+  let result = await window.api.adoptPlan(project.id, plan.filename);
+  if (result?.exists && confirm(`${project.name} already has a plan.md with content.\n\nReplace it with "${plan.title}"?`)) {
+    result = await window.api.adoptPlan(project.id, plan.filename, { replace: true });
+  }
+  if (result?.error) { if (!result.exists) alert(result.error); return; }
+  if (confirm(`Adopted into ${project.name} as plan.md.\n\nOpen the project?`)) {
+    const tab = document.querySelector('.sidebar-tab[data-tab="projects"]');
+    if (tab && activeTab !== 'projects') tab.click();
+    if (typeof selectProject === 'function') selectProject(project.id, { tab: 'plan' });
+  }
+}
+
+async function openPlan(plan) {
+  // Mark active in sidebar
+  plansContent.querySelectorAll('.plan-item.active').forEach(el => el.classList.remove('active'));
+  const items = plansContent.querySelectorAll('.plan-item');
+  items.forEach(el => {
+    if (el.querySelector('.session-id')?.textContent === plan.filename) {
+      el.classList.add('active');
+    }
+  });
+
+  const result = await window.api.readPlan(plan.filename);
+  currentPlanContent = result.content;
+  currentPlanFilePath = result.filePath;
+  currentPlanFilename = plan.filename;
+
+  // Hide terminal area and placeholder, show plan viewer
+  if (typeof hideProjectChrome === 'function') hideProjectChrome();
+  placeholder.style.display = 'none';
+  terminalArea.style.display = 'none';
+  statsViewer.style.display = 'none';
+  memoryViewer.style.display = 'none';
+  settingsViewer.style.display = 'none';
+  processViewer.style.display = 'none';
+  planViewer.style.display = 'flex';
+
+  planPanel.open(plan.title, currentPlanFilePath, currentPlanContent);
+}
+
+/** Hide the full-page viewers and bring the terminal area back, leaving any project chrome alone. */
+function hideViewerPanels() {
+  if (typeof jsonlSearch !== 'undefined') jsonlSearch?.close(false);
+  planViewer.style.display = 'none';
+  statsViewer.style.display = 'none';
+  memoryViewer.style.display = 'none';
+  settingsViewer.style.display = 'none';
+  processViewer.style.display = 'none';
+  jsonlViewer.style.display = 'none';
+  terminalArea.style.display = '';
+}
+
+function hideAllViewers() {
+  hideViewerPanels();
+  if (typeof hideProjectChrome === 'function') hideProjectChrome();
+}
+
+function hidePlanViewer() {
+  hideAllViewers();
+}
+
+// --- Memory ---
+
+async function loadMemories() {
+  cachedMemoryData = await window.api.getMemories();
+  renderMemories();
+}
+
+function renderMemories(filterIds) {
+  memoryContent.innerHTML = '';
+  const data = cachedMemoryData;
+  const allFiles = [...data.global.files, ...data.projects.flatMap(p => p.files)];
+  if (allFiles.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'plans-empty';
+    empty.textContent = 'No memory files found.';
+    memoryContent.appendChild(empty);
+    return;
+  }
+
+  // Global group
+  if (data.global.files.length > 0) {
+    const globalFiles = filterIds ? data.global.files.filter(f => filterIds.has(f.filePath)) : data.global.files;
+    if (globalFiles.length > 0) {
+      memoryContent.appendChild(buildMemoryGroup('__global__', 'Global', globalFiles));
+    }
+  }
+
+  // Per-project groups
+  for (const proj of data.projects) {
+    const projFiles = filterIds ? proj.files.filter(f => filterIds.has(f.filePath)) : proj.files;
+    if (projFiles.length === 0) continue;
+    memoryContent.appendChild(buildMemoryGroup(proj.folder, proj.shortName, projFiles));
+  }
+}
+
+function buildMemoryGroup(key, label, files) {
+  const group = document.createElement('div');
+  group.className = 'project-group';
+  const isCollapsed = memoryCollapsedState.get(key) === true; // default expanded
+  if (isCollapsed) group.classList.add('collapsed');
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'project-header';
+
+  const arrow = document.createElement('span');
+  arrow.className = 'arrow';
+  arrow.innerHTML = '&#9660;';
+  header.appendChild(arrow);
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'project-name';
+  nameSpan.textContent = label;
+  header.appendChild(nameSpan);
+
+  const countBadge = document.createElement('span');
+  countBadge.className = 'memory-file-count';
+  countBadge.textContent = files.length;
+  header.appendChild(countBadge);
+
+  header.addEventListener('click', () => {
+    const nowCollapsed = !group.classList.contains('collapsed');
+    group.classList.toggle('collapsed');
+    memoryCollapsedState.set(key, nowCollapsed);
+  });
+
+  group.appendChild(header);
+
+  // Files list
+  const filesList = document.createElement('div');
+  filesList.className = 'project-sessions';
+  for (const file of files) {
+    filesList.appendChild(buildMemoryItem(file));
+  }
+  group.appendChild(filesList);
+
+  return group;
+}
+
+function buildMemoryItem(file) {
+  const item = document.createElement('div');
+  item.className = 'session-item memory-item';
+  item.dataset.filepath = file.filePath;
+
+  const row = document.createElement('div');
+  row.className = 'session-row';
+
+  // Icon: schedule clock for schedule-*.md files, brain for everything else
+  const isSchedule = file.filename.startsWith('schedule-');
+  const icon = document.createElement('span');
+  icon.className = isSchedule ? 'memory-schedule-icon' : 'memory-brain-icon';
+  icon.innerHTML = isSchedule
+    ? ICONS.schedule(15)
+    : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>';
+  row.appendChild(icon);
+
+  const info = document.createElement('div');
+  info.className = 'session-info';
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'session-summary';
+  titleEl.textContent = file.filename;
+
+  const pathEl = document.createElement('div');
+  pathEl.className = 'session-id';
+  pathEl.textContent = file.displayPath;
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'session-meta';
+  metaEl.textContent = formatDate(new Date(file.modified));
+
+  info.appendChild(titleEl);
+  info.appendChild(pathEl);
+  info.appendChild(metaEl);
+  row.appendChild(info);
+
+  item.appendChild(row);
+
+  item.addEventListener('click', () => openMemory(file));
+  return item;
+}
+
+async function openMemory(file) {
+  // Mark active in sidebar
+  memoryContent.querySelectorAll('.memory-item.active').forEach(el => el.classList.remove('active'));
+  const target = memoryContent.querySelector(`.memory-item[data-filepath="${CSS.escape(file.filePath)}"]`);
+  if (target) target.classList.add('active');
+
+  const content = await window.api.readMemory(file.filePath);
+  currentMemoryFilePath = file.filePath;
+  currentMemoryContent = content;
+
+  // Show memory viewer in main area
+  if (typeof hideProjectChrome === 'function') hideProjectChrome();
+  placeholder.style.display = 'none';
+  terminalArea.style.display = 'none';
+  planViewer.style.display = 'none';
+  statsViewer.style.display = 'none';
+  settingsViewer.style.display = 'none';
+  processViewer.style.display = 'none';
+  memoryViewer.style.display = 'flex';
+
+  memoryPanel.open(file.filename, file.filePath, content);
+}

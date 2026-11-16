@@ -1,0 +1,568 @@
+/**
+ * viewer-panel.js — Unified viewer component for CodeMirror-based panels.
+ *
+ * A single component used by plan viewer, memory viewer, and file panel.
+ * Manages toolbar, editor, preview area, and all interactions.
+ * Watches files for external changes and reloads automatically.
+ *
+ * Toolbar buttons are shown/hidden automatically based on file type:
+ *   - Preview: shown for markdown, HTML and JSON/JSONC files (JSON opens as a tree)
+ *   - Images, PDFs and PowerPoint: read-only previews with text editing controls hidden
+ *   - Wrap: shown for text (defaults on for markdown, off for others)
+ *   - Save: shown if onSave is provided
+ *   - Open in default app: always shown
+ *   - Share: macOS share menu, shown while a file is open
+ *   - Reveal in Finder/Explorer: shown while a file is open
+ *   - Close: shown if onClose is provided
+ *   - Copy path/content: shown if opted in
+ *
+ * Depends on: viewer-toolbar.js, codemirror-bundle.js
+ */
+
+class ViewerPanel {
+  /**
+   * @param {HTMLElement} container - Parent element to render into
+   * @param {Object} opts
+   * @param {Function}  opts.onSave       - async (filePath, content) => result
+   * @param {Function}  opts.onClose      - () => void
+   * @param {boolean}   opts.copyPath     - Show copy-path button
+   * @param {boolean}   opts.copyContent  - Show copy-content button
+   * @param {string}    opts.language     - 'markdown' or 'auto' (default 'markdown')
+   * @param {string}    opts.storageKey   - localStorage key for preview mode persistence
+   */
+  constructor(container, opts = {}) {
+    this.container = container;
+    this.opts = opts;
+
+    // State
+    this.filePath = '';
+    this.editorView = null;
+    this.previewMode = opts.storageKey ? localStorage.getItem(opts.storageKey) === 'true' : false;
+    this.wrapMode = false;
+    this._watchedPath = null;
+    this._saving = false;
+    this.previewType = 'text';
+    this._objectUrl = null;
+    this._openVersion = 0;
+    // Expanded nodes in the JSON reader, kept across reloads of the same file.
+    this._jsonState = { open: null };
+
+    // Create toolbar — always include preview, wrap, save; visibility managed in open()
+    this.toolbar = window.createViewerToolbar({
+      copyPath: !!opts.copyPath,
+      copyContent: !!opts.copyContent,
+      preview: true,
+      wrap: true,
+      gotoLine: true,
+      save: !!opts.onSave,
+      openExternal: true,
+      share: window.api.platform === 'darwin',
+      reveal: true,
+      close: !!opts.onClose,
+    });
+    container.insertBefore(this.toolbar.el, container.firstChild);
+
+    // Hide preview initially (shown in open() if markdown)
+    if (this.toolbar.previewBtn) this.toolbar.previewBtn.style.display = 'none';
+
+    // Create editor area
+    this.editorEl = document.createElement('div');
+    this.editorEl.className = 'viewer-panel-editor';
+    container.appendChild(this.editorEl);
+
+    // Create preview area
+    this.previewEl = document.createElement('div');
+    this.previewEl.className = 'markdown-preview';
+    this.previewEl.style.display = 'none';
+    container.appendChild(this.previewEl);
+
+    // Wire toolbar events
+    this._wireEvents();
+
+    // Listen for Cmd/Ctrl+S from CM editors
+    container.addEventListener('cm-save', () => this._save());
+
+    // Listen for file changes from main process
+    this._onFileChanged = (changedPath) => {
+      if (changedPath === this._watchedPath && !this._saving) {
+        this._reloadFromDisk();
+      }
+    };
+    if (window.api.onFileChanged) {
+      window.api.onFileChanged(this._onFileChanged);
+    }
+  }
+
+  _wireEvents() {
+    const { toolbar, opts } = this;
+
+    if (toolbar.previewBtn) {
+      toolbar.previewBtn.addEventListener('click', () => this._togglePreview());
+    }
+
+    if (toolbar.wrapBtn) {
+      toolbar.wrapBtn.addEventListener('click', () => this._toggleWrap());
+    }
+
+    if (toolbar.gotoLineBtn) {
+      toolbar.gotoLineBtn.addEventListener('click', () => {
+        if (this.editorView && window.cmOpenGotoLine) {
+          window.cmOpenGotoLine(this.editorView);
+        }
+      });
+    }
+
+    if (toolbar.saveBtn && opts.onSave) {
+      toolbar.saveBtn.addEventListener('click', () => this._save());
+    }
+
+    if (toolbar.openExternalBtn) {
+      toolbar.openExternalBtn.addEventListener('click', () => this._openExternally());
+    }
+
+    if (toolbar.shareBtn) {
+      toolbar.shareBtn.addEventListener('click', () => this._share());
+    }
+
+    if (toolbar.revealBtn) {
+      toolbar.revealBtn.addEventListener('click', () => {
+        if (this.filePath) window.api.revealFile(this.filePath);
+      });
+    }
+
+    if (toolbar.closeBtn && opts.onClose) {
+      toolbar.closeBtn.addEventListener('click', () => opts.onClose());
+    }
+
+    if (toolbar.copyPathBtn) {
+      toolbar.copyPathBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(this.filePath);
+        toolbar.flashCopyPath();
+      });
+    }
+
+    if (toolbar.copyContentBtn) {
+      toolbar.copyContentBtn.addEventListener('click', () => {
+        const content = this.getContent();
+        navigator.clipboard.writeText(content);
+        toolbar.flashCopyContent();
+      });
+    }
+  }
+
+  /**
+   * Open a file in the viewer.
+   */
+  open(title, filePath, content = '', preview = {}) {
+    this._unwatchFile();
+    this._clearPreview();
+    this._openVersion++;
+
+    const previousPath = this.filePath;
+    this.filePath = filePath;
+    if (previousPath !== filePath) this._jsonState = { open: null };
+    this.previewUrl = preview.previewUrl || '';
+    this.previewType = preview.previewType || (/\.html?$/i.test(filePath) ? 'html' : 'text');
+    this.toolbar.setTitle(title);
+    this.toolbar.setPath(filePath);
+    if (this.toolbar.shareBtn) this.toolbar.shareBtn.style.display = filePath ? '' : 'none';
+    if (this.toolbar.revealBtn) this.toolbar.revealBtn.style.display = filePath ? '' : 'none';
+
+    const isMd = this._isMarkdown(filePath);
+    const isJson = this._isJson(filePath);
+    const isMedia = this._isMedia();
+    const isHtml = this.previewType === 'html';
+
+    // Show/hide preview button based on file type
+    if (this.toolbar.previewBtn) {
+      this.toolbar.previewBtn.style.display = !isMedia && (isMd || isHtml || isJson) ? '' : 'none';
+    }
+    for (const key of ['wrapBtn', 'gotoLineBtn', 'saveBtn', 'copyContentBtn']) {
+      if (this.toolbar[key]) this.toolbar[key].style.display = isMedia ? 'none' : '';
+    }
+
+    // Save preview preference before resetting
+    // JSON opens in the reader unless this viewer was last switched to editing it.
+    const jsonKey = this._jsonPreviewKey();
+    const wantPreview = isHtml || (isMd && this.opts.storageKey && localStorage.getItem(this.opts.storageKey) === 'true')
+      || (isJson && (!jsonKey || localStorage.getItem(jsonKey) !== 'false'));
+
+    // Reset to edit mode before updating content (without touching localStorage)
+    this.editorEl.style.display = isMedia ? 'none' : '';
+    this.previewMode = false;
+    this.toolbar.setPreviewMode(false);
+    if (this.toolbar.previewBtn) {
+      this.toolbar.previewBtn.title = this._previewLabel();
+      this.toolbar.previewBtn.setAttribute('aria-label', this.toolbar.previewBtn.title);
+      this.toolbar.previewBtn.setAttribute('aria-pressed', 'false');
+    }
+
+    // Recreate when changing files so language, undo history and search state
+    // cannot leak from the previous file into this one.
+    if (this.editorView && (previousPath !== filePath || isMedia)) {
+      this._destroyEditor();
+    }
+    this.wrapMode = isMd;
+    if (isMedia) {
+      const bytes = Uint8Array.from(atob(preview.base64 || ''), char => char.charCodeAt(0));
+      if (this.previewType === 'pptx') this._presentationBytes = bytes;
+      else this._objectUrl = URL.createObjectURL(new Blob([bytes], { type: preview.mimeType }));
+      this.previewMode = true;
+      this._renderPreview();
+      this._watchFile(filePath);
+      return;
+    }
+
+    // Create or update editor
+    if (!this.editorView) {
+      this._createEditor(content, filePath);
+    } else {
+      this.editorView.dispatch({
+        changes: { from: 0, to: this.editorView.state.doc.length, insert: content },
+      });
+    }
+
+    // Set wrap default based on file type
+    this.wrapMode = isMd;
+    this.toolbar.setWrapMode(this.wrapMode);
+    if (this.editorView && this.editorView._wrapCompartment) {
+      this.editorView.dispatch({
+        effects: this.editorView._wrapCompartment.reconfigure(
+          this.wrapMode ? window.CMEditorView.lineWrapping : []
+        ),
+      });
+    }
+
+    // Re-apply preview preference
+    if (wantPreview) {
+      this._setPreview(true);
+    }
+
+    // Watch for external changes
+    this._watchFile(filePath);
+    if (preview.line) this.goToLocation(preview.line, preview.column);
+  }
+
+  goToLocation(line, column = 1) {
+    if (!this.editorView || !Number.isSafeInteger(line) || line < 1) return;
+    const doc = this.editorView.state.doc;
+    const target = doc.line(Math.min(line, doc.lines));
+    const offset = Number.isSafeInteger(column) ? Math.max(0, Math.min(column - 1, target.length)) : 0;
+    if (this.previewMode) this._setPreview(false);
+    this.editorView.dispatch({ selection: { anchor: target.from + offset }, scrollIntoView: true });
+  }
+
+  _createEditor(content, filePath) {
+    if (this.opts.language === 'auto') {
+      this.editorView = window.createEditableViewer(
+        this.editorEl, content, filePath, { wrap: this.wrapMode },
+      );
+    } else {
+      this.editorView = window.createPlanEditor(this.editorEl);
+      if (content) {
+        this.editorView.dispatch({
+          changes: { from: 0, to: this.editorView.state.doc.length, insert: content },
+        });
+      }
+    }
+  }
+
+  _togglePreview() {
+    if (this._isMedia() || (!this._isMarkdown(this.filePath) && !this._isJson(this.filePath) && this.previewType !== 'html')) return;
+    this.previewMode = !this.previewMode;
+    if (this.previewMode) this._renderPreview();
+    else this._clearPreview();
+    this.editorEl.style.display = this.previewMode ? 'none' : '';
+    this.toolbar.setPreviewMode(this.previewMode);
+    const label = this._previewLabel();
+    this.toolbar.previewBtn.title = label;
+    this.toolbar.previewBtn.setAttribute('aria-label', label);
+    this.toolbar.previewBtn.setAttribute('aria-pressed', String(this.previewMode));
+    if (this._isMarkdown(this.filePath) && this.opts.storageKey) {
+      localStorage.setItem(this.opts.storageKey, String(this.previewMode));
+    } else if (this._isJson(this.filePath) && this._jsonPreviewKey()) {
+      localStorage.setItem(this._jsonPreviewKey(), String(this.previewMode));
+    }
+  }
+
+  _isMedia() {
+    return ['image', 'pdf', 'pptx'].includes(this.previewType);
+  }
+
+  _renderPreview() {
+    this.previewEl.replaceChildren();
+    if (this.previewType === 'pptx') {
+      this.previewEl.className = 'viewer-media-preview';
+      this.previewEl.style.display = 'block';
+      const frame = document.createElement('iframe');
+      frame.className = 'viewer-preview-frame';
+      frame.title = `PowerPoint preview: ${this.filePath.split(/[\\/]/).pop()}`;
+      frame.setAttribute('sandbox', 'allow-scripts');
+      frame.referrerPolicy = 'no-referrer';
+      const bytes = this._presentationBytes;
+      const version = this._openVersion;
+      this._presentationBytes = null;
+      frame.addEventListener('load', () => {
+        if (version !== this._openVersion || !frame.contentWindow) return;
+        // The sandbox has an opaque origin, so postMessage needs '*'. The
+        // destination is this exact frame, and only deck bytes are shared.
+        frame.contentWindow.postMessage({ type: 'switchboard-pptx', buffer: bytes.buffer }, '*', [bytes.buffer]);
+      }, { once: true });
+      frame.src = this.previewUrl;
+      this.previewEl.appendChild(frame);
+    } else if (this.previewType === 'image') {
+      this.previewEl.className = 'viewer-media-preview viewer-media-preview--image';
+      this.previewEl.style.display = 'flex';
+      const img = document.createElement('img');
+      img.alt = this.filePath.split(/[\\/]/).pop();
+      img.onerror = () => {
+        const error = document.createElement('div');
+        error.className = 'viewer-preview-error';
+        error.textContent = 'This image could not be displayed. The file may be damaged or use an unsupported image format.';
+        this.previewEl.replaceChildren(error);
+      };
+      img.src = this._objectUrl;
+      this.previewEl.appendChild(img);
+    } else if (this.previewType === 'pdf' || this.previewType === 'html') {
+      this.previewEl.className = 'viewer-media-preview';
+      this.previewEl.style.display = 'block';
+      const frame = document.createElement('iframe');
+      frame.className = 'viewer-preview-frame';
+      frame.title = `${this.previewType === 'pdf' ? 'PDF' : 'HTML'} preview: ${this.filePath.split(/[\\/]/).pop()}`;
+      if (this.previewType === 'pdf') {
+        // Chromium's built-in PDF viewer provides zoom, page navigation and print.
+        frame.src = this._objectUrl;
+      } else {
+        // Scripts run with an opaque origin: no parent DOM, app APIs or
+        // shared storage. Never combine allow-scripts with allow-same-origin.
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.referrerPolicy = 'no-referrer';
+        const doc = new DOMParser().parseFromString(this.getContent(), 'text/html');
+        const policy = doc.createElement('meta');
+        policy.httpEquiv = 'Content-Security-Policy';
+        // Only the current asset scope can be fetched. No file:// reads or
+        // connections to local app services; CDN scripts/images still work.
+        const assetOrigin = /^switchboard-preview:\/\/[a-f0-9]+\//.exec(this.previewUrl)?.[0] || '';
+        policy.content = `default-src 'none'; script-src 'unsafe-inline' ${assetOrigin} https: http:; img-src ${assetOrigin} data: blob: https: http:; style-src 'unsafe-inline' ${assetOrigin} https: http:; font-src ${assetOrigin} data: https: http:; connect-src ${assetOrigin || "'none'"}; base-uri ${assetOrigin || "'none'"}; form-action 'none'`;
+        if (assetOrigin) {
+          const base = doc.createElement('base');
+          base.href = this.previewUrl;
+          doc.head.prepend(base);
+        }
+        doc.head.prepend(policy);
+        frame.srcdoc = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+      }
+      this.previewEl.appendChild(frame);
+    } else if (this._isJson(this.filePath)) {
+      this.previewEl.className = 'json-reader';
+      this.previewEl.style.display = 'block';
+      this._renderJson();
+    } else {
+      this.previewEl.className = 'markdown-preview';
+      this.previewEl.style.display = 'block';
+      this.previewEl.innerHTML = window.marked.parse(this.getContent());
+    }
+  }
+
+  /** The tree from the live buffer, or where the file breaks and a way to get there. */
+  _renderJson() {
+    const parsed = window.JsonReader.parseJsonForReader(this.getContent(), { comments: /\.jsonc$/i.test(this.filePath) });
+    if (parsed.ok) {
+      window.JsonReader.renderTree(this.previewEl, parsed.root, this._jsonState);
+      return;
+    }
+    const error = document.createElement('div');
+    error.className = 'json-reader-error';
+    const message = document.createElement('div');
+    message.textContent = `This file is not valid JSON: ${parsed.message} (line ${parsed.line}, column ${parsed.column}).`;
+    const jump = document.createElement('button');
+    jump.type = 'button';
+    jump.className = 'json-reader-jump';
+    jump.textContent = 'Show in editor';
+    jump.addEventListener('click', () => {
+      // Going to fix one broken file is not a choice to stop reading JSON as a tree.
+      const key = this._jsonPreviewKey();
+      const saved = key ? localStorage.getItem(key) : null;
+      this.goToLocation(parsed.line, parsed.column);
+      if (key) {
+        if (saved === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, saved);
+      }
+    });
+    error.appendChild(message);
+    error.appendChild(jump);
+    this.previewEl.appendChild(error);
+  }
+
+  _clearPreview() {
+    this.previewEl.replaceChildren();
+    this.previewEl.style.display = 'none';
+    if (this._objectUrl) URL.revokeObjectURL(this._objectUrl);
+    this._objectUrl = null;
+    this._presentationBytes = null;
+  }
+
+  _setPreview(show) {
+    if (this.previewMode === show) return;
+    this._togglePreview();
+  }
+
+  _toggleWrap() {
+    if (!this.editorView || !this.editorView._wrapCompartment) return;
+    this.wrapMode = !this.wrapMode;
+    this.editorView.dispatch({
+      effects: this.editorView._wrapCompartment.reconfigure(
+        this.wrapMode ? window.CMEditorView.lineWrapping : []
+      ),
+    });
+    this.toolbar.setWrapMode(this.wrapMode);
+  }
+
+  async _save() {
+    if (!this.opts.onSave || !this.filePath || this._isMedia()) return;
+    this._saving = true;
+    const content = this.getContent();
+    try {
+      const result = await this.opts.onSave(this.filePath, content);
+      if (result && result.ok !== false) {
+        this.toolbar.flashSave();
+      }
+    } finally {
+      setTimeout(() => { this._saving = false; }, 500);
+    }
+  }
+
+  // Opens the file as saved on disk; unsaved edits stay in this editor.
+  async _openExternally() {
+    if (!this.filePath) return;
+    try {
+      const opened = await window.api.openFileExternally(this.filePath, null);
+      if (!opened?.ok) throw new Error(opened?.error || 'Could not open the file in its default application.');
+    } catch (error) {
+      alert(error.message || 'Could not open the file in its default application.');
+    }
+  }
+
+  // Shares the file as saved on disk; unsaved edits stay in this editor.
+  async _share() {
+    if (!this.filePath) return;
+    try {
+      const shared = await window.api.shareFile(this.filePath);
+      if (!shared?.ok) throw new Error(shared?.error || 'Could not share the file.');
+    } catch (error) {
+      alert(error.message || 'Could not share the file.');
+    }
+  }
+
+  // Keep the current buffer when its file (or an ancestor folder) is renamed.
+  async relocate(title, filePath) {
+    this._unwatchFile();
+    const version = ++this._openVersion;
+    this.filePath = filePath;
+    this.toolbar.setTitle(title);
+    this.toolbar.setPath(filePath);
+    let result;
+    try { result = await window.api.readFileForPanel(filePath); } catch {}
+    if (version !== this._openVersion) return null;
+    if (result?.ok) {
+      // A new extension must not discard an editable buffer by switching it
+      // to a binary preview. Reopening later uses the new file type normally.
+      const preview = this.editorView && ['image', 'pdf', 'pptx'].includes(result.previewType)
+        ? { ...result, previewType: 'text' } : result;
+      this.open(title, filePath, this.editorView ? this.getContent() : result.content, preview);
+    } else {
+      this._watchFile(filePath);
+    }
+    return result;
+  }
+
+  getContent() {
+    return this.editorView ? this.editorView.state.doc.toString() : '';
+  }
+
+  destroy() {
+    this._unwatchFile();
+    this._openVersion++;
+    this._destroyEditor();
+    this._clearPreview();
+    this.filePath = '';
+    this.previewMode = false;
+    this._jsonState = { open: null };
+  }
+
+  _destroyEditor() {
+    if (this.editorView) {
+      this.editorView.destroy();
+      this.editorView = null;
+    }
+    // Clear stale search/goto-line bar references so they get recreated with the new editor
+    delete this.editorEl._cmSearchBar;
+    delete this.editorEl._cmGotoLine;
+    this.editorEl.innerHTML = '';
+  }
+
+  // ── File Watching ──────────────────────────────────────────────────
+
+  _watchFile(filePath) {
+    if (!filePath || !window.api.watchFile) return;
+    this._watchedPath = filePath;
+    window.api.watchFile(filePath);
+  }
+
+  _unwatchFile() {
+    if (this._watchedPath && window.api.unwatchFile) {
+      window.api.unwatchFile(this._watchedPath);
+      this._watchedPath = null;
+    }
+  }
+
+  async _reloadFromDisk() {
+    if (!this.filePath || !window.api.readFileForPanel) return;
+    const version = this._openVersion;
+    const result = await window.api.readFileForPanel(this.filePath);
+    if (version !== this._openVersion) return;
+    if (!result.ok) return;
+    if (this._isMedia()) {
+      this.open(this.toolbar.titleEl.textContent, this.filePath, result.content, result);
+      return;
+    }
+
+    const newContent = result.content;
+    const currentContent = this.getContent();
+    if (newContent === currentContent) return;
+
+    if (this.editorView) {
+      this.editorView.dispatch({
+        changes: { from: 0, to: this.editorView.state.doc.length, insert: newContent },
+      });
+    }
+
+    if (this.previewMode) {
+      this._renderPreview();
+    }
+  }
+
+  _isMarkdown(filePath) {
+    if (!filePath) return this.opts.language === 'markdown';
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    return ext === 'md' || ext === 'mdx';
+  }
+
+  _isJson(filePath) {
+    return !!filePath && /\.jsonc?$/i.test(filePath);
+  }
+
+  // Remembered apart from markdown's, so switching one does not switch the other.
+  _jsonPreviewKey() {
+    return this.opts.storageKey ? `${this.opts.storageKey}:json` : null;
+  }
+
+  _previewLabel() {
+    if (this.previewMode) return 'Back to editor';
+    if (this.previewType === 'html') return 'Preview HTML';
+    if (this._isJson(this.filePath)) return 'Read JSON as a tree';
+    return 'Toggle markdown preview';
+  }
+}
+
+window.ViewerPanel = ViewerPanel;

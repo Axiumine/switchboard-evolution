@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<!-- The Task Manager in a window of its own (main.js openTaskManagerWindow):
+     process-viewer.js with task-manager-window.js in place of the main window. -->
+<body class="tm-window">
+  <div id="process-viewer">
+    <div id="process-viewer-header">
+      <span id="process-viewer-subtitle">RAM per session</span>
+      <span id="process-viewer-status" class="pm-status"></span>
+      <button id="tool-window-pin" class="tool-window-btn" type="button" aria-pressed="false"></button>
+      <button id="process-viewer-refresh" type="button" title="Refresh now" aria-label="Refresh now"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+    </div>
+    <div id="process-viewer-body"></div>
+  </div>
+  <script src="../node_modules/morphdom/dist/morphdom-umd.js"></script>
+  <script src="icons.js"></script>
+  <script src="session-config.js"></script>
+  <script src="utils.js"></script>
+  <script src="tool-window.js"></script>
+  <script src="task-manager-window.js"></script>
+  <script src="process-viewer.js"></script>
+</body>
+</html>

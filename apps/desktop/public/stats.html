@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stats</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<!-- Stats in a window of its own (main.js openToolWindow): stats-view.js, as
+     the main window shows it, with stats-window.js in place of app.js. -->
+<body class="tm-window">
+  <div id="stats-viewer">
+    <div id="stats-viewer-header">
+      <span id="stats-viewer-title">Activity</span>
+      <button id="tool-window-pin" class="tool-window-btn" type="button" aria-pressed="false"></button>
+      <button id="stats-window-refresh" class="tool-window-btn" type="button" title="Refresh now" aria-label="Refresh now"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+    </div>
+    <div id="stats-viewer-body"></div>
+  </div>
+  <script src="icons.js"></script>
+  <script src="session-config.js"></script>
+  <script src="utils.js"></script>
+  <script src="stats-view.js"></script>
+  <script src="tool-window.js"></script>
+  <script src="stats-window.js"></script>
+</body>
+</html>

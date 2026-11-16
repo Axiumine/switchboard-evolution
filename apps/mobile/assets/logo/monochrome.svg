@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The mark in one colour, for Android's themed icons: the dot stands apart from the bubble. -->
+  <defs>
+    <mask id="gap">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="726" cy="334" r="68" fill="#000"/>
+    </mask>
+  </defs>
+  <g mask="url(#gap)">
+    <path d="M375 322 H649 A88 88 0 0 1 737 410 V584 A88 88 0 0 1 649 672 H452 L352 748 L366 672 A88 88 0 0 1 287 584 V410 A88 88 0 0 1 375 322 Z" fill="none" stroke="#ffffff" stroke-width="34" stroke-linejoin="round"/>
+  </g>
+  <path d="M384 432 L456 497 L384 562" fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M498 562 H604" fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="726" cy="334" r="46" fill="#ffffff"/>
+</svg>
