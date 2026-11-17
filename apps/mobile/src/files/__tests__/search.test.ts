@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   countMatches, dismissFile, dismissMatch, EMPTY_SEARCH, matchParts, NO_DISMISSED, replaceOpts, replaceReport, replacementText, replaceTargets,
-  resultRows, searchOpts, splitAtLine, splitPath, summaryText, visibleFiles, type SearchFile, type SearchForm, type SearchMatch,
+  resultRows, searchOpts, splitPath, summaryText, visibleFiles, type SearchFile, type SearchForm, type SearchMatch,
 } from '../search';
 
 const match = (line: number, column: number, text: string, before = '', after = ''): SearchMatch => ({ line, column, length: text.length, text, before, after });
@@ -142,25 +142,5 @@ describe('replacing', () => {
     });
     const many = Array.from({ length: 7 }, (_, i) => ({ path: `f${i}.ts`, reason: 'busy' }));
     expect(replaceReport({ ok: true, replaced: 2, files: 2, skipped: many }).message.split('\n').slice(-1)[0]).toBe('and 2 more');
-  });
-});
-
-describe('the line a match opens at', () => {
-  const text = 'one\ntwo\nthree';
-  it('splits the text around the line', () => {
-    expect(splitAtLine(text, 2)).toEqual({ before: 'one\n', target: 'two', after: '\nthree' });
-    expect(splitAtLine(text, 1)).toEqual({ before: '', target: 'one', after: '\ntwo\nthree' });
-    expect(splitAtLine(text, 3)).toEqual({ before: 'one\ntwo\n', target: 'three', after: '' });
-  });
-
-  it('puts the text back together', () => {
-    const parts = splitAtLine(text, 2)!;
-    expect(parts.before + parts.target + parts.after).toBe(text);
-  });
-
-  it('has no line past the end, or a line that is not a number', () => {
-    expect(splitAtLine(text, 4)).toBeNull();
-    expect(splitAtLine(text, 0)).toBeNull();
-    expect(splitAtLine(text, NaN)).toBeNull();
   });
 });

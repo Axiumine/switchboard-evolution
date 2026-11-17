@@ -187,15 +187,3 @@ export function replaceReport(result: ReplaceResult): { title: string; message: 
   const more = skipped.length > shown.length ? [`and ${skipped.length - shown.length} more`] : [];
   return { title, message: ['Left alone:', ...shown, ...more].join('\n') };
 }
-
-/** The line to highlight in a file opened from a match: the text before it, the line, the text after. */
-export function splitAtLine(text: string, line: number): { before: string; target: string; after: string } | null {
-  if (!Number.isInteger(line) || line < 1) return null;
-  const lines = text.split('\n');
-  if (line > lines.length) return null;
-  return {
-    before: line > 1 ? `${lines.slice(0, line - 1).join('\n')}\n` : '',
-    target: lines[line - 1],
-    after: line < lines.length ? `\n${lines.slice(line).join('\n')}` : '',
-  };
-}
