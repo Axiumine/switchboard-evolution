@@ -1,6 +1,6 @@
 import { expect, test } from '@jest/globals';
 
-import { graphRows, LANE_WIDTH, ROW_HEIGHT } from '../graph';
+import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, UNCOMMITTED } from '../graph';
 
 const x = (lane: number) => LANE_WIDTH / 2 + lane * LANE_WIDTH;
 const mid = ROW_HEIGHT / 2;
@@ -52,4 +52,20 @@ test('each row knows the lines that leave its bottom, for a panel opened under i
 test('a line to a parent not loaded yet runs on to the last row', () => {
   const { rows } = graphRows([{ hash: 'A', parents: ['B'] }, { hash: 'X', parents: [] }]);
   expect(rows[1].below.length).toBeGreaterThan(0);
+});
+
+test('the Uncommitted Changes node and its line down to the checked-out commit are grey', () => {
+  const { rows } = graphRows([
+    { hash: '#uncommitted', parents: ['B'], kind: 'uncommitted' },
+    { hash: 'A', parents: ['B'] },
+    { hash: 'B', parents: [] },
+  ]);
+  expect(rows[0].node.colorIndex).toBe(UNCOMMITTED);
+  expect(rows[0].segments.every((s) => s.colorIndex === UNCOMMITTED)).toBe(true);
+  // Beside A the grey line passes by, and it arrives grey at B; B and A keep their lane colour.
+  expect(rows[1].below.some((line) => line.colorIndex === UNCOMMITTED)).toBe(true);
+  expect(rows[2].segments.some((s) => s.colorIndex === UNCOMMITTED)).toBe(true);
+  expect(rows[2].node.colorIndex).not.toBe(UNCOMMITTED);
+  expect(laneColour(['#00ff00'], UNCOMMITTED)).not.toBe('#00ff00');
+  expect(laneColour(['#00ff00', '#0000ff'], 3)).toBe('#0000ff');
 });

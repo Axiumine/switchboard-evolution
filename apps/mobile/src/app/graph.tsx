@@ -8,7 +8,7 @@ import { CommitDetails, type FileView } from '@/components/git/CommitDetails';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import { forceRetry, pushAction, rowActions, type GraphAction } from '@/git/actions';
-import { graphRows, LANE_WIDTH, ROW_HEIGHT, type GraphRow } from '@/git/graph';
+import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, type GraphRow } from '@/git/graph';
 import { buildLayoutInput, type GraphCommit, type HistoryRow, type Stash, type Uncommitted } from '@/git/history';
 import { relativeTime, shortProjectPath } from '@/sessions/model';
 import { onDesktopEvent, request, useConnection } from '@/store/connection';
@@ -42,7 +42,8 @@ export default function GraphScreen() {
   const [naming, setNaming] = useState<GraphAction | null>(null);
   const [toolbar, setToolbar] = useState(false);
   const [running, setRunning] = useState<{ label: string; actionId: string; progress: string } | null>(null);
-  // The row whose details are open under it, as on the desktop; the files as a tree or a list; the file opened last.
+  // The row whose details are open under it, as on the desktop; the files as a tree or a list (for that row
+  // only: the next one opens in the desktop's default again); the file opened last.
   const [expanded, setExpanded] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [lastViewed, setLastViewed] = useState<string | null>(null);
@@ -67,7 +68,7 @@ export default function GraphScreen() {
   const remotes = useQuery({ queryKey: ['git-remotes', projectId, folder], queryFn: () => request<{ remotes?: { name: string }[] }>('get-git-graph-remotes', [projectId, folder]), enabled: online, refetchOnMount: 'always' });
   const palette = prefs.data?.preferences?.graphColours?.length ? prefs.data.preferences.graphColours : DEFAULT_COLOURS;
   const remoteNames = (remotes.data?.remotes || []).map((r) => r.name);
-  // The desktop's choices until one is made here; the phone cannot change the desktop's.
+  // The desktop's choices until one is made for the open row; the phone cannot change the desktop's.
   const view: FileView = fileView || (prefs.data?.preferences?.fileViewType === 'list' ? 'list' : 'tree');
   const compact = prefs.data?.preferences?.compactFolders !== false;
 
@@ -107,6 +108,7 @@ export default function GraphScreen() {
   function toggle(hash: string) {
     if (open === hash) { setExpanded(null); return; }
     setExpanded(hash);
+    setFileView(null);
     setLastViewed(null);
     scrollToRow(hash);
   }
@@ -188,7 +190,7 @@ export default function GraphScreen() {
                 headHash={headHash}
                 below={layout[index].below}
                 graphWidth={Math.max(lanes, 1) * LANE_WIDTH}
-                colour={(i) => palette[i % palette.length]}
+                colour={(i) => laneColour(palette, i)}
                 fileView={view}
                 onFileView={setFileView}
                 compact={compact}
@@ -244,7 +246,7 @@ function confirmThen(action: GraphAction, run: (action: GraphAction) => void) {
 const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, onPress, onLongPress }: {
   row: HistoryRow; geometry: GraphRow; lanes: number; palette: string[]; selected: boolean; onPress: () => void; onLongPress: () => void;
 }) {
-  const colour = (index: number) => palette[index % palette.length];
+  const colour = (index: number) => laneColour(palette, index);
   const refs = row.refs || { heads: [], remotes: [], tags: [] };
   const badges = [
     ...refs.heads.map((name) => ({ key: `h:${name}`, text: name, style: styles.badgeHead })),

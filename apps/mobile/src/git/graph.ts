@@ -6,6 +6,14 @@ import { computeGitGraphLayout } from '@/shared/vendor/git-graph-layout';
 
 export const LANE_WIDTH = 14;
 export const ROW_HEIGHT = 44;
+/** The colour index of the Uncommitted Changes node and its line: grey, never a lane colour (as on the desktop). */
+export const UNCOMMITTED = -1;
+const UNCOMMITTED_COLOUR = '#808094';
+
+/** A lane's colour from the palette, or the grey of the Uncommitted Changes. */
+export function laneColour(palette: string[], index: number): string {
+  return index === UNCOMMITTED ? UNCOMMITTED_COLOUR : palette[index % palette.length];
+}
 
 export type Segment = { d: string; colorIndex: number };
 /** A line leaving the bottom of a row, straight down: what a panel opened under the row draws beside it. */
@@ -20,10 +28,11 @@ function link(x1: number, y1: number, x2: number, y2: number): string {
   return x1 === x2 ? `M${x1} ${y1} L${x2} ${y2}` : `M${x1} ${y1} C${x1} ${y2} ${x2} ${y1} ${x2} ${y2}`;
 }
 
-export function graphRows(commits: { hash: string; parents: string[] }[], options: { firstParentOnly?: boolean } = {}) {
+export function graphRows(commits: { hash: string; parents: string[]; kind?: string }[], options: { firstParentOnly?: boolean } = {}) {
   const layout = computeGitGraphLayout(commits, 'date', options);
   const index = new Map(layout.map((row, i) => [row.hash, i]));
-  const rows: GraphRow[] = layout.map((row) => ({ hash: row.hash, node: { x: x(row.lane), colorIndex: row.colorIndex }, segments: [], below: [] }));
+  const uncommitted = new Set(commits.filter((c) => c.kind === 'uncommitted').map((c) => c.hash));
+  const rows: GraphRow[] = layout.map((row) => ({ hash: row.hash, node: { x: x(row.lane), colorIndex: uncommitted.has(row.hash) ? UNCOMMITTED : row.colorIndex }, segments: [], below: [] }));
   const pass = (k: number, at: number, colorIndex: number) => {
     if (!rows[k].below.some((line) => line.x === at)) rows[k].below.push({ x: at, colorIndex });
   };
@@ -33,7 +42,8 @@ export function graphRows(commits: { hash: string; parents: string[] }[], option
     for (const edge of row.edges) {
       lanes = Math.max(lanes, edge.viaLane + 1, edge.toLane + 1);
       const j = index.get(edge.parentHash);
-      const colorIndex = edge.style === 'same-lane' ? row.colorIndex : j !== undefined ? layout[j].colorIndex : row.colorIndex;
+      const colorIndex = uncommitted.has(row.hash) ? UNCOMMITTED
+        : edge.style === 'same-lane' ? row.colorIndex : j !== undefined ? layout[j].colorIndex : row.colorIndex;
       rows[i].segments.push({ d: link(x(row.lane), MID, x(edge.viaLane), ROW_HEIGHT), colorIndex });
       const last = j === undefined ? layout.length : j;
       for (let k = i + 1; k < last; k++) rows[k].segments.push({ d: `M${x(edge.viaLane)} 0 L${x(edge.viaLane)} ${ROW_HEIGHT}`, colorIndex });
