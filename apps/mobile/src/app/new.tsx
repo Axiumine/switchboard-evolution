@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 import { OptionsForm, type Options } from '@/components/OptionsForm';
 import { returnToProject } from '@/projects/open-session';
 import { sessionTitle, shortProjectPath, type Folder } from '@/sessions/model';
+import { useStableOrder } from '@/sessions/stable-order';
 import { fieldsFor } from '@/shared/vendor/session-config';
 import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -58,7 +59,7 @@ export default function NewSessionScreen() {
   const resumed = resume ? (projects.data || []).flatMap((f) => f.sessions).find((s) => s.sessionId === params.sessionId) : undefined;
 
   const { worktree, projectId: worktreeProject } = params;
-  const targets = useMemo(() => {
+  const listed = useMemo(() => {
     const list = targetsOf(tree.data?.projects || [], projects.data || []);
     if (!worktree) return list;
     // The worktree first; a folder target for the same path would only repeat it.
@@ -67,6 +68,12 @@ export default function NewSessionScreen() {
       ...list.filter((t) => t.projectPath !== worktree || t.projectId),
     ];
   }, [tree.data, projects.data, worktree, worktreeProject]);
+  // Where each place was first shown, once the lists are read. The computer
+  // sends projects newest first, so the one a session just started in would
+  // jump to the top while this screen closes, which crashes the app on
+  // Android (stable-order.ts). It also keeps the place picked by default
+  // from changing under the user's finger.
+  const targets = useStableOrder(listed, !projects.isPending && (resume || !tree.isPending));
   const [targetKey, setTargetKey] = useState<string | null>(params.target || (worktree ? `w:${worktree}` : null));
   const [showAll, setShowAll] = useState(false);
   const target = resume ? null : targets.find((t) => t.key === targetKey) || targets[0];
@@ -107,12 +114,13 @@ export default function NewSessionScreen() {
       await refreshLive();
       // Opened from a project page: the session shows on its Session tab, as on the desktop.
       const projectId = resume ? resumed?.projectId : target?.projectId || worktreeProject;
+      // Started: this screen closes as it is, spinner and all. Changing it
+      // now would reach views the closing animation holds (stable-order.ts).
       if (returnToProject(navigation, projectId, result.sessionId, 'terminal')) return;
       router.replace({ pathname: '/session/[id]', params: { id: result.sessionId, tab: 'terminal' } });
     } catch (err: any) {
-      Alert.alert('Could not start', err.message);
-    } finally {
       setStarting(false);
+      Alert.alert('Could not start', err.message);
     }
   };
 
