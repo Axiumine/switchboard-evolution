@@ -15,7 +15,6 @@ import {
   formatUptime,
   measureNote,
   memoryLevel,
-  memorySummary,
   ownerKey,
   ownerRef,
   ownerSubtitle,
@@ -28,18 +27,20 @@ import {
   type ProcessUsage,
 } from '@/processes/model';
 import { usePullRefresh } from '@/components/PullRefresh';
+import { UsageDonut, type DetailRow } from '@/components/processes/UsageDonut';
 import { useShown } from '@/layout/shown';
 import { openSessionFromTabs } from '@/projects/open-session';
 import { queryClient } from '@/remote/query';
-import type { Folder } from '@/sessions/model';
+import type { Folder, Session } from '@/sessions/model';
+import { diskSlices, memorySlices, memoryTotals, type ProjectDiskUsage, type Slice } from '@/shared/vendor/usage-chart';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 
 // A shell busy starting up can briefly hold hundreds of processes; keep the list readable.
 const MAX_PROCESS_ROWS = 40;
 const LEVEL_COLORS = { low: colors.accent, mid: colors.attention, high: colors.danger } as const;
-// The rest of the memory in use, beside the app and its sessions: the same colour, darker.
-const USED_COLOR = '#4b5099';
+// Project sizes change slowly and the computer keeps them for half an hour: ask now and then.
+const PROJECT_DISK_MS = 10000;
 // Stop waits for the stragglers on the computer: a few seconds.
 const STOP_TIMEOUT_MS = 30000;
 
@@ -78,7 +79,25 @@ export default function ProcessesScreen() {
     // It polls: no SyncBar for it.
     meta: { quiet: true },
   });
-  const pull = usePullRefresh(() => usage.refetch());
+  // How much disk each project takes with its attached folders, for the disk ring.
+  const projectSizes = useCapability('get-project-disk-usage');
+  const projectDisk = useQuery({
+    queryKey: ['project-disk-usage'],
+    queryFn: () => request<ProjectDiskUsage>('get-project-disk-usage', [], { timeoutMs: 20000 }),
+    enabled: online && projectSizes,
+    refetchOnMount: 'always',
+    refetchInterval: (query) => (focused ? (query.state.data?.measuring ? 3000 : PROJECT_DISK_MS) : false),
+    meta: { quiet: true },
+  });
+  const measureAgain = async () => {
+    try {
+      const result = await request<ProjectDiskUsage>('get-project-disk-usage', [true], { timeoutMs: 20000 });
+      queryClient.setQueryData(['project-disk-usage'], result);
+    } catch (err: any) {
+      Alert.alert('Could not measure the projects', err.message);
+    }
+  };
+  const pull = usePullRefresh(() => Promise.all([usage.refetch(), projectDisk.refetch()]));
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => request<Folder[]>('get-projects', [false]), enabled: online });
   const sessions = useMemo(() => sessionsById(projects.data), [projects.data]);
 
@@ -190,7 +209,6 @@ export default function ProcessesScreen() {
     return <Empty title="Update Switchboard Evolution on the computer" text="The Task Manager needs a newer Switchboard Evolution on the computer. Update it there, then come back." />;
   }
 
-  const summary = data ? memorySummary(data) : null;
   const notes = [measureNote(data?.memoryMeasure)];
   if (data?.platform === 'win32') notes.push('CPU is not measured on Windows, and a WSL session only shows its Windows-side process.');
 
@@ -207,8 +225,8 @@ export default function ProcessesScreen() {
           : <ActivityIndicator color={colors.accent} style={styles.loading} />
       ) : (
         <>
-          <MemoryCard summary={summary!} appCpu={data.app.cpu} />
-          {data.disks?.length ? <DisksCard disks={data.disks} platform={data.platform} /> : null}
+          <MemoryCard data={data} sessions={sessions} />
+          {data.disks?.length ? <DisksCard disks={data.disks} platform={data.platform} projects={projectSizes ? projectDisk.data ?? null : null} onMeasure={measureAgain} /> : null}
 
           <View style={styles.listHead}>
             <Text style={styles.listTitle}>By RAM</Text>
@@ -329,57 +347,129 @@ function OwnerRow({ owner, title, share, totalMemBytes, now, open, pending, stop
 }
 
 /**
- * The memory, one card and one bar: what the app and its sessions use, the
- * rest of what is in use on the computer in a darker shade, and what is free
- * up to the installed memory. "5.50 GB / 27.2 GB / 32.0 GB", each number in
- * its colour of the bar. A desktop too old to say what is in use gets the
- * first and the last.
+ * The memory, as on the desktop: what the app and its sessions use / what is
+ * in use on the computer / what is installed, then a ring of the installed
+ * memory: the app, each of the largest sessions and tasks, other apps, free.
+ * A desktop too old to say what is in use gets two numbers and no "other apps".
  */
-function MemoryCard({ summary, appCpu }: { summary: ReturnType<typeof memorySummary>; appCpu: number | null }) {
-  const { used, installed, ours } = summary;
+function MemoryCard({ data, sessions }: { data: ProcessUsage; sessions: ReadonlyMap<string, Session> }) {
+  const totals = memoryTotals(data);
+  // Colours go by session, so a session keeps its colour while among the largest.
+  const ring = useMemo(() => memorySlices(data, { labelFor: (owner) => ownerTitle(owner, sessions) }), [data, sessions]);
+  const { used, installed, ours } = totals;
+  const running = [`${totals.sessions} session${totals.sessions === 1 ? '' : 's'}`];
+  if (totals.tasks) running.push(`${totals.tasks} task${totals.tasks === 1 ? '' : 's'}`);
+  const center = used === null
+    ? { big: formatPercent(ours, installed) || '—', small: 'app and sessions' }
+    : { big: formatPercent(used, installed) || '—', small: 'in use' };
   return (
     <View style={styles.cardMain}>
-      <Text style={styles.cardLabel} numberOfLines={1} adjustsFontSizeToFit>
-        {used !== null ? 'App and sessions / Used / Installed' : 'App and sessions / Installed'}
-      </Text>
+      <Text style={styles.cardLabel}>Memory</Text>
       <Text style={styles.cardValue} numberOfLines={1} adjustsFontSizeToFit>
         <Text style={styles.oursValue}>{formatBytes(ours)}</Text>
         {used !== null ? <Text style={styles.usedValue}>{' / '}{formatBytes(used)}</Text> : null}
         <Text style={styles.cardUnit}>{' / '}{formatBytes(installed)}</Text>
       </Text>
-      <View style={[styles.meter, styles.meterRow]}>
-        <View style={[styles.fillFlat, { width: percent(summary.oursShare), backgroundColor: colors.accent }]} />
-        {used !== null ? <View style={[styles.fillFlat, { width: percent(summary.usedShare - summary.oursShare), backgroundColor: USED_COLOR }]} /> : null}
-      </View>
+      <Text style={styles.cardKey} numberOfLines={1} adjustsFontSizeToFit>
+        {used !== null ? 'App and sessions / in use / installed' : 'App and sessions / installed'}
+      </Text>
+      <UsageDonut
+        slices={ring.slices}
+        total={installed}
+        format={formatBytes}
+        center={center}
+        label={used !== null
+          ? `Switchboard and its sessions use ${formatBytes(ours)}; ${formatBytes(used)} of ${formatBytes(installed)} is in use on the computer`
+          : `Switchboard and its sessions use ${formatBytes(ours)} of ${formatBytes(installed)}`}
+      />
       <Text style={styles.cardHint}>
         {[
-          `${formatPercent(ours, installed)} app and sessions`,
-          used !== null ? `${formatPercent(used, installed)} used` : null,
-          summary.free !== null ? `${formatBytes(summary.free)} free` : null,
+          `app ${formatBytes(totals.appBytes)}`,
+          `${running.join(', ')} ${formatBytes(totals.ownersBytes)}`,
+          `${totals.processes} process${totals.processes === 1 ? '' : 'es'}`,
+          totals.free !== null ? `${formatBytes(totals.free)} free` : null,
+          `app CPU ${formatCpu(data.app.cpu)}`,
         ].filter(Boolean).join(' · ')}
-      </Text>
-      <Text style={styles.cardHint}>
-        app {formatBytes(summary.appBytes)} · {summary.running} {formatBytes(summary.ownersBytes)} · {summary.processCount} process{summary.processCount === 1 ? '' : 'es'} · app CPU {formatCpu(appCpu)}
       </Text>
     </View>
   );
 }
 
+/** "just now", "12 min ago", "2 h ago". */
+function agoText(at: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.round(minutes / 60)} h ago`;
+}
+
 /**
- * The disks, one line each: its name, what is free of how much, and a bar of
- * how full it is. The disk of home and the projects comes first; a computer
- * with more (Linux keeps the projects on several) lists them all.
+ * The disk of home and the projects as a ring, as on the desktop: used / size,
+ * each project (its folder and attached folders, which open under it) when
+ * the computer measured them, other files and free. Any other disk below it
+ * as a line and a bar.
  */
-function DisksCard({ disks, platform }: { disks: Disk[]; platform: string }) {
+function DisksCard({ disks, platform, projects, onMeasure }: {
+  disks: Disk[];
+  platform: string;
+  projects: ProjectDiskUsage | null;
+  onMeasure: () => void;
+}) {
+  const [main, ...others] = disks;
+  const ring = useMemo(() => diskSlices(main, { projects: projects?.projects ?? null }), [main, projects]);
+  const used = Math.max(0, main.totalBytes - main.freeBytes);
+  const format = (bytes: number) => formatDisk(bytes, platform);
+  const details = (slice: Slice): DetailRow[] | null => {
+    if (slice.project) {
+      return slice.project.folders.map((folder) => {
+        const notes = [];
+        if (folder.isRoot) notes.push('project folder');
+        if (folder.inside) notes.push(`inside ${folder.inside}`);
+        if (folder.alsoIn.length) notes.push(`also in ${folder.alsoIn.join(', ')}`);
+        return { key: folder.path, name: folder.name, value: folder.bytes == null ? '—' : format(folder.bytes), note: notes.join(' · ') };
+      });
+    }
+    if (slice.projects) return slice.projects.map((project) => ({ key: project.id, name: project.name, value: format(project.bytes) }));
+    return null;
+  };
+  const level = ring.level === 'high' ? 'Almost full' : ring.level === 'mid' ? 'Low on space' : null;
   return (
     <View style={styles.cardMain}>
-      <Text style={styles.cardLabel}>{disks.length > 1 ? `Disks · ${disks.length}` : 'Disk'}</Text>
-      {disks.map((disk, i) => {
+      <Text style={styles.cardLabel}>{disks.length > 1 ? `Disk · ${disks.length} disks` : 'Disk'}</Text>
+      <Text style={styles.cardValue} numberOfLines={1} adjustsFontSizeToFit>
+        {format(used)}<Text style={styles.cardUnit}>{' / '}{format(main.totalBytes)}</Text>
+      </Text>
+      <Text style={styles.cardKey}>used / size</Text>
+      <UsageDonut
+        slices={ring.slices}
+        total={main.totalBytes}
+        format={format}
+        center={{ big: formatPercent(used, main.totalBytes) || '—', small: 'used' }}
+        label={`${main.name}: ${format(used)} used of ${format(main.totalBytes)}, ${format(main.freeBytes)} free`}
+        details={details}
+      />
+      <Text style={styles.cardHint}>
+        {format(main.freeBytes)} free on {main.name}
+        {level ? <Text style={[styles.low, ring.level === 'high' && styles.lowHigh]}>{` · ${level}`}</Text> : null}
+      </Text>
+      {projects ? (
+        projects.measuring
+          ? <Text style={styles.cardHint}>{projects.projects ? 'Measuring the projects again…' : 'Measuring the projects (their folder and attached folders)…'}</Text>
+          : projects.measuredAt ? (
+            <View style={styles.measureLine}>
+              <Text style={styles.cardHint}>Projects measured {agoText(projects.measuredAt)} · </Text>
+              <Pressable onPress={onMeasure} accessibilityRole="button" hitSlop={8} style={({ pressed }) => pressed && styles.pressed}>
+                <Text style={styles.link}>Measure again</Text>
+              </Pressable>
+            </View>
+          ) : null
+      ) : null}
+      {others.map((disk) => {
         const fill = diskFill(disk);
         return (
           <View
             key={disk.mount}
-            style={[styles.disk, i > 0 && styles.diskNext]}
+            style={[styles.disk, styles.diskNext]}
             accessible
             accessibilityLabel={`${disk.name}: ${formatDisk(disk.freeBytes, platform)} free of ${formatDisk(disk.totalBytes, platform)}`}
           >
@@ -445,11 +535,14 @@ const styles = StyleSheet.create({
   cardHint: { color: colors.textDim, fontSize: 12 },
   meter: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginVertical: 4 },
   fill: { height: '100%', borderRadius: 3 },
-  meterRow: { flexDirection: 'row' },
-  fillFlat: { height: '100%' },
   oursValue: { color: '#c4c8ff' },
+  cardKey: { color: colors.textFaint, fontSize: 11.5 },
+  low: { color: colors.attention, fontWeight: '600' },
+  lowHigh: { color: colors.danger },
+  measureLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  link: { color: colors.accent, fontSize: 12, fontWeight: '600' },
   cardUnit: { color: colors.textDim, fontSize: 15, fontWeight: '500' },
-  usedValue: { color: '#8f94d8' },
+  usedValue: { color: '#a6a8d8' },
   disk: { gap: 3 },
   diskNext: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   diskName: { color: colors.text, fontSize: 15, fontWeight: '700' },
