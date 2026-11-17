@@ -12,6 +12,8 @@ export type ProjectUi = {
   tab: ProjectTab;
   /** The Git tab's view: Changes, History or Worktrees. */
   gitView?: GitView;
+  /** The repository (folder path) Changes and History show; the two views share it, as on the desktop. */
+  gitRepo?: string;
   /** The session the Session tab shows; it outlives a switch to another tab, as on the desktop. */
   session?: string | null;
   /** Whether the Session tab opened on the chat or the terminal. */

@@ -1,14 +1,20 @@
-import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { FileViewToggle, type FileView } from '@/components/git/FileViewToggle';
+import { GitGraphView } from '@/components/git/GitGraphView';
+import { RepositoryBlock } from '@/components/git/RepositoryBlock';
+import { usePullRefresh } from '@/components/PullRefresh';
+import { useGitInfo } from '@/git/info-query';
+import { chooseRepo, historyRepos, type RepoRef } from '@/git/repo-choice';
+import { useCanStage } from '@/git/stage-requests';
 import type { Project } from '@/projects/model';
 import { GIT_VIEWS, type GitView } from '@/projects/tabs';
 import { useProjectUi } from '@/projects/ui-store';
-import { shortProjectPath } from '@/sessions/model';
 import { colors, spacing } from '@/theme';
-import { InfoRow, Section, SectionLink } from '../Section';
-import { useTabScroll } from '../useTabScroll';
+import { RepoChips } from '../RepoChips';
+import { SectionLink } from '../Section';
 import { WorktreesTab } from './WorktreesTab';
 
 /**
@@ -22,7 +28,7 @@ export function GitTab({ project, active = true }: { project: Project; active?: 
   if (!visited.includes(view)) setVisited([...visited, view]);
 
   const bodies: Record<GitView, ReactNode> = {
-    changes: <ChangesView project={project} />,
+    changes: <ChangesView project={project} active={active && view === 'changes'} />,
     history: <HistoryView project={project} />,
     worktrees: <WorktreesTab project={project} active={active && view === 'worktrees'} />,
   };
@@ -56,46 +62,81 @@ export function GitTab({ project, active = true }: { project: Project; active?: 
   );
 }
 
-/** The way into each repository's changes and latest commits. */
-function ChangesView({ project }: { project: Project }) {
-  const scroll = useTabScroll(project.id, 'changes');
+/** The selected repository's branch, changes and latest commits, under the repository chips. */
+function ChangesView({ project, active }: { project: Project; active: boolean }) {
+  const canStage = useCanStage();
+  const [fileView, setFileView] = useState<FileView>('list');
+  const [gitRepo, patchUi] = useProjectUi(project.id, (ui) => ui.gitRepo);
+  const info = useGitInfo(project.id);
+  const repositories = info.data?.repositories || [];
+  const repo = chooseRepo(repositories, gitRepo);
+  // Back from the Git Graph or another screen, or this view shown again: staging or a commit may have changed everything.
+  const { refetch } = info;
+  useFocusEffect(useCallback(() => { if (active) refetch(); }, [refetch, active]));
+  const pull = usePullRefresh(() => info.refetch());
+
   return (
-    <ScrollView {...scroll}>
-      <Section title="Changes">
-        {project.folders.length ? (
-          <InfoRow
-            title="Branch, changes and latest commits"
-            meta={project.folders.map((f) => shortProjectPath(f.path)).join(', ')}
-            onPress={() => router.push({ pathname: '/git', params: { projectId: project.id, title: project.name } })}
+    <View style={styles.body}>
+      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => patchUi({ gitRepo: path })} />
+      <ScrollView refreshControl={pull}>
+        {repo ? (
+          <View style={styles.toggleRow}>
+            <FileViewToggle view={fileView} onChange={setFileView} />
+          </View>
+        ) : null}
+        {info.isLoading ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : null}
+        {info.data?.error ? <Text style={styles.text}>{info.data.error}</Text> : null}
+        {repo ? (
+          <RepositoryBlock
+            key={repo.path}
+            projectId={project.id}
+            repo={repo}
+            tree={fileView === 'tree'}
+            canStage={canStage}
+            onOpenHistory={() => patchUi({ gitView: 'history', gitRepo: repo.path })}
           />
-        ) : (
-          <>
+        ) : null}
+        {!info.isLoading && !repo && !info.data?.error ? (
+          <View style={styles.empty}>
             <Text style={styles.text}>No folder of this project is attached yet.</Text>
             <SectionLink label="Attach a folder…" onPress={() => router.push({ pathname: '/folders', params: { projectId: project.id } })} />
-          </>
-        )}
-      </Section>
-    </ScrollView>
+          </View>
+        ) : null}
+      </ScrollView>
+    </View>
   );
 }
 
-/** The Git Graph of each folder of the project, with its actions. */
+/** The Git Graph of the selected repository, with its actions, under the repository chips. */
 function HistoryView({ project }: { project: Project }) {
-  const scroll = useTabScroll(project.id, 'history');
+  const [gitRepo, patchUi] = useProjectUi(project.id, (ui) => ui.gitRepo);
+  // The repositories are read by Changes too: use what is cached. Until they arrive, the project's folders stand in.
+  const info = useGitInfo(project.id, false);
+  const known = info.data?.repositories;
+  const repositories = useMemo(
+    () => historyRepos(known ?? project.folders.map((folder): RepoRef => ({ path: folder.path }))),
+    [known, project.folders],
+  );
+  const repo = chooseRepo(repositories, gitRepo);
+
   return (
-    <ScrollView {...scroll}>
-      <Section title="History">
-        {project.folders.map((folder) => (
-          <InfoRow
-            key={folder.path}
-            title={shortProjectPath(folder.path)}
-            meta={folder.mode === 'worktree' ? `worktree${folder.branch ? ` · ${folder.branch}` : ''}` : 'folder'}
-            onPress={() => router.push({ pathname: '/graph', params: { projectId: project.id, folder: folder.path } })}
-          />
-        ))}
-        {!project.folders.length ? <Text style={styles.text}>No folder of this project is attached yet.</Text> : null}
-      </Section>
-    </ScrollView>
+    <View style={styles.body}>
+      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => patchUi({ gitRepo: path })} />
+      {repo ? (
+        // Its own state (open row, selection, page) belongs to one repository.
+        <GitGraphView
+          key={repo.path}
+          projectId={project.id}
+          folder={repo.path}
+          embedded
+          onReviewChanges={() => patchUi({ gitView: 'changes', gitRepo: repo.path })}
+        />
+      ) : (
+        <View style={styles.empty}>
+          <Text style={styles.text}>No folder of this project is attached yet.</Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -110,4 +151,6 @@ const styles = StyleSheet.create({
   optionText: { color: colors.textDim, fontSize: 13.5, fontWeight: '600' },
   optionTextOn: { color: '#e4e4fa' },
   text: { color: colors.textFaint, fontSize: 13, paddingVertical: spacing.sm },
+  empty: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  toggleRow: { alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
 });

@@ -45,3 +45,13 @@ describe('selecting from the store', () => {
     unsubscribe();
   });
 });
+
+describe('the Git tab repository', () => {
+  it('is remembered per project, beside the view', () => {
+    const { patch, get } = useProjectUiStore.getState();
+    patch('p1', { gitView: 'history', gitRepo: '/work/app' });
+    patch('p1', { gitView: 'changes' });
+    expect(get('p1').gitRepo).toBe('/work/app');
+    expect(get('p2').gitRepo).toBeUndefined();
+  });
+});
