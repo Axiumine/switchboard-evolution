@@ -331,6 +331,9 @@ function gitGraphBuildMenuCtx(project, state, body, repo, target) {
     onOpenSourceControlView: () => { if (typeof setProjectTab === 'function') setProjectTab(project, 'git'); if (typeof renderOverview === 'function') renderOverview(); },
     hasUntrackedFiles: !!(state.uncommitted && (state.uncommitted.changes || []).some(f => f.status === 'untracked')),
     codeReview: state.codeReview ? { key: state.codeReview.key, reviewedPaths: state.codeReview.reviewedPaths } : null,
+    compareBase: gitGraphCompareBase(state),
+    onSelectForCompare: (hash) => gitGraphSelectForCompare(project, state, body, hash),
+    onCompare: (hash) => gitGraphCompareWithSelected(project, state, body, hash),
     onMarkFileReviewed: (path, reviewed) => gitGraphSetFileReviewed(project, state, body, path, reviewed),
     onViewDiff: (file) => gitGraphOpenFileDiff(project, state, body, repo, file.path),
     onViewFileAtRevision: (file) => gitGraphViewFileAtRevision(project, state, body, repo, file),
@@ -1142,23 +1145,50 @@ function gitGraphHandleRowClick(project, state, body, el, event) {
   const hash = el.dataset.ggHash;
   if (!hash) return;
   const row = state.rows.find(r => r.hash === hash);
-  if (event.ctrlKey || event.metaKey) {
-    if (state.selectedHash && state.selectedHash !== hash) {
-      const first = state.selectedHash, second = hash;
-      // Order-independent: the comparison always reads from whichever side
-      // is actually the ancestor toward the descendant. Click order only
-      // decides it when neither is reachable from the other within the
-      // loaded window (e.g. unrelated histories) — the default below.
-      let fromHash = first, toHash = second;
-      if (gitGraphIsAncestor(state.rows, second, first)) { fromHash = second; toHash = first; }
-      state.compareHash = hash;
-      gitGraphOpenComparison(project, state, body, fromHash, toHash);
-      return;
-    }
-  }
+  if ((event.ctrlKey || event.metaKey) && gitGraphCompareWithSelected(project, state, body, hash)) return;
   state.selectedHash = hash;
   state.compareHash = null;
   gitGraphOpenDetails(project, state, body, row);
+}
+
+/** Compares `hash` with the selected commit (the one open, or marked with
+ * Select for Compare): Ctrl/Cmd+click and the right-click menu. False when
+ * there is no other commit selected. */
+function gitGraphCompareWithSelected(project, state, body, hash) {
+  if (!state.selectedHash || state.selectedHash === hash) return false;
+  const first = state.selectedHash, second = hash;
+  // Order-independent: the comparison always reads from whichever side
+  // is actually the ancestor toward the descendant. Click order only
+  // decides it when neither is reachable from the other within the
+  // loaded window (e.g. unrelated histories) — the default below.
+  let fromHash = first, toHash = second;
+  if (gitGraphIsAncestor(state.rows, second, first)) { fromHash = second; toHash = first; }
+  state.compareHash = hash;
+  gitGraphOpenComparison(project, state, body, fromHash, toHash);
+  return true;
+}
+
+/** Marks a commit as the one the next Compare starts from, without opening
+ * its details (the row shows as selected). */
+function gitGraphSelectForCompare(project, state, body, hash) {
+  state.detailsRequest = (state.detailsRequest || 0) + 1; // a load still on its way no longer lands
+  state.detailsData = null;
+  state.detailsLoading = false;
+  state.codeReview = null;
+  state.lastViewedFilePath = null;
+  state.selectedHash = hash;
+  state.compareHash = null;
+  const dock = body.querySelector('#gg-details-docked');
+  if (dock) dock.style.display = 'none';
+  gitGraphPaint(project, state, body, { preserveScroll: true });
+}
+
+/** The selected commit as the right-click menu names it, or null. */
+function gitGraphCompareBase(state) {
+  if (!state.selectedHash) return null;
+  if (state.selectedHash === '#uncommitted') return { hash: state.selectedHash, label: 'Uncommitted Changes' };
+  const row = (state.rows || []).find(r => r.hash === state.selectedHash);
+  return { hash: state.selectedHash, label: (row && row.shortHash) || state.selectedHash.slice(0, 8) };
 }
 
 function gitGraphShowTooltip(el, state) {

@@ -195,11 +195,18 @@ function gitGraphBuildCommitMenu(ctx) {
   const isHead = gitGraphIsHeadCommit(ctx);
   const isCurrentBranchTip = gitGraphIsCurrentBranchTip(ctx);
   const dropVisible = gitGraphCommitDropVisible(commit);
-  const items = [
+  // Comparing two commits: the one selected (marked here, or open) and this one.
+  const base = ctx.compareBase && ctx.compareBase.hash !== commit.hash ? ctx.compareBase : null;
+  const isBase = !!(ctx.compareBase && ctx.compareBase.hash === commit.hash);
+  const items = [];
+  if (base) items.push({ id: 'compareWithSelected', label: `Compare with ${base.label}`, onClick: () => ctx.onCompare && ctx.onCompare(commit.hash) });
+  if (!isBase) items.push({ id: 'selectForCompare', label: 'Select for Compare', onClick: () => ctx.onSelectForCompare && ctx.onSelectForCompare(commit.hash) });
+  items.push({ sep: true });
+  items.push(
     { id: 'addTag', label: 'Add Tag…', icon: gitGraphMenuIcon('tag'), onClick: () => gitGraphShowAddTagDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, commitHash: commit.hash, commitShortHash: commit.shortHash, remotes: ctx.remotes, suggestedName: gitGraphSuggestNextTagName(ctx.tags), defaults: ctx.dialogDefaults && ctx.dialogDefaults.addTag }) },
     { id: 'createBranch', label: 'Create Branch…', icon: gitGraphMenuIcon('branch'), onClick: () => gitGraphShowCreateBranchDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, commitHash: commit.hash, defaults: ctx.dialogDefaults && ctx.dialogDefaults.createBranch }) },
     { sep: true },
-  ];
+  );
   if (!isHead) items.push({ id: 'checkout', label: 'Checkout…', onClick: () => gitGraphShowCheckoutCommitDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, commitHash: commit.hash, commitShortHash: commit.shortHash }) });
   items.push(
     { id: 'cherrypick', label: 'Cherry Pick…', icon: gitGraphMenuIcon('cherryPick'), onClick: () => gitGraphShowCherryPickDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, commitHash: commit.hash, commitShortHash: commit.shortHash, parents: commit.parents, defaults: ctx.dialogDefaults && ctx.dialogDefaults.cherryPick }) },

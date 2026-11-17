@@ -979,6 +979,34 @@ test('Ctrl-clicking an older ancestor after a newer commit still compares from t
   assert.deepEqual(calls[0].slice(2), ['older', 'newer']);
 });
 
+test('the right-click menu selects a commit for compare, then compares another with it, ancestor first', async () => {
+  const state = view.gitGraphState('proj-cmp-menu');
+  state.repositories = [{ path: '/repo', git: true }];
+  state.selectedRepo = '/repo';
+  state.rows = [
+    { hash: 'newer', shortHash: 'newer12', parents: ['older'] },
+    { hash: 'older', shortHash: 'older12', parents: [] },
+  ];
+  const project = { id: 'proj-cmp-menu' };
+  const body = fakeElement();
+  const repo = { path: '/repo' };
+  const calls = [];
+  global.window = { api: { getGitGraphCompareDetail: (...args) => { calls.push(args); return Promise.resolve({ ok: true, files: [] }); } } };
+
+  assert.equal(view.gitGraphBuildMenuCtx(project, state, body, repo, null).compareBase, null);
+  view.gitGraphBuildMenuCtx(project, state, body, repo, null).onSelectForCompare('newer');
+  assert.equal(state.selectedHash, 'newer');
+  assert.equal(state.detailsData, null, 'selecting does not open the details');
+  assert.deepEqual(view.gitGraphBuildMenuCtx(project, state, body, repo, null).compareBase, { hash: 'newer', label: 'newer12' });
+
+  view.gitGraphBuildMenuCtx(project, state, body, repo, null).onCompare('older');
+  assert.equal(state.detailsData.mode, 'compare');
+  assert.equal(state.detailsData.fromHash, 'older');
+  assert.equal(state.detailsData.toHash, 'newer');
+  assert.deepEqual(calls[0].slice(2), ['older', 'newer']);
+  await new Promise(resolve => setImmediate(resolve));
+});
+
 // === Commit-details file list reuses #98's tree builder ===
 
 test('gitGraphFileListHtml (tree mode) builds folder rows via buildGitChangeTree/gitTreeRows and leaf rows carry the security-fixed escapeAttr path attribute', () => {

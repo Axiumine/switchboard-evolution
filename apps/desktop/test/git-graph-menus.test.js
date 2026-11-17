@@ -35,6 +35,32 @@ function labels(items) { return items.filter(i => !i.sep).map(i => i.label); }
 
 // --- Commit menu ---
 
+test('commit menu: Select for Compare on any commit, Compare with the selected one on the others', () => {
+  resetWindowApi();
+  const calls = [];
+  const base = {
+    projectId: 'p', folderPath: '/repo', head: { hash: 'zzz', branch: 'main' },
+    onSelectForCompare: (hash) => calls.push(['select', hash]),
+    onCompare: (hash) => calls.push(['compare', hash]),
+  };
+  const commit = { hash: 'def456', shortHash: 'def456', subject: 's', parents: ['p1'], children: [] };
+
+  const nothingSelected = menus.gitGraphBuildCommitMenu({ ...base, commit });
+  assert.equal(labels(nothingSelected)[0], 'Select for Compare');
+  assert.ok(!labels(nothingSelected).some(l => /^Compare with/.test(l)));
+  nothingSelected.find(i => i.id === 'selectForCompare').onClick();
+  assert.deepEqual(calls.pop(), ['select', 'def456']);
+
+  const otherSelected = menus.gitGraphBuildCommitMenu({ ...base, commit, compareBase: { hash: 'abc123', label: 'abc1234' } });
+  assert.equal(labels(otherSelected)[0], 'Compare with abc1234');
+  otherSelected.find(i => i.id === 'compareWithSelected').onClick();
+  assert.deepEqual(calls.pop(), ['compare', 'def456']);
+
+  // On the selected commit itself there is nothing to compare with.
+  const itself = menus.gitGraphBuildCommitMenu({ ...base, commit, compareBase: { hash: 'def456', label: 'def456' } });
+  assert.ok(!labels(itself).some(l => /Compare/.test(l)));
+});
+
 test('commit menu hides Checkout on the currently checked-out commit, shows it otherwise', () => {
   resetWindowApi();
   const base = { projectId: 'p', folderPath: '/repo', head: { hash: 'abc123', branch: 'main' } };
