@@ -1548,10 +1548,28 @@ loadProjects().then(async () => {
     } else if (session) {
       if (openSessions.has(activeSessionId)) showSession(activeSessionId);
       else openSession(session);
+      revealActiveSessionInSidebar();
     }
     else setActiveSession(null);
   }
 });
+
+/**
+ * At start, the session opened again is in sight in the sidebar: its project's
+ * drawer open in Projects, its folder open in Sessions.
+ */
+function revealActiveSessionInSidebar() {
+  if (!activeSessionId) return;
+  if (typeof revealSessionInProjects === 'function') revealSessionInProjects(activeSessionId);
+  const item = sidebarContent?.querySelector(`.session-item[data-session-id="${CSS.escape(activeSessionId)}"]`);
+  if (!item) return;
+  const list = item.closest('.project-sessions');
+  const header = list?.previousElementSibling;
+  if (header?.classList.contains('collapsed')) header.classList.remove('collapsed');
+  const slug = item.closest('.slug-group.collapsed');
+  if (slug) { slug.classList.remove('collapsed'); saveExpandedSlugs(); }
+  item.scrollIntoView({ block: 'nearest' });
+}
 
 // A session a project window opens or starts: here, where the terminals are
 // (project-window.js, main.js project-window-run).

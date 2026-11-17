@@ -1976,6 +1976,40 @@ function showTrackInDrawer(project, key) {
   (head || drawer)?.scrollIntoView({ block: 'nearest' });
 }
 
+/**
+ * Open the drawer that holds a session and bring its row into sight: when the
+ * app starts again on the session that was open, the sidebar shows it at a
+ * glance instead of only marking its project. A long group's "+ N more" opens
+ * too when the session is past it; outside every project, the "No project"
+ * drawer and the session's folder open.
+ */
+function revealSessionInProjects(sessionId) {
+  const session = sessionMap.get(sessionId);
+  if (!session || !projectsContent) return false;
+  const found = projectForSession(session);
+  if (found) {
+    const project = found.project;
+    projectsUi.expandedProjects[project.id] = true;
+    const mode = paneGroupMode(project);
+    const limit = mode === 'track' ? visibleSessionCount : PANE_GROUP_LIMIT;
+    const group = groupSessions(project, mode).find(g => g.sessions.some(s => s.sessionId === sessionId));
+    const index = group ? group.sessions.findIndex(s => s.sessionId === sessionId) : -1;
+    if (group && !group.unlimited && index >= limit) projectsUi.expandedLists[`${project.id}:${mode}:${group.key}`] = true;
+  } else {
+    projectsUi.otherOpen = true;
+    if (session.projectPath) projectsUi.otherFolders[session.projectPath] = true;
+    const folder = sessionsWithoutProject().find(g => g.folder.projectPath === session.projectPath);
+    const index = folder ? folder.sessions.findIndex(s => s.sessionId === sessionId) : -1;
+    if (index >= visibleSessionCount) projectsUi.expandedLists[`other:${session.projectPath}`] = true;
+  }
+  saveProjectsUi();
+  renderProjectList();
+  if (found) refreshProjectDrawer(found.project.id); else refreshProjectDrawers();
+  const row = projectsContent.querySelector(`.pane-session[data-session-id="${CSS.escape(sessionId)}"]`);
+  row?.scrollIntoView({ block: 'nearest' });
+  return !!row;
+}
+
 /** Where a track's group sits in the drawer's Track view: tracks in order, then General. */
 function trackGroupIndex(project, key) {
   return groupSessions(project, 'track').findIndex(group => group.key === key);
