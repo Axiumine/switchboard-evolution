@@ -59,7 +59,8 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
   const [expanded, setExpanded] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [lastViewed, setLastViewed] = useState<string | null>(null);
-  // The commits ticked for Compare.
+  // The commits ticked for Compare, once Enable Selection (in "•••") shows the checkboxes.
+  const [selecting, setSelecting] = useState(false);
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const list = useRef<FlatList<HistoryRow>>(null);
   const queryClient = useQueryClient();
@@ -101,7 +102,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
   const open = expanded && loaded.has(expanded) ? expanded : null;
   // A row dropped or reset away is no longer ticked (like the open row, it is read against what is loaded).
   const ticked = useMemo(() => new Set([...checked].filter((hash) => loaded.has(hash))), [checked, loaded]);
-  const extraData = useMemo(() => ({ open, view, lastViewed, ticked }), [open, view, lastViewed, ticked]);
+  const extraData = useMemo(() => ({ open, view, lastViewed, ticked, selecting }), [open, view, lastViewed, ticked, selecting]);
 
 
   // The repository changed (here, on the computer, or from a terminal), and the progress of a network action.
@@ -133,11 +134,24 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
 
   // Compare with, as on the desktop: the commit open, else the only one ticked.
   const base = compareBase(open, ticked);
-  const toggleCheck = (hash: string) => setChecked((previous) => {
-    const next = new Set(previous);
-    if (next.has(hash)) next.delete(hash); else next.add(hash);
-    return next;
-  });
+  const toggleCheck = (hash: string) => {
+    // Ticking from the long-press menu turns the selection on, so the tick is in sight.
+    setSelecting(true);
+    setChecked((previous) => {
+      const next = new Set(previous);
+      if (next.has(hash)) next.delete(hash); else next.add(hash);
+      return next;
+    });
+  };
+  const loadedHashes = history.map((row) => row.hash);
+  const selectionOptions: SheetOption[] = selecting
+    ? [
+      { label: 'Select All', hint: `${loadedHashes.length} loaded`, onPress: () => setChecked(new Set(loadedHashes)) },
+      ...(ticked.size ? [{ label: 'Deselect All', onPress: () => setChecked(new Set()) }] : []),
+      { label: 'Invert Selection', onPress: () => setChecked(new Set(loadedHashes.filter((hash) => !ticked.has(hash)))) },
+      { label: 'Cancel Selection', onPress: () => { setSelecting(false); setChecked(new Set()); } },
+    ]
+    : [{ label: 'Enable Selection', hint: 'tick commits to compare them', onPress: () => setSelecting(true) }];
 
   /** Opens the comparison of these commits, oldest first. */
   function compare(hashes: Iterable<string>) {
@@ -168,6 +182,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
 
   const pushCurrent = currentBranch ? pushAction(currentBranch, upstreams[currentBranch], remoteNames) : null;
   const toolbarOptions: SheetOption[] = [
+    ...selectionOptions,
     ...(remoteNames.length ? [{ label: 'Fetch from all remotes', onPress: () => run({ label: 'Fetch', actionId: 'fetchAllRemotes', params: {} }) }] : []),
     ...(pushCurrent ? [{ label: pushCurrent.label, onPress: () => run(pushCurrent) }] : []),
     { label: 'Review changes', onPress: onReviewChanges ?? (() => router.push({ pathname: '/git', params: { projectId } })) },
@@ -177,15 +192,8 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
   const branchText = currentBranch ? `On ${currentBranch}` : headHash ? `Detached at ${headHash.slice(0, 7)}` : null;
   const actions = (
     <View style={styles.headerButtons}>
-      <Pressable onPress={() => setChecked(new Set(history.map((row) => row.hash)))} hitSlop={10} accessibilityLabel="Select all loaded commits">
-        <Ionicons name="checkmark-done-outline" size={22} color={colors.text} />
-      </Pressable>
-      {ticked.size ? (
-        <Pressable onPress={() => setChecked(new Set())} hitSlop={10} accessibilityLabel="Clear the selection">
-          <Ionicons name="close-circle-outline" size={22} color={colors.text} />
-        </Pressable>
-      ) : null}
-      <Pressable onPress={() => { remotes.refetch(); setToolbar(true); }} hitSlop={10} accessibilityLabel="Repository actions">
+      {selecting ? <Text style={styles.selectedCount}>{ticked.size} selected</Text> : null}
+      <Pressable onPress={() => { remotes.refetch(); setToolbar(true); }} hitSlop={10} accessibilityLabel="Selection and repository actions">
         <Text style={styles.headerButton}>•••</Text>
       </Pressable>
     </View>
@@ -227,6 +235,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
               lanes={lanes}
               palette={palette}
               selected={item.hash === open}
+              selecting={selecting}
               checked={ticked.has(item.hash)}
               onToggleCheck={() => toggleCheck(item.hash)}
               onPress={() => toggle(item.hash)}
@@ -241,7 +250,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
                 headHash={headHash}
                 below={layout[index].below}
                 graphWidth={Math.max(lanes, 1) * LANE_WIDTH}
-                leading={CHECK_WIDTH}
+                leading={selecting ? CHECK_WIDTH : 0}
                 colour={(i) => laneColour(palette, i)}
                 fileView={view}
                 onFileView={setFileView}
@@ -315,8 +324,8 @@ function confirmThen(action: GraphAction, run: (action: GraphAction) => void) {
   ]);
 }
 
-const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, checked, onToggleCheck, onPress, onLongPress }: {
-  row: HistoryRow; geometry: GraphRow; lanes: number; palette: string[]; selected: boolean; checked: boolean;
+const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, selecting, checked, onToggleCheck, onPress, onLongPress }: {
+  row: HistoryRow; geometry: GraphRow; lanes: number; palette: string[]; selected: boolean; selecting: boolean; checked: boolean;
   onToggleCheck: () => void; onPress: () => void; onLongPress: () => void;
 }) {
   const colour = (index: number) => laneColour(palette, index);
@@ -336,17 +345,19 @@ const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selec
       accessibilityState={{ expanded: selected }}
       accessibilityHint="Shows the files it changed. Long press for actions."
     >
-      {/* Its own press: ticking a row does not open it. */}
-      <Pressable
-        onPress={onToggleCheck}
-        hitSlop={{ top: 4, bottom: 4, left: 8, right: 0 }}
-        style={styles.check}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked }}
-        accessibilityLabel="Select for Compare"
-      >
-        <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={20} color={checked ? colors.accent : colors.textFaint} />
-      </Pressable>
+      {/* Only with the selection on; its own press: ticking a row does not open it. */}
+      {selecting ? (
+        <Pressable
+          onPress={onToggleCheck}
+          hitSlop={{ top: 4, bottom: 4, left: 8, right: 0 }}
+          style={styles.check}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked }}
+          accessibilityLabel="Select for Compare"
+        >
+          <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={20} color={checked ? colors.accent : colors.textFaint} />
+        </Pressable>
+      ) : null}
       <Svg width={Math.max(lanes, 1) * LANE_WIDTH} height={ROW_HEIGHT}>
         {geometry.segments.map((segment, i) => <Path key={i} d={segment.d} stroke={colour(segment.colorIndex)} strokeWidth={2} fill="none" />)}
         <Circle
@@ -382,6 +393,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', height: ROW_HEIGHT, paddingLeft: spacing.sm, paddingRight: spacing.md },
   pressed: { backgroundColor: colors.surface },
   check: { width: CHECK_WIDTH, height: ROW_HEIGHT, alignItems: 'center', justifyContent: 'center' },
+  selectedCount: { color: colors.accent, fontSize: 12.5, fontWeight: '600' },
   selected: { backgroundColor: colors.raised },
   text: { flex: 1, marginLeft: spacing.sm, gap: 1 },
   subjectLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
