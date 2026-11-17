@@ -777,6 +777,22 @@ function gitViewToggleHtml(mode) {
   </span>`;
 }
 
+/**
+ * The top of the Changes tab: one tab per repository (only when there are
+ * several), then the chosen one's path right under them, with "Read only" at
+ * its end when nothing can be staged. The repository's name is already on its
+ * tab, so it is not repeated above.
+ */
+function gitRepoHeaderHtml(repositories, repo, { readOnly = false } = {}) {
+  const picker = repositories.length > 1 ? `
+    <div class="git-repo-picker" role="tablist" aria-label="Repositories">
+      ${repositories.map((item, index) => `<button type="button" class="git-repo-option ${item.path === repo.path ? 'active' : ''}" data-index="${index}">${escapeHtml(gitRepoName(item))}</button>`).join('')}
+    </div>` : '';
+  const badge = readOnly ? '<span class="git-readonly">Read only</span>' : '';
+  return `${picker}
+        <div class="git-tab-pathline"><span class="git-tab-path mono">${escapeHtml(repo.path)}</span>${badge}</div>`;
+}
+
 function paintGitRepository(project, state, body) {
   const repositories = state.repositories || [];
   if (!repositories.length) {
@@ -788,24 +804,17 @@ function paintGitRepository(project, state, body) {
   if (!repo) repo = repositories.find(item => item.git) || repositories[0];
   state.selectedRepo = repo.path;
 
-  const picker = repositories.length > 1 ? `
-    <div class="git-repo-picker" role="tablist" aria-label="Repositories">
-      ${repositories.map((item, index) => `<button type="button" class="git-repo-option ${item.path === repo.path ? 'active' : ''}" data-index="${index}">${escapeHtml(gitRepoName(item))}</button>`).join('')}
-    </div>` : '';
-
   if (!repo.git) {
     body.innerHTML = `
       <div class="git-tab-shell">
-        <div class="git-tab-top"><div><div class="git-tab-title">Git</div><div class="git-tab-path mono">${escapeHtml(repo.path)}</div></div><span class="git-readonly">Read only</span></div>
-        ${picker}
+        ${gitRepoHeaderHtml(repositories, repo, { readOnly: true })}
         <div class="git-empty-state"><div class="git-empty-title">Not a Git repository</div><div>${escapeHtml(repo.path)}</div></div>
       </div>`;
   } else {
     const changed = repo.changes.length;
     body.innerHTML = `
       <div class="git-tab-shell">
-        <div class="git-tab-top"><div><div class="git-tab-title">${escapeHtml(gitRepoName(repo))}</div><div class="git-tab-path mono">${escapeHtml(repo.path)}</div></div>${gitCanStage() ? '' : '<span class="git-readonly">Read only</span>'}</div>
-        ${picker}
+        ${gitRepoHeaderHtml(repositories, repo, { readOnly: !gitCanStage() })}
         ${gitOverviewHtml(repo)}
         <section class="git-section">
           <div class="git-section-heading"><span>Changes</span><span class="git-heading-right">${changed ? gitViewToggleHtml(gitChangesViewMode()) : ''}<span class="git-section-meta">${changed ? `${changed} file${changed === 1 ? '' : 's'}` : 'Working tree clean'}</span></span></div>

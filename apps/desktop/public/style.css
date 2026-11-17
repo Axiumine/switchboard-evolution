@@ -5715,6 +5715,17 @@ body { display: flex; flex-direction: column; }
   word-break: break-all;
 }
 
+/* The chosen repository's path, right under its tab (Changes). */
+.git-tab-pathline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.git-repo-picker + .git-tab-pathline { margin-top: -6px; }
+.git-tab-pathline .git-tab-path { margin-top: 0; min-width: 0; }
+.git-tab-pathline .git-readonly { margin-left: auto; flex-shrink: 0; }
+
 .git-readonly {
   flex-shrink: 0;
   color: #6f6f84;

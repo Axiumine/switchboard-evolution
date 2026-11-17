@@ -386,3 +386,38 @@ test('the hunks of a diff can be picked line by line, and a hunk staged as a who
   assert.match(ctx.gitHunksHtml(parsed, new Set(), 'staged'), /Unstage Hunk/);
   assert.equal(ctx.gitDiffNote(ctx.GitDiffModel.parseUnifiedDiff('diff --git a/x b/x\nnew file mode 100644\n--- /dev/null\n+++ b/x\n')), 'New file');
 });
+
+test('Changes header: repository tabs first, the chosen path under them, no title above', () => {
+  const ctx = loadContext();
+  const repos = [{ path: '/work/app', git: true }, { path: '/work/api', git: true }];
+  const html = ctx.gitRepoHeaderHtml(repos, repos[1], { readOnly: false });
+  assert.doesNotMatch(html, /git-tab-title/);
+  const picker = html.indexOf('git-repo-picker');
+  const line = html.indexOf('git-tab-pathline');
+  assert.ok(picker >= 0 && line > picker, 'the path comes after the tabs');
+  assert.match(html, /<span class="git-tab-path mono">\/work\/api<\/span><\/div>/);
+  assert.match(html, /git-repo-option active" data-index="1">api</);
+  assert.doesNotMatch(html, /Read only/);
+});
+
+test('Changes header with one repository: only its path, with Read only when nothing can be staged', () => {
+  const ctx = loadContext();
+  const repo = { path: '/work/app', git: true };
+  const html = ctx.gitRepoHeaderHtml([repo], repo, { readOnly: true });
+  assert.doesNotMatch(html, /git-repo-picker/);
+  assert.match(html, /git-tab-pathline"><span class="git-tab-path mono">\/work\/app<\/span><span class="git-readonly">Read only<\/span>/);
+});
+
+test('paintGitRepository puts the summary (and any warning) after the path line', () => {
+  const ctx = loadContext();
+  const body = { innerHTML: '', querySelectorAll: () => [] };
+  const repos = [
+    { path: '/work/app', git: true, branch: 'main', changes: [], commits: [], stats: { insertions: 0, deletions: 0 } },
+    { path: '/work/api', git: true, branch: 'dev', changes: [], commits: [], stats: { insertions: 0, deletions: 0 } },
+  ];
+  ctx.paintGitRepository({ id: 'p' }, { repositories: repos, selectedRepo: '/work/api' }, body);
+  const html = body.innerHTML;
+  assert.doesNotMatch(html, /git-tab-title/);
+  const order = ['git-repo-picker', 'git-tab-pathline', 'git-summary'].map(cls => html.indexOf(cls));
+  assert.ok(order.every(i => i >= 0) && order[0] < order[1] && order[1] < order[2], JSON.stringify(order));
+});
