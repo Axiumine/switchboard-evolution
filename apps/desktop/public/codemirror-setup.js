@@ -2,8 +2,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { EditorState, StateField, StateEffect, Compartment } from '@codemirror/state';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
+import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { highlightSelectionMatches } from '@codemirror/search';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
 import { tags } from '@lezer/highlight';
@@ -22,6 +21,10 @@ import { xml } from '@codemirror/lang-xml';
 import { yaml } from '@codemirror/lang-yaml';
 import { sql } from '@codemirror/lang-sql';
 import { cpp } from '@codemirror/lang-cpp';
+import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { diff } from '@codemirror/legacy-modes/mode/diff';
+import { toml } from '@codemirror/legacy-modes/mode/toml';
+import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 
 const markdownExtras = HighlightStyle.define([
   { tag: tags.monospace, color: '#8BE9FD' },
@@ -456,7 +459,7 @@ function createPlanEditor(parent) {
       cmGotoLineKeymap,
       cmSaveKeymap,
       cmFloatingSearch(),
-      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      markdownSupport(),
       dracula,
       syntaxHighlighting(markdownExtras),
       appThemePatch,
@@ -469,42 +472,55 @@ function createPlanEditor(parent) {
   return view;
 }
 
+// ── Languages ────────────────────────────────────────────────────────
+// The languages Switchboard highlights: a file by its name or extension, and
+// a Markdown code block (```ts, ```bash …) by name or alias. Only these go in
+// the bundle. @codemirror/language-data would bring every language CodeMirror
+// has: its imports are lazy, but esbuild inlines them all into the IIFE.
+
+// A LanguageSupport, not the bare Language: a Markdown code block reads its .language.
+const legacy = (mode) => () => new LanguageSupport(StreamLanguage.define(mode));
+
+const CODE_LANGUAGES = [
+  { name: 'JavaScript', alias: ['js', 'ecmascript', 'node'], extensions: ['js', 'mjs', 'cjs'], support: () => javascript() },
+  { name: 'JSX', extensions: ['jsx'], support: () => javascript({ jsx: true }) },
+  { name: 'TypeScript', alias: ['ts'], extensions: ['ts', 'mts', 'cts'], support: () => javascript({ typescript: true }) },
+  { name: 'TSX', extensions: ['tsx'], support: () => javascript({ jsx: true, typescript: true }) },
+  { name: 'Python', alias: ['py'], extensions: ['py'], support: () => python() },
+  { name: 'JSON', alias: ['jsonc', 'json5'], extensions: ['json'], support: () => json() },
+  { name: 'HTML', alias: ['htm'], extensions: ['html', 'htm'], support: () => html() },
+  { name: 'CSS', extensions: ['css'], support: () => css() },
+  { name: 'Rust', alias: ['rs'], extensions: ['rs'], support: () => rust() },
+  { name: 'Go', alias: ['golang'], extensions: ['go'], support: () => go() },
+  { name: 'Java', extensions: ['java'], support: () => java() },
+  { name: 'XML', alias: ['svg'], extensions: ['xml', 'svg'], support: () => xml() },
+  { name: 'YAML', alias: ['yml'], extensions: ['yaml', 'yml'], support: () => yaml() },
+  { name: 'SQL', extensions: ['sql'], support: () => sql() },
+  { name: 'C++', alias: ['c', 'cpp', 'cc', 'h', 'hpp'], extensions: ['c', 'cpp', 'cc', 'h', 'hpp'], support: () => cpp() },
+  { name: 'Shell', alias: ['sh', 'bash', 'zsh', 'console', 'shellscript'], extensions: ['sh', 'bash', 'zsh'], support: legacy(shell) },
+  { name: 'Diff', alias: ['patch'], extensions: ['diff', 'patch'], support: legacy(diff) },
+  { name: 'TOML', extensions: ['toml'], support: legacy(toml) },
+  { name: 'Dockerfile', alias: ['docker'], filename: /^Dockerfile$/, support: legacy(dockerFile) },
+  { name: 'Markdown', alias: ['md'], extensions: ['md', 'mdx', 'markdown'], support: () => markdownSupport() },
+];
+
+/** The same languages for Markdown code blocks, each made when a block first needs it. */
+const CODE_BLOCK_LANGUAGES = CODE_LANGUAGES.map(({ name, alias, extensions, filename, support }) =>
+  LanguageDescription.of({ name, alias, extensions, filename, load: async () => support() }));
+
+function markdownSupport() {
+  return markdown({ base: markdownLanguage, codeLanguages: CODE_BLOCK_LANGUAGES });
+}
+
 // ── Language Detection ───────────────────────────────────────────────
 
-const LANG_MAP = {
-  js: () => javascript(),
-  mjs: () => javascript(),
-  cjs: () => javascript(),
-  jsx: () => javascript({ jsx: true }),
-  ts: () => javascript({ typescript: true }),
-  tsx: () => javascript({ jsx: true, typescript: true }),
-  py: () => python(),
-  json: () => json(),
-  html: () => html(),
-  htm: () => html(),
-  css: () => css(),
-  rs: () => rust(),
-  go: () => go(),
-  java: () => java(),
-  xml: () => xml(),
-  svg: () => xml(),
-  yaml: () => yaml(),
-  yml: () => yaml(),
-  sql: () => sql(),
-  c: () => cpp(),
-  cpp: () => cpp(),
-  cc: () => cpp(),
-  h: () => cpp(),
-  hpp: () => cpp(),
-  md: () => markdown({ base: markdownLanguage, codeLanguages: languages }),
-  mdx: () => markdown({ base: markdownLanguage, codeLanguages: languages }),
-};
-
+/** The language of a file by its name, then its extension; Markdown when it is none of them. */
 function getLanguageExt(filename) {
-  const ext = (filename || '').split('.').pop()?.toLowerCase();
-  const factory = LANG_MAP[ext];
-  if (factory) return factory();
-  return markdown({ base: markdownLanguage, codeLanguages: languages });
+  const base = (filename || '').split(/[\\/]/).pop();
+  const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : '';
+  const lang = CODE_LANGUAGES.find(l => l.filename && l.filename.test(base))
+    || CODE_LANGUAGES.find(l => l.extensions && l.extensions.includes(ext));
+  return lang ? lang.support() : markdownSupport();
 }
 
 // ── Read-Only File Viewer ───────────────────────────────────────────
