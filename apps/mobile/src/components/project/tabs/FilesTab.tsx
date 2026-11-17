@@ -18,6 +18,7 @@ import {
   appendMention, byteSize, chatMention, filesRoots, foldersToList, joinPath, parentRelative, pasteTarget, remapExpanded, treeRows,
   type FileEntry,
 } from '@/files/model';
+import { afterTrash, trashPicked } from '@/files/selection';
 import { PaneLayout, usePaneMode } from '@/layout/PaneLayout';
 import { projectSessions, type Project } from '@/projects/model';
 import { act } from '@/projects/queries';
@@ -25,6 +26,7 @@ import { useProjectUi } from '@/projects/ui-store';
 import { useOpenSession } from '@/projects/open-session';
 import { getDraft, setDraftText } from '@/sessions/drafts';
 import { sessionTitle, type Session } from '@/sessions/model';
+import { failuresText, invertSelection, selectAll, topLevelPicks, trashQuestion } from '@/shared/vendor/file-selection';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 
@@ -34,9 +36,13 @@ type Listing = { ok: boolean; entries?: FileEntry[]; error?: string };
 const useFilesClipboard = create<{ clip: { mode: 'copy' | 'cut'; root: string; rel: string; name: string } | null }>(() => ({ clip: null }));
 
 const NONE: string[] = [];
+const NOTHING: ReadonlySet<string> = new Set();
 
 // iOS cannot show a sheet while the previous one is still sliding away.
 const AFTER_SHEET_MS = Platform.OS === 'ios' ? 450 : 0;
+
+/** Room for the checkboxes before the indent, with Enable Selection on. */
+const CHECK_COLUMN = 28;
 
 /** Tree beside the file from this width up (tablets, a phone on its side). */
 const TWO_PANE = 600;
@@ -72,6 +78,7 @@ export function FilesTab({ project }: { project: Project }) {
     paste: useCapability('paste-project-entry'),
     timeline: useCapability('get-file-timeline'),
     manage: useCapability('manage-project-entry'),
+    trashMany: useCapability('trash-project-entries'),
     download: useCapability('read-project-file-chunk'),
     search: useCapability('search-project-files'),
     replace: useCapability('replace-in-project-files'),
@@ -81,6 +88,17 @@ export function FilesTab({ project }: { project: Project }) {
   const [searchOpened, setSearchOpened] = useState(false);
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
   const searchOn = searching && can.search;
+  // Enable Selection in the "•••" menu: a checkbox on every row, for Delete N
+  // Selected. Kept for the folder it was turned on in; another tab drops it.
+  const [selection, setSelection] = useState<{ root: string; picked: ReadonlySet<string> } | null>(null);
+  const selecting = selection?.root === root;
+  const picked = selecting ? selection.picked : NOTHING;
+  const setPicked = (next: ReadonlySet<string>) => setSelection({ root, picked: next });
+  const togglePick = (rel: string) => {
+    const next = new Set(picked);
+    if (next.has(rel)) next.delete(rel); else next.add(rel);
+    setPicked(next);
+  };
 
   const patchFiles = useCallback((partial: { root?: string; expanded?: Record<string, string[]>; selected?: Record<string, string | null> }) => {
     patchUi({ files: { ...ui, ...partial } });
@@ -98,6 +116,7 @@ export function FilesTab({ project }: { project: Project }) {
   folders.forEach((rel, i) => { byFolder[rel] = listings[i]?.data?.entries; });
   const rows = treeRows(byFolder, expanded);
   const rootListing = listings[0];
+  const visibleRels = rows.map((row) => row.entry.relativePath);
 
   const setExpanded = (next: string[]) => patchFiles({ expanded: { ...(ui?.expanded ?? {}), [root]: next } });
   const select = (rel: string | null) => patchFiles({ selected: { ...(ui?.selected ?? {}), [root]: rel } });
@@ -177,6 +196,32 @@ export function FilesTab({ project }: { project: Project }) {
     ],
   );
 
+  /** Delete N Selected: one question, then everything ticked to the Trash on the computer. */
+  const trashSelection = () => {
+    const known = new Map<string, FileEntry>();
+    for (const entries of Object.values(byFolder)) for (const entry of entries ?? []) known.set(entry.relativePath, entry);
+    const rels = topLevelPicks(picked);
+    if (!rels.length) return;
+    const question = trashQuestion(rels.map((rel) => ({ rel, isDir: known.get(rel)?.type === 'directory' })));
+    setTimeout(() => Alert.alert(question.title, question.detail, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: question.confirm, style: 'destructive', onPress: () => run('delete them', async () => {
+          const outcome = await trashPicked({ root, picked: rels, canTrashMany: can.trashMany, call: act });
+          const next = afterTrash(expandedList, selected, outcome.removed);
+          patchFiles({ expanded: { ...(ui?.expanded ?? {}), [root]: next.expanded }, selected: { ...(ui?.selected ?? {}), [root]: next.selected } });
+          if (outcome.failed.length) {
+            // What could not go stays ticked.
+            setPicked(new Set(outcome.failed.map((item) => item.rel)));
+            Alert.alert('Some items were not moved', failuresText(outcome.failed));
+          } else {
+            setSelection(null);
+          }
+        }),
+      },
+    ]), AFTER_SHEET_MS);
+  };
+
   // Started once the menu has slid away: iOS cannot show the share sheet over a sheet still closing.
   const download = (entry: FileEntry) => setTimeout(() => {
     downloadProjectFile(root, entry.relativePath, entry.name)
@@ -216,7 +261,30 @@ export function FilesTab({ project }: { project: Project }) {
     if (result.sessionId) openInTab(result.sessionId, 'terminal');
   });
 
+  /** The selection part of the folder's "•••" menu. */
+  const selectionOptions = (): SheetOption[] => {
+    if (!can.manage && !can.trashMany) return [];
+    if (!selecting) {
+      return [{ label: 'Enable Selection', hint: 'tick files and folders, then delete them together', onPress: () => setSelection({ root, picked: new Set() }) }];
+    }
+    const options: SheetOption[] = [
+      { label: 'Select All', hint: `${visibleRels.length} shown`, onPress: () => setPicked(selectAll(visibleRels)) },
+    ];
+    if (picked.size) options.push({ label: 'Deselect All', onPress: () => setPicked(new Set()) });
+    options.push({ label: 'Invert Selection', onPress: () => setPicked(invertSelection(visibleRels, picked)) });
+    if (picked.size) options.push({ label: `Delete ${picked.size} Selected…`, destructive: true, onPress: trashSelection });
+    options.push({ label: 'Cancel Selection', onPress: () => setSelection(null) });
+    return options;
+  };
+
   const menuOptions = (target: FileEntry | 'root'): SheetOption[] => {
+    // While ticking, the folder's menu is about the ticks first.
+    if (target === 'root' && selecting) return [...selectionOptions(), ...entryMenuOptions(target)];
+    if (target === 'root') return [...entryMenuOptions(target), ...selectionOptions()];
+    return entryMenuOptions(target);
+  };
+
+  const entryMenuOptions = (target: FileEntry | 'root'): SheetOption[] => {
     const entry = target === 'root' ? null : target;
     const isDir = !entry || entry.type === 'directory';
     const rel = entry?.relativePath ?? '';
@@ -299,7 +367,9 @@ export function FilesTab({ project }: { project: Project }) {
 
   const toolbar = (
     <View style={styles.toolbar}>
-      <Text style={styles.toolbarTitle} numberOfLines={1}>{root === project.root ? 'Project folder' : root.split('/').pop()}</Text>
+      <Text style={[styles.toolbarTitle, selecting && styles.toolbarCount]} numberOfLines={1}>
+        {selecting ? `${picked.size} selected` : root === project.root ? 'Project folder' : root.split('/').pop()}
+      </Text>
       {can.create ? <ToolButton icon="document-outline" label="New file" onPress={() => newEntry('', 'file')} /> : null}
       {can.create ? <ToolButton icon="folder-outline" label="New folder" onPress={() => newEntry('', 'folder')} /> : null}
       {can.search ? <ToolButton icon="search-outline" label="Search in this folder" onPress={() => { setSearchOpened(true); setSearching(true); }} /> : null}
@@ -312,6 +382,7 @@ export function FilesTab({ project }: { project: Project }) {
   const list = (
     <FlatList
       data={rows}
+      extraData={picked}
       keyExtractor={(row) => row.entry.relativePath}
       refreshControl={pull}
       renderItem={({ item: { entry, depth } }) => {
@@ -323,10 +394,32 @@ export function FilesTab({ project }: { project: Project }) {
           <Pressable
             onPress={() => open(entry)}
             onLongPress={() => setMenu(entry)}
-            style={({ pressed }) => [styles.row, { paddingLeft: spacing.md + depth * 18 }, wide && selected === entry.relativePath && styles.rowSelected, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.row,
+              { paddingLeft: spacing.md + (selecting ? CHECK_COLUMN : 0) + depth * 18 },
+              wide && selected === entry.relativePath && styles.rowSelected,
+              selecting && picked.has(entry.relativePath) && styles.rowPicked,
+              pressed && styles.pressed,
+            ]}
             accessibilityRole="button"
             accessibilityLabel={`${entry.name}${isDir ? (isOpen ? ', open folder' : ', folder') : ''}`}
           >
+            {selecting ? (
+              <Pressable
+                onPress={() => togglePick(entry.relativePath)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+                style={styles.check}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: picked.has(entry.relativePath) }}
+                accessibilityLabel={`Select ${entry.name}`}
+              >
+                <Ionicons
+                  name={picked.has(entry.relativePath) ? 'checkbox' : 'square-outline'}
+                  size={20}
+                  color={picked.has(entry.relativePath) ? colors.accent : colors.textFaint}
+                />
+              </Pressable>
+            ) : null}
             <View style={styles.chevron}>{isDir ? <Ionicons name={isOpen ? 'chevron-down' : 'chevron-forward'} size={13} color={colors.textFaint} /> : null}</View>
             <View style={dim && styles.dimIcon}><FileIcon name={entry.name} dir={isDir} open={isOpen} size={18} /></View>
             <Text style={[styles.name, isDir && styles.folderName, dim && { color: colors.textFaint }]} numberOfLines={1}>{entry.name}</Text>
@@ -367,7 +460,12 @@ export function FilesTab({ project }: { project: Project }) {
       />
       <DownloadBar />
 
-      <Sheet visible={!!menu} title={menu === 'root' ? (root === project.root ? 'Project folder' : root) : menu?.relativePath} options={menu ? menuOptions(menu) : []} onClose={() => setMenu(null)} />
+      <Sheet
+        visible={!!menu}
+        title={menu === 'root' ? (selecting ? `${picked.size} selected` : root === project.root ? 'Project folder' : root) : menu?.relativePath}
+        options={menu ? menuOptions(menu) : []}
+        onClose={() => setMenu(null)}
+      />
       <Sheet
         visible={!!chats}
         title="Add to which chat?"
@@ -409,6 +507,9 @@ const styles = StyleSheet.create({
   tool: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44, paddingRight: spacing.lg },
   rowSelected: { backgroundColor: 'rgba(120,130,255,0.14)' },
+  rowPicked: { backgroundColor: 'rgba(128,136,255,0.08)' },
+  check: { position: 'absolute', left: spacing.sm, top: 0, bottom: 0, width: 24, alignItems: 'center', justifyContent: 'center' },
+  toolbarCount: { color: colors.accent },
   pressed: { backgroundColor: colors.surface },
   chevron: { width: 13, alignItems: 'center' },
   dimIcon: { opacity: 0.5 },
