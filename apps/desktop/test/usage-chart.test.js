@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   COLORS, formatBytes, formatDisk, formatPercent, memoryTotals, assignColors, memorySlices,
-  diskLevel, diskSlices, donutPaths, resourceStatus,
+  diskLevel, diskSlices, donutPaths, resourceStatus, ramLevel,
 } = require('../public/usage-chart');
 
 const GB = 1024 ** 3;
@@ -140,7 +140,7 @@ test('resourceStatus with an old desktop, a big disk, and nothing to say', () =>
   assert.equal(big.disk, 'Disk 1.2 / 2 TB');
   const linux = resourceStatus(usage({ platform: 'linux', disks: [{ totalBytes: 50 * GB, freeBytes: 20 * GB }] }));
   assert.equal(linux.disk, 'Disk 30 / 50 GB');
-  assert.deepEqual(resourceStatus(null), { ram: '', disk: '', title: '' });
+  assert.deepEqual(resourceStatus(null), { ram: '', disk: '', title: '', ramLevel: 'low', diskLevel: 'low' });
 });
 
 test('donutPaths keeps a sliver for a tiny slice, taken from the large ones', () => {
@@ -171,4 +171,17 @@ test('diskSlices never lets projects take more than what is used', () => {
   assert.equal(slices.find(s => s.key === 'other-files').bytes, 0);
   assert.equal(sum(slices), 100);
   assert.deepEqual(diskSlices({ totalBytes: 100, freeBytes: 90 }, { projects: [] }).slices.map(s => s.key), ['used', 'free']);
+});
+
+test('the status bar turns amber, then red, near the limits', () => {
+  assert.equal(ramLevel({ installed: 100, used: 89 }), 'low');
+  assert.equal(ramLevel({ installed: 100, used: 90 }), 'mid');
+  assert.equal(ramLevel({ installed: 100, used: 95 }), 'high');
+  assert.equal(ramLevel({ installed: 100, used: null }), 'low');
+  const calm = resourceStatus(usage());
+  assert.deepEqual([calm.ramLevel, calm.diskLevel], ['low', 'low']);
+  const tight = resourceStatus(usage({ usedMemBytes: 33 * GB, disks: [{ name: 'Macintosh HD', totalBytes: 494e9, freeBytes: 21e9 }] }));
+  assert.deepEqual([tight.ramLevel, tight.diskLevel], ['mid', 'high']);
+  assert.match(tight.title, /memory running low/);
+  assert.match(tight.title, /disk almost full/);
 });

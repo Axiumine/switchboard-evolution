@@ -109,6 +109,9 @@ body { display: flex; flex-direction: column; }
   font-variant-numeric: tabular-nums;
 }
 #status-bar-resources:empty { display: none; }
+/* Close to the limit: amber; at it: red (RAM in use from 90% / 95%, disk free under 20% / 10%). */
+.sb-res-mid { color: #f0a050; }
+.sb-res-high { color: #e05070; font-weight: 600; }
 #status-bar-resources:hover,
 #status-bar-resources:focus-visible { color: #b0b0c4; outline: none; }
 

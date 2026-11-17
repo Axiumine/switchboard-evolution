@@ -1611,8 +1611,17 @@ async function refreshResourceStatus() {
   if (!statusBarResources || PROJECT_WINDOW || document.hidden) return;
   try {
     const status = UsageChart.resourceStatus(await window.api.getProcessUsage());
-    const parts = [status.ram, status.disk].filter(Boolean);
-    statusBarResources.textContent = parts.length ? `\u00a0\u00b7 ${parts.join(' \u00b7 ')}` : '';
+    // Each part in amber or red when it gets close to its limit.
+    const parts = [[status.ram, status.ramLevel], [status.disk, status.diskLevel]].filter(([text]) => text);
+    const nodes = [];
+    for (const [text, level] of parts) {
+      nodes.push(document.createTextNode(nodes.length ? ' \u00b7 ' : '\u00a0\u00b7 '));
+      const span = document.createElement('span');
+      span.className = `sb-res sb-res-${level}`;
+      span.textContent = text;
+      nodes.push(span);
+    }
+    statusBarResources.replaceChildren(...nodes);
     statusBarResources.title = status.title ? `${status.title}\nClick to open the Task Manager` : 'Open the Task Manager';
   } catch {}
 }
