@@ -85,7 +85,9 @@ function filesState(project, root = currentFilesRoot(project)) {
   const ui = filesUi(project);
   let state = ui.roots.get(root);
   if (!state) {
-    state = { root, expanded: new Set(), selected: null, cache: new Map(), timeline: null };
+    // `selected` is the file open in the editor; `picked` are the rows ticked
+    // after Enable Selection, for Delete N Selected.
+    state = { root, expanded: new Set(), selected: null, cache: new Map(), timeline: null, selecting: false, picked: new Set(), visibleRels: [] };
     ui.roots.set(root, state);
   }
   return state;
@@ -334,6 +336,7 @@ async function applyProjectFileAction(change) {
       if (selected !== state.selected) state.openRequest = (state.openRequest || 0) + 1;
       state.selected = selected;
       state.expanded = new Set([...state.expanded].map(rel => remapFileActionRelative(state.root, rel, change)).filter(Boolean));
+      if (state.picked?.size) state.picked = new Set([...state.picked].map(rel => remapFileActionRelative(state.root, rel, change)).filter(Boolean));
       if (state.timeline) {
         const rel = remapFileActionRelative(state.root, state.timeline.rel, change);
         if (!rel) state.timeline = null;
@@ -399,6 +402,8 @@ async function renderFileTree(project, list, state) {
   }
   await walk('', 0);
   if (!list.isConnected || state.renderRequest !== request) return;
+  state.visibleRels = rows.map(({ entry }) => entry.relativePath);
+  list.classList.toggle('is-selecting', !!state.selecting);
   const focused = list.contains(document.activeElement) ? document.activeElement?.dataset?.rel : null;
   list.replaceChildren();
   const rootError = state.cache.get('')?.error;
@@ -410,16 +415,22 @@ async function renderFileTree(project, list, state) {
     const open = isDir && state.expanded.has(entry.relativePath);
     const cut = filesClipboard?.mode === 'cut' && filesClipboard.root === root && filesClipboard.rel === entry.relativePath;
     const row = document.createElement('div');
+    const picked = state.selecting && state.picked.has(entry.relativePath);
     row.className = 'ws-file-row' + (isDir ? ' is-dir' : '') + (!isDir && entry.type !== 'file' ? ' is-binary' : '') +
-      (state.selected === entry.relativePath ? ' selected' : '') + (cut ? ' is-cut' : '');
+      (state.selected === entry.relativePath ? ' selected' : '') + (cut ? ' is-cut' : '') + (picked ? ' is-picked' : '');
     row.dataset.rel = entry.relativePath;
     row.tabIndex = 0;
     row.setAttribute('role', 'treeitem');
     if (isDir) row.setAttribute('aria-expanded', String(open));
-    row.style.paddingLeft = `${4 + depth * 12}px`;
+    // With selection on, a column of checkboxes comes first, before the indent.
+    row.style.paddingLeft = `${4 + (state.selecting ? 20 : 0) + depth * 12}px`;
     row.title = entry.type === 'file' && entry.viewable === false ? entry.relativePath + '\nOpen in default application' : entry.relativePath;
     const twistie = isDir ? (open ? PICONS.chevronDown(12) : PICONS.chevronRight(12)) : '';
-    row.innerHTML = `<span class="ws-file-twistie">${twistie}</span>${fileIconHtml(entry.name, { dir: isDir, open })}<span class="ws-file-name">${escapeHtml(entry.name)}</span>`;
+    const check = state.selecting
+      ? `<input type="checkbox" class="ws-file-check" tabindex="-1" aria-label="Select ${escapeHtml(entry.name)}"${picked ? ' checked' : ''}>`
+      : '';
+    row.innerHTML = `${check}<span class="ws-file-twistie">${twistie}</span>${fileIconHtml(entry.name, { dir: isDir, open })}<span class="ws-file-name">${escapeHtml(entry.name)}</span>`;
+    if (state.selecting) row.setAttribute('aria-selected', String(picked));
     const activate = async () => {
       if (isDir) {
         if (open) state.expanded.delete(entry.relativePath); else state.expanded.add(entry.relativePath);
@@ -430,16 +441,111 @@ async function renderFileTree(project, list, state) {
       if (entry.type !== 'file') return;
       openFileInProjectEditor(project, entry.relativePath, { allowExternal: true, root });
     };
-    row.onclick = activate;
+    row.onclick = (event) => {
+      // The checkbox only ticks; the rest of the row still opens.
+      if (event.target.classList?.contains('ws-file-check')) {
+        event.stopPropagation();
+        setFilePicked(list, state, entry.relativePath, event.target.checked);
+        return;
+      }
+      activate();
+    };
     row.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
       showContextMenu(explorerMenuItems(project, root, entry), { x: event.clientX, y: event.clientY });
     });
-    row.addEventListener('keydown', (event) => onExplorerKey(event, project, root, entry, row, activate));
+    row.addEventListener('keydown', (event) => {
+      if (state.selecting && event.key === ' ' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setFilePicked(list, state, entry.relativePath, !state.picked.has(entry.relativePath));
+        return;
+      }
+      onExplorerKey(event, project, root, entry, row, activate);
+    });
     list.appendChild(row);
   }
   if (focused) list.querySelector(`.ws-file-row[data-rel="${CSS.escape(focused)}"]`)?.focus();
+  refreshPickedCount(list, state);
+}
+
+// --- Selection: tick rows, then Delete N Selected (the "•••" menu) ---
+
+/** Tick or untick one row, without rebuilding the tree. */
+function setFilePicked(list, state, rel, on) {
+  const next = new Set(state.picked);
+  if (on) next.add(rel); else next.delete(rel);
+  state.picked = next;
+  refreshPicks(list, state);
+}
+
+/** Bring the checkboxes, the rows and the count in line with state.picked. */
+function refreshPicks(list, state) {
+  for (const row of list.querySelectorAll('.ws-file-row')) {
+    const on = state.picked.has(row.dataset.rel);
+    row.classList.toggle('is-picked', on);
+    row.setAttribute('aria-selected', String(on));
+    const box = row.querySelector('.ws-file-check');
+    if (box) box.checked = on;
+  }
+  refreshPickedCount(list, state);
+}
+
+function refreshPickedCount(list, state) {
+  const count = list.closest('.ws-files-side')?.querySelector('.ws-files-count');
+  if (!count) return;
+  count.hidden = !state.selecting;
+  count.textContent = state.selecting ? `${state.picked.size} selected` : '';
+}
+
+/** The selection part of the "•••" menu. */
+function explorerSelectionItems(project, root, body, state) {
+  const list = () => body.querySelector('#ws-files-list');
+  const rerender = async () => { if (list()) await renderFileTree(project, list(), state); };
+  if (!state.selecting) {
+    return [{ label: 'Enable Selection', icon: PICONS.check(14), onClick: async () => { state.selecting = true; await rerender(); } }];
+  }
+  const count = state.picked.size;
+  const set = (picked) => { state.picked = picked; if (list()) refreshPicks(list(), state); };
+  return [
+    { head: `${count} selected` },
+    { label: 'Select All', onClick: () => set(FileSelection.selectAll(state.visibleRels)) },
+    { label: 'Deselect All', disabled: !count, onClick: () => set(new Set()) },
+    { label: 'Invert Selection', onClick: () => set(FileSelection.invertSelection(state.visibleRels, state.picked)) },
+    { sep: true },
+    {
+      label: count ? `Delete ${count} Selected…` : 'Delete Selected…',
+      icon: PICONS.trash(14),
+      danger: true,
+      disabled: !count,
+      onClick: () => explorerTrashPicked(project, root, state, list),
+    },
+    { sep: true },
+    { label: 'Cancel Selection', icon: PICONS.x(13), onClick: async () => { state.selecting = false; state.picked = new Set(); await rerender(); } },
+  ];
+}
+
+/** Move the ticked entries to the Trash, after one question from main. */
+async function explorerTrashPicked(project, root, state, list) {
+  const rels = FileSelection.topLevelPicks([...state.picked]);
+  if (!rels.length) return;
+  const blocked = typeof canManageBrowserEntry === 'function' ? rels.filter(rel => !canManageBrowserEntry(root, rel)) : [];
+  if (blocked.length) {
+    alert(`Resolve or close the open diff before deleting:\n${blocked.join('\n')}`);
+    return;
+  }
+  let result;
+  try { result = await window.api.trashProjectEntries(root, rels); } catch (err) { result = { ok: false, error: err.message }; }
+  if (!result?.ok) { alert(result?.error || 'Could not move the items to the Trash.'); return; }
+  if (result.cancelled) return;
+  const failed = new Set((result.failed || []).map(item => item.rel));
+  // What could not go stays ticked; when everything went, selection ends.
+  state.picked = new Set([...state.picked].filter(rel => failed.has(rel)));
+  if (!failed.size) state.selecting = false;
+  if (result.removed?.length) await explorerResult(project, result, 'Could not move the items to the Trash.');
+  else if (list()) await renderFileTree(project, list(), state);
+  if (failed.size) alert(FileSelection.failuresText(result.failed));
 }
 
 /** The explorer's shortcuts on a focused row (or on the empty tree for `entry` null). */
@@ -479,7 +585,7 @@ async function explorerResult(project, result, fallback) {
   if (result.cancelled) return null;
   if (typeof applyProjectFileAction === 'function') await applyProjectFileAction(result);
   // A session's file browser follows renames and moves the same way.
-  if (['rename', 'trash', 'move'].includes(result.action) && typeof applyBrowserFileAction === 'function') await applyBrowserFileAction(result);
+  if (['rename', 'trash', 'trash-many', 'move'].includes(result.action) && typeof applyBrowserFileAction === 'function') await applyBrowserFileAction(result);
   return result;
 }
 
@@ -971,12 +1077,16 @@ function filesHeadHtml(project, root, view) {
   const isProject = root === project.root;
   const title = view === 'search' ? 'Search' : isProject ? 'Project folder' : pathBasename(root);
   const viewButton = (name, label, icon) => `<button type="button" class="ws-files-view${view === name ? ' on' : ''}" data-view="${name}" role="tab" aria-selected="${view === name}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</button>`;
-  const actions = filesHeadActions(view).map(a => `<button type="button" class="ws-ghost ws-files-action${a.fold ? ' is-foldable' : ''}" data-act="${a.act}" title="${escapeHtml(a.label)}" aria-label="${escapeHtml(a.label)}">${a.icon}</button>`).join('');
+  const more = `<button type="button" class="ws-ghost ws-files-action ws-files-more" data-act="more" title="More Actions…" aria-label="More Actions">${FICONS.more(14)}</button>`;
+  // In the explorer the "•••" menu also holds the selection, so it is always
+  // there, right after Collapse Folders; in Search it only gathers what is folded.
+  const actions = filesHeadActions(view).map(a => `<button type="button" class="ws-ghost ws-files-action${a.fold ? ' is-foldable' : ''}" data-act="${a.act}" title="${escapeHtml(a.label)}" aria-label="${escapeHtml(a.label)}">${a.icon}</button>${view !== 'search' && a.act === 'collapse' ? more : ''}`).join('') + (view === 'search' ? more : '');
   return `
     <div class="ws-files-head">
       <span class="ws-files-views" role="tablist" aria-label="Side panel">${viewButton('explorer', `Explorer (${filesKeyHint('⇧⌘E', 'Ctrl+Shift+E')})`, FICONS.explorer(15))}${viewButton('search', `Search (${filesKeyHint('⇧⌘F', 'Ctrl+Shift+F')})`, PICONS.search(14))}</span>
       <span class="ws-card-title ws-files-title" title="${escapeHtml(view === 'search' ? root : root)}">${escapeHtml(title)}</span>
-      <span class="ws-files-actions">${actions}<button type="button" class="ws-ghost ws-files-action ws-files-more" data-act="more" title="More Actions…" aria-label="More Actions">${FICONS.more(14)}</button></span>
+      <span class="ws-files-count" aria-live="polite" hidden></span>
+      <span class="ws-files-actions">${actions}</span>
     </div>`;
 }
 
@@ -1029,7 +1139,15 @@ async function renderFilesTab(project, body) {
   head.querySelectorAll('[data-act]').forEach(button => {
     const act = button.dataset.act;
     if (act === 'more') {
-      button.onclick = () => showContextMenu(filesHeadActions(view).map(a => ({ label: a.label, icon: a.icon, onClick: handlers[a.act] })), { anchor: button });
+      button.onclick = () => {
+        // The actions the narrow header folded away, then (explorer) the selection.
+        const folded = filesHeadActions(view)
+          .filter(a => a.fold && head.querySelector(`[data-act="${a.act}"]`)?.offsetParent === null)
+          .map(a => ({ label: a.label, icon: a.icon, onClick: handlers[a.act] }));
+        const selection = view === 'search' ? [] : explorerSelectionItems(project, root, body, state);
+        const items = folded.length && selection.length ? [...folded, { sep: true }, ...selection] : [...folded, ...selection];
+        if (items.length) showContextMenu(items, { anchor: button });
+      };
     } else if (handlers[act]) {
       button.onclick = handlers[act];
     }

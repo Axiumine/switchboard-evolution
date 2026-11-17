@@ -7111,9 +7111,19 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
   padding: 0;
   justify-content: center;
 }
-.ws-files-head .ws-files-more { display: none; }
+/* The explorer's "•••" holds the selection and is always there; in Search it only gathers folded actions. */
+.ws-files-side[data-view="search"] .ws-files-head .ws-files-more { display: none; }
+.ws-files-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #a6abff;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ws-files-count[hidden] { display: none; }
 @container files-side (max-width: 300px) {
-  .ws-files-head .ws-files-title { display: none; }
+  .ws-files-head .ws-files-title,
+  .ws-files-head .ws-files-count { display: none; }
 }
 @container files-side (max-width: 212px) {
   .ws-files-head .ws-files-action.is-foldable { display: none; }
@@ -7341,6 +7351,7 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .ws-files-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
 
 .ws-file-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -7351,6 +7362,27 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* Selection (the "•••" menu's Enable Selection): a column of checkboxes on the left. */
+.ws-file-check {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  accent-color: #8088ff;
+  opacity: 0.55;
+}
+.ws-file-row:hover .ws-file-check,
+.ws-file-row:focus-visible .ws-file-check,
+.ws-file-check:checked { opacity: 1; }
+.ws-file-row.is-picked {
+  background: rgba(128,136,255,0.08);
+  box-shadow: inset 2px 0 0 #8088ff;
 }
 
 .ws-file-row:hover {

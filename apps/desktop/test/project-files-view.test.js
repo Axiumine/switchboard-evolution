@@ -119,3 +119,87 @@ test('shortcut hints follow the platform', () => {
   assert.equal(items.find(i => i.label === 'Rename…').hint, 'F2');
   assert.ok(items.some(i => i.label === 'Reveal in File Manager'));
 });
+
+function withSelection(context) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/file-selection.js'), 'utf8'), context);
+  context.FileSelection = context.window.FileSelection;
+  return context;
+}
+
+test('the explorer header keeps "•••" right after Collapse Folders, with Open Folder after it', () => {
+  const { context, project } = setup();
+  const html = context.filesHeadHtml(project, project.root, 'explorer');
+  const acts = [...html.matchAll(/data-act="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(acts, ['new-file', 'new-folder', 'refresh', 'collapse', 'more', 'open']);
+  assert.match(html, /class="ws-files-count"[^>]*hidden/);
+  const search = [...context.filesHeadHtml(project, project.root, 'search').matchAll(/data-act="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(search.at(-1), 'more');
+});
+
+test('the "•••" menu offers Enable Selection, then the selection actions until Cancel Selection', async () => {
+  const { context, project } = setup();
+  withSelection(context);
+  const state = context.filesState(project, '/code/app');
+  const body = { querySelector: () => null };
+  assert.deepEqual(labels(context.explorerSelectionItems(project, '/code/app', body, state)), ['Enable Selection']);
+
+  await context.explorerSelectionItems(project, '/code/app', body, state)[0].onClick();
+  assert.equal(state.selecting, true);
+  state.visibleRels = ['a', 'a/b.md', 'c.md'];
+  let items = context.explorerSelectionItems(project, '/code/app', body, state);
+  assert.deepEqual(labels(items), ['Select All', 'Deselect All', 'Invert Selection', 'Delete Selected…', 'Cancel Selection']);
+  assert.equal(items.find(i => i.label === 'Delete Selected…').disabled, true);
+  assert.equal(items.find(i => i.label === 'Deselect All').disabled, true);
+
+  items.find(i => i.label === 'Select All').onClick();
+  assert.deepEqual([...state.picked].sort(), ['a', 'a/b.md', 'c.md']);
+  items = context.explorerSelectionItems(project, '/code/app', body, state);
+  const del = items.find(i => /^Delete/.test(i.label || ''));
+  assert.equal(del.label, 'Delete 3 Selected…');
+  assert.equal(del.danger, true);
+  assert.equal(!!del.disabled, false);
+
+  state.picked = new Set(['a']);
+  items.find(i => i.label === 'Invert Selection').onClick();
+  assert.deepEqual([...state.picked].sort(), ['a/b.md', 'c.md']);
+
+  await context.explorerSelectionItems(project, '/code/app', body, state).find(i => i.label === 'Cancel Selection').onClick();
+  assert.equal(state.selecting, false);
+  assert.equal(state.picked.size, 0);
+  assert.deepEqual(labels(context.explorerSelectionItems(project, '/code/app', body, state)), ['Enable Selection']);
+});
+
+test('Delete N Selected trashes the shallowest ticks in one call and ends the selection', async () => {
+  const { context, project, calls } = setup();
+  withSelection(context);
+  const sent = [];
+  context.window.api.trashProjectEntries = async (root, rels) => {
+    sent.push([root, [...rels]]);
+    return { ok: true, action: 'trash-many', projectPath: root, removed: [...rels], failed: [], changes: [] };
+  };
+  context.applyProjectFileAction = async () => {};
+  const state = context.filesState(project, '/code/app');
+  state.selecting = true;
+  state.picked = new Set(['src/a.js', 'src', 'b.md']);
+  await context.explorerTrashPicked(project, '/code/app', state, () => null);
+  assert.deepEqual(plain(sent), [['/code/app', ['b.md', 'src']]]);
+  assert.equal(state.selecting, false);
+  assert.equal(state.picked.size, 0);
+  assert.deepEqual(calls.filter(c => c[0] === 'alert'), []);
+});
+
+test('what could not be trashed stays ticked and is reported', async () => {
+  const { context, project, calls } = setup();
+  withSelection(context);
+  context.window.api.trashProjectEntries = async (root) => ({
+    ok: true, action: 'trash-many', projectPath: root, removed: ['b.md'], failed: [{ rel: 'c.md', error: 'No longer exists' }], changes: [],
+  });
+  context.applyProjectFileAction = async () => {};
+  const state = context.filesState(project, '/code/app');
+  state.selecting = true;
+  state.picked = new Set(['b.md', 'c.md']);
+  await context.explorerTrashPicked(project, '/code/app', state, () => null);
+  assert.equal(state.selecting, true);
+  assert.deepEqual([...state.picked], ['c.md']);
+  assert.match(calls.find(c => c[0] === 'alert')[1], /1 item could not be moved:\nc\.md: No longer exists/);
+});

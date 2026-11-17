@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { manageProjectEntry, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
+const { manageProjectEntry, trashProjectEntries, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
 const fileTimeline = require('./file-timeline');
 const projectSearch = require('./project-search');
 const { resolveProjectEntry, isViewableFile, previewType, readProjectFile, listProjectDirectory, MAX_PREVIEW_BYTES } = require('./project-files');
@@ -214,6 +214,15 @@ function createPhoneFiles({ roots, readRoots = () => [], shell }) {
       try {
         const result = await manageProjectEntry(projectPath, relativePath, action, newName, { shell, confirmTrash: async () => true });
         return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    },
+    /** Several entries to the Trash at once; the phone has asked its user already. */
+    async trashMany(projectPath, relativePaths) {
+      if (!known(projectPath)) return refused;
+      try {
+        return { ok: true, ...await trashProjectEntries(projectPath, relativePaths, { shell, confirm: async () => true }) };
       } catch (err) {
         return { ok: false, error: err.message };
       }

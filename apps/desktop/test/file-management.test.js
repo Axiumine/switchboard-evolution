@@ -205,3 +205,85 @@ test('shareFile shares any existing absolute file, resolved, and nothing else', 
   assert.throws(() => shareFile(path.dirname(outside), { share }), /Not a file/);
   assert.equal(shared.length, 1);
 });
+
+// --- Several entries to the Trash (the Files tab's Delete N Selected) ---
+
+function batchFixture(t) {
+  const { temp, root } = fixture(t);
+  const trashed = [];
+  const questions = [];
+  const shell = {
+    trashItem: async (file) => {
+      trashed.push(path.relative(fs.realpathSync(root), file));
+      fs.renameSync(file, path.join(temp, `trashed-${trashed.length}`));
+    },
+  };
+  const run = (rels, answer = true) => require('../file-management').trashProjectEntries(root, rels, {
+    shell,
+    confirm: async (entries) => { questions.push(entries); return answer; },
+  });
+  return { temp, root, trashed, questions, run };
+}
+
+test('trashProjectEntries asks once, then trashes every entry, a folder with its contents', async t => {
+  const { root, trashed, questions, run } = batchFixture(t);
+  fs.mkdirSync(path.join(root, 'src', 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'lib', 'a.js'), 'a');
+  fs.writeFileSync(path.join(root, 'notes.md'), 'n');
+  fs.writeFileSync(path.join(root, 'keep.md'), 'k');
+
+  const result = await run(['src/lib/a.js', 'notes.md', 'src', 'notes.md']);
+  assert.equal(questions.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(questions[0])), [{ rel: 'notes.md', isDir: false }, { rel: 'src', isDir: true }]);
+  assert.deepEqual(trashed, ['notes.md', 'src']);
+  assert.equal(result.action, 'trash-many');
+  assert.deepEqual(result.removed, ['notes.md', 'src']);
+  assert.deepEqual(result.failed, []);
+  assert.deepEqual(result.changes.map(c => [c.action, c.relativePath]), [['trash', 'notes.md'], ['trash', 'src']]);
+  assert.ok(fs.existsSync(path.join(root, 'keep.md')));
+});
+
+test('trashProjectEntries cancelled trashes nothing', async t => {
+  const { root, trashed, run } = batchFixture(t);
+  fs.writeFileSync(path.join(root, 'a.md'), 'a');
+  const result = await run(['a.md'], false);
+  assert.equal(result.cancelled, true);
+  assert.deepEqual(trashed, []);
+  assert.ok(fs.existsSync(path.join(root, 'a.md')));
+});
+
+test('trashProjectEntries reports what cannot go and moves the rest', async t => {
+  const { root, trashed, questions, run } = batchFixture(t);
+  fs.writeFileSync(path.join(root, 'a.md'), 'a');
+  const result = await run(['a.md', 'missing.md', '../outside.md', '/abs.md', '']);
+  assert.deepEqual(trashed, ['a.md']);
+  assert.deepEqual(JSON.parse(JSON.stringify(questions[0])), [{ rel: 'a.md', isDir: false }], 'only what can go is asked about');
+  assert.deepEqual(result.removed, ['a.md']);
+  assert.deepEqual(result.failed.map(f => f.rel).sort(), ['../outside.md', '/abs.md', 'missing.md'].sort());
+  assert.equal(result.failed.find(f => f.rel === 'missing.md').error, 'No longer exists');
+});
+
+test('trashProjectEntries refuses an item replaced while the question was open', async t => {
+  const { root, trashed, temp } = batchFixture(t);
+  fs.writeFileSync(path.join(root, 'a.md'), 'a');
+  fs.writeFileSync(path.join(root, 'b.md'), 'b');
+  const result = await require('../file-management').trashProjectEntries(root, ['a.md', 'b.md'], {
+    shell: { trashItem: async (file) => { trashed.push(path.basename(file)); fs.renameSync(file, path.join(temp, path.basename(file))); } },
+    confirm: async () => {
+      fs.rmSync(path.join(root, 'a.md'));
+      fs.writeFileSync(path.join(root, 'a.md'), 'replaced');
+      return true;
+    },
+  });
+  assert.deepEqual(trashed, ['b.md']);
+  assert.deepEqual(result.failed, [{ rel: 'a.md', error: 'Changed while confirming' }]);
+  assert.equal(fs.readFileSync(path.join(root, 'a.md'), 'utf8'), 'replaced');
+});
+
+test('trashProjectEntries needs something to trash and never the folder itself', async t => {
+  const { run, trashed } = batchFixture(t);
+  await assert.rejects(run([]), /Nothing to move/);
+  const result = await run(['.']);
+  assert.deepEqual(trashed, []);
+  assert.match(result.failed[0].error, /project folder itself/);
+});

@@ -80,7 +80,8 @@ const { scanSchedules } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 const { resolveEffectiveSettings } = require('./resolve-effective-settings');
 const { listProjectDirectory, readProjectFile, readPreviewFile, openFileExternally, resolveProjectEntry } = require('./project-files');
-const { manageProjectEntry, revealFile, shareFile, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
+const { manageProjectEntry, trashProjectEntries, revealFile, shareFile, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
+const FileSelection = require('./public/file-selection');
 const fileTimeline = require('./file-timeline');
 const projectSearch = require('./project-search');
 const { resolveTerminalFiles } = require('./terminal-file-links');
@@ -856,6 +857,32 @@ ipcMain.handle('manage-project-entry', async (_event, projectPath, relativePath,
           message: `Move "${path.basename(filePath)}" to the ${destination}?`,
           detail: `${isDirectory ? 'The folder and its contents' : 'The file'} can be restored from the ${destination}. Open previews of this item will close; unsaved edits will be discarded.`,
           buttons: ['Cancel', `Move to ${destination}`], defaultId: 0, cancelId: 0,
+          noLink: true,
+        });
+        return choice.response === 1;
+      },
+    });
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Several ticked entries of the Files tab to the Trash, after one question
+// asked over the window that asked (a project window too).
+ipcMain.handle('trash-project-entries', async (event, projectPath, relativePaths) => {
+  try {
+    const sender = event?.sender ? BrowserWindow.fromWebContents(event.sender) : null;
+    const win = sender && !sender.isDestroyed() ? sender : mainWindow;
+    const result = await trashProjectEntries(projectPath, relativePaths, {
+      shell,
+      confirm: async (entries) => {
+        const question = FileSelection.trashQuestion(entries, { platform: process.platform });
+        const choice = await dialog.showMessageBox(win, {
+          type: 'question',
+          message: question.title,
+          detail: question.detail,
+          buttons: ['Cancel', question.confirm], defaultId: 0, cancelId: 0,
           noLink: true,
         });
         return choice.response === 1;
@@ -2082,6 +2109,7 @@ const remoteLocalMethods = {
   'locate-file': (_client, filePath, cwd) => phoneFiles.locate(filePath, cwd),
   'save-project-file': (_client, projectPath, relativePath, content, expectedVersion) => phoneFiles.save(projectPath, relativePath, content, expectedVersion),
   'manage-project-entry': (_client, projectPath, relativePath, action, newName) => phoneFiles.manage(projectPath, relativePath, action, newName),
+  'trash-project-entries': (_client, projectPath, relativePaths) => phoneFiles.trashMany(projectPath, relativePaths),
   'create-project-entry': (_client, projectPath, folderRelative, name, kind) => phoneFiles.create(projectPath, folderRelative, name, kind),
   'duplicate-project-entry': (_client, projectPath, relativePath) => phoneFiles.duplicate(projectPath, relativePath),
   'paste-project-entry': (_client, sourcePath, sourceRelative, targetPath, targetRelative, mode) => phoneFiles.paste(sourcePath, sourceRelative, targetPath, targetRelative, mode),

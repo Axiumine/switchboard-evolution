@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { resolveProjectEntry } = require('./project-files');
+const { topLevelPicks } = require('./public/file-selection');
 
 // Resolve the parent, not the leaf: renaming/trashing a symlink must act on
 // the link itself. Parents still have to resolve inside the project.
@@ -53,6 +54,44 @@ async function manageProjectEntry(projectPath, relativePath, action, newName, { 
     await shell.trashItem(filePath);
   } else {
     throw new Error('Unknown file action');
+  }
+  return result;
+}
+
+/**
+ * Move several entries of a project folder to the Trash after one question.
+ * A folder takes what is inside it, so ticked entries inside a ticked folder
+ * are not trashed twice. Each entry is checked again after the question, as
+ * manageProjectEntry does; one that cannot be moved does not stop the others.
+ * Resolves { action: 'trash-many', projectPath, removed, failed, changes },
+ * where `changes` are the single trash changes the views know how to follow.
+ */
+async function trashProjectEntries(projectPath, relativePaths, { shell, confirm }) {
+  if (!Array.isArray(relativePaths) || !relativePaths.length) throw new Error('Nothing to move to the Trash');
+  const result = { action: 'trash-many', projectPath, removed: [], failed: [], changes: [] };
+  const entries = [];
+  for (const rel of topLevelPicks(relativePaths)) {
+    try {
+      const { filePath, stat } = resolveManagedEntry(projectPath, rel);
+      entries.push({ rel, filePath, stat });
+    } catch (err) {
+      result.failed.push({ rel, error: err.code === 'ENOENT' ? 'No longer exists' : err.message });
+    }
+  }
+  if (!entries.length) return result;
+  if (!await confirm(entries.map(({ rel, stat }) => ({ rel, isDir: stat.isDirectory() })))) return { ...result, cancelled: true };
+  for (const { rel, filePath, stat } of entries) {
+    try {
+      const current = resolveManagedEntry(projectPath, rel);
+      if (current.filePath !== filePath || current.stat.ino !== stat.ino || current.stat.dev !== stat.dev) {
+        throw new Error('Changed while confirming');
+      }
+      await shell.trashItem(filePath);
+      result.removed.push(rel);
+      result.changes.push({ action: 'trash', projectPath, relativePath: rel, filePath });
+    } catch (err) {
+      result.failed.push({ rel, error: err.code === 'ENOENT' ? 'No longer exists' : err.message });
+    }
   }
   return result;
 }
@@ -189,6 +228,6 @@ function pasteProjectEntry(sourceProjectPath, sourceRelative, targetProjectPath,
 }
 
 module.exports = {
-  manageProjectEntry, resolveManagedEntry, revealFile, shareFile,
+  manageProjectEntry, trashProjectEntries, resolveManagedEntry, revealFile, shareFile,
   createProjectEntry, duplicateProjectEntry, pasteProjectEntry, copyName,
 };

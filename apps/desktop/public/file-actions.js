@@ -7,6 +7,14 @@ function projectEntryPath(root, relativePath = '') {
 
 function remapFileActionPath(value, change) {
   if (!value) return value;
+  // Several entries moved to the Trash at once: the first one that holds it decides.
+  if (Array.isArray(change?.changes)) {
+    for (const one of change.changes) {
+      const mapped = remapFileActionPath(value, one);
+      if (mapped !== value) return mapped;
+    }
+    return value;
+  }
   const normalize = path => {
     const normalized = path.replace(/\\/g, '/');
     return window.api.platform === 'win32' ? normalized.toLowerCase() : normalized;

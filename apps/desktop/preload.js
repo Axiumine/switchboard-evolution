@@ -282,6 +282,7 @@ contextBridge.exposeInMainWorld('api', {
   searchProjectFiles: (root, options) => ipcRenderer.invoke('search-project-files', root, options),
   replaceInProjectFiles: (root, options) => ipcRenderer.invoke('replace-in-project-files', root, options),
   manageProjectEntry: (projectPath, relativePath, action, newName) => ipcRenderer.invoke('manage-project-entry', projectPath, relativePath, action, newName),
+  trashProjectEntries: (projectPath, relativePaths) => ipcRenderer.invoke('trash-project-entries', projectPath, relativePaths),
   createProjectEntry: (projectPath, folderRelative, name, kind) => ipcRenderer.invoke('create-project-entry', projectPath, folderRelative, name, kind),
   duplicateProjectEntry: (projectPath, relativePath) => ipcRenderer.invoke('duplicate-project-entry', projectPath, relativePath),
   pasteProjectEntry: (sourcePath, sourceRelative, targetPath, targetRelative, mode) => ipcRenderer.invoke('paste-project-entry', sourcePath, sourceRelative, targetPath, targetRelative, mode),

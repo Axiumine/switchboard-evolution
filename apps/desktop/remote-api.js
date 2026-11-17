@@ -151,6 +151,7 @@ allow('read-project-file-chunk', [isPath, isRelative, isInt(0, Number.MAX_SAFE_I
 allow('save-project-file', [isPath, isRelative, isString(2_000_000), optional(isVersion)], { local: true });
 // Rename or move to the Trash only; revealing in Finder would act on the Mac's screen.
 allow('manage-project-entry', [isPath, isRelative, oneOf('rename', 'trash'), optional(isString(255))], { local: true });
+allow('trash-project-entries', [isPath, arrayOf(isRelative, 5000)], { local: true });
 // The explorer of the Files tab: a new file or folder (name may hold "/"), a copy next to an
 // entry, a copied or cut entry pasted into a folder of the same or another known root.
 allow('create-project-entry', [isPath, isRelative, isString(1000), oneOf('file', 'folder')], { local: true });

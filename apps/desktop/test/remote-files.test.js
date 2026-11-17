@@ -180,12 +180,31 @@ test('rename and Trash work inside a known folder and nowhere else', async () =>
   assert.ok(fs.existsSync(path.join(project, 'docs', 'new.md')));
 });
 
+test('several entries go to the Trash in one call, inside a known folder only', async () => {
+  const trashed = [];
+  const shell = { trashItem: async (p) => { trashed.push(p); fs.rmSync(p, { recursive: true, force: true }); } };
+  const files = createPhoneFiles({ roots: () => [project], shell });
+  fs.mkdirSync(path.join(project, 'batch', 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'batch', 'sub', 'one.md'), '1');
+  fs.writeFileSync(path.join(project, 'batch', 'two.md'), '2');
+
+  const result = await files.trashMany(project, ['batch/sub/one.md', 'batch/sub', 'batch/two.md']);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.removed, ['batch/sub', 'batch/two.md']);
+  assert.deepEqual(trashed, [path.join(project, 'batch', 'sub'), path.join(project, 'batch', 'two.md')]);
+
+  const elsewhere = path.dirname(project);
+  assert.deepEqual(await files.trashMany(elsewhere, [path.basename(project) + '/docs']), { ok: false, error: 'Not a folder of a project' });
+  assert.equal((await files.trashMany(project, [])).ok, false);
+  assert.equal(trashed.length, 2);
+});
+
 test('the remote parameters of the new file methods are checked', async () => {
   const calls = [];
   const local = (name) => (_client, ...args) => { calls.push([name, ...args]); return { ok: true }; };
   const api = createRemoteApi({
     getHandler: () => null,
-    localMethods: { 'save-project-file': local('save'), 'manage-project-entry': local('manage') },
+    localMethods: { 'save-project-file': local('save'), 'manage-project-entry': local('manage'), 'trash-project-entries': local('trash-many') },
   });
   const hex = sha1('x');
   assert.deepEqual(await api.call('save-project-file', [project, 'a.md', 'text', hex]), { result: { ok: true } });
@@ -200,6 +219,11 @@ test('the remote parameters of the new file methods are checked', async () => {
   assert.match((await api.call('manage-project-entry', [project, '/abs', 'trash'])).error, /Wrong parameter 2/);
   assert.match((await api.call('manage-project-entry', [project, 'a.md', 'rename', 'x'.repeat(256)])).error, /Wrong parameter 4/);
   assert.equal(calls.length, 4);
+  assert.deepEqual(await api.call('trash-project-entries', [project, ['a.md', 'docs/b']]), { result: { ok: true } });
+  assert.match((await api.call('trash-project-entries', [project, ['/abs']])).error, /Wrong parameter 2/);
+  assert.match((await api.call('trash-project-entries', [project, 'a.md'])).error, /Wrong parameter 2/);
+  assert.match((await api.call('trash-project-entries', ['relative', ['a.md']])).error, /Wrong parameter 1/);
+  assert.equal(calls.length, 5);
 });
 
 test('a phone downloads any file of the project piece by piece, and nothing outside it', () => {
