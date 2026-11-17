@@ -514,6 +514,69 @@ ipcMain.handle('remove-project', (_event, projectPath) => {
 // --- IPC: projects ---
 // Every mutating handler notifies the renderer itself (projects.js), so both
 // the Sessions and the Projects tab refresh from one event.
+// --- Claude Code's trust in the attached folders (claude-trust.js) ---
+// Attaching a folder to a project is the user's consent to Claude Code working
+// there, so it is recorded once instead of Claude asking in every session.
+const claudeTrust = require('./claude-trust');
+
+function projectFolderPaths(projectId) {
+  try { return dbModule.listProjectFolders(projectId).map(f => f.path); } catch { return []; }
+}
+
+function trustFolders(folders) {
+  const list = [...new Set((folders || []).filter(Boolean))];
+  if (!list.length) return;
+  claudeTrust.recordTrust(list).then((result) => {
+    if (result.error) log.warn(`[trust] could not record Claude Code's trust: ${result.error}`);
+    else if (result.keys.length) log.info(`[trust] Claude Code now trusts ${result.keys.join(', ')}`);
+  });
+}
+
+/** Wrap a handler taking a project id first: trust the folders it added to that project. */
+function trustingNewFolders(fn) {
+  return async (id, ...args) => {
+    const before = new Set(projectFolderPaths(id));
+    const result = await fn(id, ...args);
+    if (!result?.error) trustFolders(projectFolderPaths(id).filter(p => !before.has(p)));
+    return result;
+  };
+}
+
+// One question at a time: two sessions started together share the answer.
+let folderTrustQueue = Promise.resolve();
+
+/**
+ * Before a session with attached folders Claude Code does not trust yet, ask
+ * once whether to trust them. Never blocks the launch on an error.
+ */
+function confirmFolderTrust(win, dirs) {
+  const run = folderTrustQueue.then(async () => {
+    const untrusted = await claudeTrust.untrustedFolders(dirs);
+    if (!untrusted.length) return;
+    const shown = untrusted.slice(0, 8).map(d => `• ${d}`);
+    if (untrusted.length > shown.length) shown.push(`+ ${untrusted.length - shown.length} more`);
+    const options = {
+      type: 'question',
+      buttons: ['Trust and Start', 'Start Without Trusting'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      message: untrusted.length === 1
+        ? 'Trust this attached folder for Claude Code?'
+        : `Trust these ${untrusted.length} attached folders for Claude Code?`,
+      detail: `${shown.join('\n')}\n\nClaude Code asks about attached folders it does not trust in every new session. Trusting them here records the answer once, as starting Claude Code in each folder and trusting it would, and the session starts without asking.`,
+    };
+    const { response } = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options);
+    if (response !== 0) return;
+    const result = await claudeTrust.recordTrust(untrusted);
+    if (result.error) log.warn(`[trust] could not record Claude Code's trust: ${result.error}`);
+  }).catch((err) => log.warn('[trust] check failed', err));
+  folderTrustQueue = run;
+  return run;
+}
+
 function guarded(fn) {
   return async (_event, ...args) => {
     try { return await fn(...args); } catch (err) {
@@ -528,10 +591,18 @@ ipcMain.handle('get-project-tree', guarded((showArchived) => {
   if (!isCachePopulated() || !isSearchIndexPopulated()) return { projects: [] };
   return projects.buildProjectTree(!!showArchived);
 }));
-ipcMain.handle('create-project', guarded((spec) => projects.createProject(spec || {})));
+ipcMain.handle('create-project', guarded(async (spec) => {
+  const result = await projects.createProject(spec || {});
+  const id = result?.project?.id;
+  if (id) {
+    const row = dbModule.getProject(id);
+    trustFolders([row?.root, ...projectFolderPaths(id)]);
+  }
+  return result;
+}));
 ipcMain.handle('update-project', guarded((id, patch) => projects.updateProject(id, patch || {})));
 ipcMain.handle('delete-project', guarded((id) => projects.deleteProject(id)));
-ipcMain.handle('attach-project-folder', guarded((id, spec) => projects.attachFolder(id, spec || {})));
+ipcMain.handle('attach-project-folder', guarded(trustingNewFolders((id, spec) => projects.attachFolder(id, spec || {}))));
 ipcMain.handle('detach-project-folder', guarded((id, folderPath, opts) => projects.detachFolder(id, folderPath, opts || {})));
 ipcMain.handle('set-session-assignment', guarded((sessionId, projectId, trackId) => {
   const cleanProjectId = projectId || null;
@@ -682,18 +753,18 @@ ipcMain.handle('get-worktree-settings', guarded((id) => worktrees.getSettings(id
 ipcMain.handle('set-worktree-settings', guarded((id, patch) => worktrees.setSettings(id, patch || {})));
 ipcMain.handle('list-worktree-branches', guarded((id, repoPath) => worktrees.listRepoBranches(id, wtPath(repoPath))));
 ipcMain.handle('suggest-worktree-path', guarded((id, repoPath, ref) => worktrees.suggestWorktreePath(id, wtPath(repoPath), String(ref || ''))));
-ipcMain.handle('worktree-create', guarded((id, spec) => worktrees.createWorktree(id, spec || {})));
+ipcMain.handle('worktree-create', guarded(trustingNewFolders((id, spec) => worktrees.createWorktree(id, spec || {}))));
 ipcMain.handle('worktree-run-post-create', guarded((id, worktreePath) => worktrees.runPostCreate(id, wtPath(worktreePath))));
 ipcMain.handle('worktree-remove', guarded((id, worktreePath, opts) => worktrees.removeWorktree(id, wtPath(worktreePath), opts || {})));
 ipcMain.handle('worktree-delete-branch', guarded((id, repoPath, branch, opts) => worktrees.deleteBranch(id, wtPath(repoPath), String(branch || ''), opts || {})));
 ipcMain.handle('worktree-merged', guarded((id, repoPath, base) => worktrees.mergedWorktrees(id, wtPath(repoPath), String(base || ''))));
 ipcMain.handle('worktree-lock', guarded((id, worktreePath, reason) => worktrees.lockWorktree(id, wtPath(worktreePath), String(reason || ''))));
 ipcMain.handle('worktree-unlock', guarded((id, worktreePath) => worktrees.unlockWorktree(id, wtPath(worktreePath))));
-ipcMain.handle('worktree-move', guarded((id, worktreePath, newPath) => worktrees.moveWorktree(id, wtPath(worktreePath), wtPath(newPath))));
+ipcMain.handle('worktree-move', guarded(trustingNewFolders((id, worktreePath, newPath) => worktrees.moveWorktree(id, wtPath(worktreePath), wtPath(newPath)))));
 ipcMain.handle('worktree-repair', guarded((id, repoPath, paths) => worktrees.repairWorktrees(id, wtPath(repoPath), Array.isArray(paths) ? paths.map(String) : [])));
 ipcMain.handle('worktree-prune-preview', guarded((id, repoPath) => worktrees.prunePreview(id, wtPath(repoPath))));
 ipcMain.handle('worktree-prune', guarded((id, repoPath, opts) => worktrees.pruneWorktrees(id, wtPath(repoPath), opts || {})));
-ipcMain.handle('worktree-attach', guarded((id, worktreePath) => worktrees.attachToProject(id, wtPath(worktreePath))));
+ipcMain.handle('worktree-attach', guarded(trustingNewFolders((id, worktreePath) => worktrees.attachToProject(id, wtPath(worktreePath)))));
 ipcMain.handle('worktree-detach', guarded((id, worktreePath) => worktrees.detachFromProject(id, wtPath(worktreePath))));
 
 // --- IPC: get-projects ---
@@ -2560,6 +2631,15 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   if (harness && !harness.buildLaunchArgs) {
     return { ok: false, error: `${harness.label} sessions cannot be launched yet` };
+  }
+
+  // Claude asks about every --add-dir it does not trust, again in every session.
+  // Ask once here instead, while someone is at the desktop; a phone or a
+  // schedule says it is unattended and gets Claude's own question.
+  if (isClaudeSession && sessionOptions?.addDirs && !sessionOptions?.unattended) {
+    const dirs = String(sessionOptions.addDirs).split(',').map(d => d.trim()).filter(Boolean);
+    const sender = _event?.sender ? BrowserWindow.fromWebContents(_event.sender) : null;
+    await confirmFolderTrust(sender && !sender.isDestroyed() ? sender : mainWindow, dirs);
   }
 
   // Resolve shell profile from effective settings

@@ -37,6 +37,7 @@ test('a new session gets a fresh id, the folder defaults and its project', async
   assert.equal(options.initialPrompt, 'Fix the login');
   assert.deepEqual([options.projectId, options.trackId], ['proj', 'track']);
   assert.equal(options.mcpEmulation, false, 'no IDE diff waiting on the desktop');
+  assert.equal(options.unattended, true, 'no question about trusting folders waiting on the desktop');
   assert.deepEqual(launched, [result.sessionId]);
 });
 

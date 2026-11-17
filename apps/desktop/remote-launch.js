@@ -73,7 +73,12 @@ function createSessionLauncher({ openTerminal, effectiveSettings, sessionConfig,
 
     // Nobody may be at the desktop to review a diff: Claude asks for
     // permission in the terminal instead, where the phone can answer.
-    if (options.type !== 'terminal') options.mcpEmulation = false;
+    // Nor to answer the desktop's question about trusting attached folders:
+    // Claude's own question shows in the terminal the phone sees.
+    if (options.type !== 'terminal') {
+      options.mcpEmulation = false;
+      options.unattended = true;
+    }
 
     const result = await openTerminal(sessionId, projectPath, isNew, options);
     if (!result?.ok) return { error: result?.error || 'Could not start the session' };

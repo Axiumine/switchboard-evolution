@@ -67,7 +67,7 @@ function scheduleLastRunLabel(schedule) {
 // --- Launching ---
 
 /** Start the session for a schedule main says is due. Never steals focus. */
-async function launchScheduledSession(launch) {
+async function launchScheduledSession(launch, { unattended = false } = {}) {
   if (!launch || launch.error || !launch.schedule || !launch.target) return;
   const { schedule, target, runtime } = launch;
   const runtimeId = runtime || 'claude';
@@ -76,6 +76,9 @@ async function launchScheduledSession(launch) {
   options.runtime = runtimeId;
   options.initialPrompt = schedule.prompt;
   options.scheduleId = schedule.id;
+  // A schedule that comes due starts with nobody at the screen: no question
+  // about trusting attached folders may hold it up.
+  if (unattended) options.unattended = true;
   await launchNewSession(target, options, { focus: false });
 }
 
@@ -475,6 +478,6 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
 
 if (typeof window !== 'undefined' && window.api?.onScheduleDue) {
   window.api.onScheduleDue((launch) => {
-    launchScheduledSession(launch).catch(err => console.error('[schedule] launch failed', err));
+    launchScheduledSession(launch, { unattended: true }).catch(err => console.error('[schedule] launch failed', err));
   });
 }
