@@ -2,13 +2,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
 import { Redirect, router, Tabs, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { HeaderButton } from '@/components/HeaderButton';
 import {
   ArchivedToggle, CardEnd, DrawerSessionRow, FolderHead, GroupHead, MoreRow, NoneRow, ProjectListRow, SectionLabel, SectionToggle,
 } from '@/components/projects/ListRows';
+import { usePullRefresh } from '@/components/PullRefresh';
 import { SearchStopBar } from '@/components/SearchStopBar';
 import { SessionActions } from '@/components/SessionActions';
 import { SessionRow } from '@/components/SessionRow';
@@ -191,6 +192,8 @@ export default function ProjectsScreen() {
     }
   };
 
+  const pull = usePullRefresh(() => Promise.all([tree.refetch(), folders.refetch()]));
+
   if (!loaded) return <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>;
   if (!desktop) return <Redirect href="/pair" />;
 
@@ -242,7 +245,7 @@ export default function ProjectsScreen() {
         initialNumToRender={30}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={tree.isRefetching} onRefresh={() => { tree.refetch(); folders.refetch(); }} tintColor={colors.accent} />}
+        refreshControl={pull}
       />
       <TextPrompt visible={creating} title="New project" confirm="Create" onClose={() => setCreating(false)} onSubmit={create} />
       <Sheet

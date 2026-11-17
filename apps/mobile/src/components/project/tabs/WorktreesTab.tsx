@@ -3,8 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { usePullRefresh } from '@/components/PullRefresh';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import type { Project } from '@/projects/model';
@@ -66,6 +67,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   // A read already under way is joined, not started over.
   const { refetch } = listing;
   useFocusEffect(useCallback(() => { if (active && online && supported) refetch({ cancelRefetch: false }); }, [active, online, supported, refetch]));
+  const pull = usePullRefresh(() => (online ? refetch({ cancelRefetch: false }) : undefined));
 
   const repositories = listing.data?.repositories;
   const settings = listing.data?.settings;
@@ -345,7 +347,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
       <ScrollView
         {...scroll}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={listing.isRefetching} onRefresh={() => { if (online) refetch({ cancelRefetch: false }); }} tintColor={colors.accent} />}
+        refreshControl={pull}
       >
         {body}
         {repositories?.length ? <Text style={styles.footer}>Tap a worktree for its actions; + starts a session in it. Pull down to read them again.</Text> : null}

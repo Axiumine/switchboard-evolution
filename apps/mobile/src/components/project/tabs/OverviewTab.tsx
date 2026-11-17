@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
 
+import { usePullRefresh } from '@/components/PullRefresh';
 import { SessionActions } from '@/components/SessionActions';
 import { SessionRow } from '@/components/SessionRow';
 import { Sheet } from '@/components/Sheet';
@@ -16,14 +17,14 @@ import { InfoRow, Section, SectionLink } from '../Section';
 import { useTabScroll } from '../useTabScroll';
 
 /** The project at a glance: status, tracks and their sessions, other sessions, schedules and folders. */
-export function OverviewTab({ project, now, run, onRename, refreshing, onRefresh }: {
+export function OverviewTab({ project, now, run, onRename, onRefresh }: {
   project: Project;
   now: number;
   run: Run;
   onRename: (rename: Rename) => void;
-  refreshing: boolean;
-  onRefresh: () => void;
+  onRefresh: () => unknown;
 }) {
+  const pull = usePullRefresh(onRefresh);
   const live = useConnection((s) => s.live);
   const notices = useConnection((s) => s.notices);
   const scroll = useTabScroll(project.id, 'overview');
@@ -44,7 +45,7 @@ export function OverviewTab({ project, now, run, onRename, refreshing, onRefresh
 
   return (
     <>
-      <ScrollView {...scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}>
+      <ScrollView {...scroll} refreshControl={pull}>
         {status || state !== 'idle' ? (
           <Text style={styles.status}>{[status, state === 'attention' ? 'a session needs you' : state === 'busy' ? 'working' : state === 'unread' ? 'unread' : null].filter(Boolean).join(' · ')}</Text>
         ) : null}

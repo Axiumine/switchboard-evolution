@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { usePullRefresh } from '@/components/PullRefresh';
 import { byteSize } from '@/files/model';
 import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -22,6 +23,7 @@ export default function FilesScreen() {
     queryFn: () => request<{ ok: boolean; entries?: Entry[]; error?: string }>('list-project-directory', [root, path]),
     enabled: online && !!root,
   });
+  const pull = usePullRefresh(() => listing.refetch());
 
   const open = (entry: Entry) => {
     if (entry.type === 'directory') router.push({ pathname: '/files', params: { root, path: entry.relativePath, title } });
@@ -35,7 +37,7 @@ export default function FilesScreen() {
       <FlatList
         data={listing.data?.entries || []}
         keyExtractor={(entry) => entry.relativePath}
-        refreshControl={<RefreshControl refreshing={listing.isRefetching} onRefresh={() => { listing.refetch(); }} tintColor={colors.accent} />}
+        refreshControl={pull}
         renderItem={({ item }) => {
           const dim = item.type !== 'directory' && !item.viewable;
           return (

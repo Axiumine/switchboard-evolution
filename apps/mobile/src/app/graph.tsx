@@ -2,11 +2,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { CommitDetails, type FileView } from '@/components/git/CommitDetails';
+import { usePullRefresh } from '@/components/PullRefresh';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import { COMPARE_MAX, compareBase, compareLabel, compareOrder, compareParams } from '@/git/compare';
@@ -165,6 +166,7 @@ export default function GraphScreen() {
     ...(pushCurrent ? [{ label: pushCurrent.label, onPress: () => run(pushCurrent) }] : []),
     { label: 'Review changes', onPress: () => router.push({ pathname: '/git', params: { projectId } }) },
   ];
+  const pull = usePullRefresh(() => graph.refetch());
 
   return (
     <View style={styles.screen}>
@@ -246,7 +248,7 @@ export default function GraphScreen() {
         getItemLayout={open ? undefined : (_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
         initialNumToRender={25}
         windowSize={11}
-        refreshControl={<RefreshControl refreshing={graph.isRefetching && !running} onRefresh={() => { graph.refetch(); }} tintColor={colors.accent} />}
+        refreshControl={pull}
         onEndReached={() => { if (data?.hasMore && !graph.isFetching && limit < MAX_COMMITS) setLimit((l) => Math.min(MAX_COMMITS, l + MORE)); }}
         onEndReachedThreshold={0.5}
         ListEmptyComponent={graph.isLoading ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : <Text style={styles.empty}>No commits.</Text>}

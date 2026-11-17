@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Redirect, router, Tabs, useNavigation } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { HeaderButton } from '@/components/HeaderButton';
+import { usePullRefresh } from '@/components/PullRefresh';
 import { SearchStopBar } from '@/components/SearchStopBar';
 import { SessionActions } from '@/components/SessionActions';
 import { SessionRow } from '@/components/SessionRow';
@@ -77,6 +78,8 @@ export default function SessionsScreen() {
     [live, notices, reviewing, open, showActions, searching, leaveOutRow],
   );
 
+  const pull = usePullRefresh(() => projects.refetch());
+
   if (!loaded) return <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>;
   if (!desktop) return <Redirect href="/pair" />;
 
@@ -118,7 +121,7 @@ export default function SessionsScreen() {
         renderSectionHeader={({ section }) => <Text style={styles.sectionHeader} numberOfLines={1}>{section.title}</Text>}
         stickySectionHeadersEnabled
         initialNumToRender={20}
-        refreshControl={<RefreshControl refreshing={projects.isRefetching} onRefresh={() => { projects.refetch(); }} tintColor={colors.accent} />}
+        refreshControl={pull}
         ListEmptyComponent={
           <Text style={styles.empty}>
             {!online ? '' : projects.isLoading ? 'Loading sessions…' : searching ? 'No session matches.' : 'No sessions here.'}

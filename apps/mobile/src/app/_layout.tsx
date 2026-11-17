@@ -7,6 +7,7 @@ import { AppState } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { AttentionToast } from '@/components/AttentionToast';
+import { SyncBar } from '@/components/SyncBar';
 import { AppStack as Stack } from '@/layout/AppStack';
 import { isDuoModel } from '@/layout/hinge';
 import { queryClient } from '@/remote/query';
@@ -62,6 +63,7 @@ export default function RootLayout() {
           <Stack.Screen name="worktrees/folder" options={{ title: 'Worktree folder' }} />
         </Stack>
         <AttentionToast />
+        <SyncBar />
       </QueryClientProvider>
     </KeyboardProvider>
   );

@@ -3,13 +3,14 @@ import { useQueries, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native';
 import { create } from 'zustand';
 
 import { DownloadBar } from '@/components/files/DownloadBar';
 import { FileIcon } from '@/components/files/FileIcon';
 import { SearchPanel } from '@/components/files/SearchPanel';
 import { FileView } from '@/components/files/FileView';
+import { usePullRefresh } from '@/components/PullRefresh';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import { downloadProjectFile, downloadSupported } from '@/files/download';
@@ -97,13 +98,12 @@ export function FilesTab({ project }: { project: Project }) {
   folders.forEach((rel, i) => { byFolder[rel] = listings[i]?.data?.entries; });
   const rows = treeRows(byFolder, expanded);
   const rootListing = listings[0];
-  const refreshing = listings.some((q) => q.isRefetching);
 
   const setExpanded = (next: string[]) => patchFiles({ expanded: { ...(ui?.expanded ?? {}), [root]: next } });
   const select = (rel: string | null) => patchFiles({ selected: { ...(ui?.selected ?? {}), [root]: rel } });
   const toggle = (rel: string) => setExpanded(expanded.has(rel) ? expandedList.filter((r) => r !== rel) : [...expandedList, rel]);
 
-  const refresh = () => { queryClient.invalidateQueries({ queryKey: ['directory'] }); };
+  const pull = usePullRefresh(() => queryClient.invalidateQueries({ queryKey: ['directory'] }));
   const afterChange = () => {
     queryClient.invalidateQueries({ queryKey: ['directory'] });
     queryClient.invalidateQueries({ queryKey: ['file'] });
@@ -313,7 +313,7 @@ export function FilesTab({ project }: { project: Project }) {
     <FlatList
       data={rows}
       keyExtractor={(row) => row.entry.relativePath}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />}
+      refreshControl={pull}
       renderItem={({ item: { entry, depth } }) => {
         const isDir = entry.type === 'directory';
         const isOpen = isDir && expanded.has(entry.relativePath);

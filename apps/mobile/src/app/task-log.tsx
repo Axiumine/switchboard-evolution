@@ -28,6 +28,8 @@ export default function TaskLogScreen() {
     queryFn: () => request<RunAnswer>('get-task-run', [projectPath, label]),
     enabled: online && !!projectPath && !!label,
     refetchInterval: focused ? 2000 : false,
+    // It polls: no SyncBar for it.
+    meta: { quiet: true },
   });
   const answer = run.data;
   const refused = answer && 'error' in answer && !('label' in answer) ? answer.error : null;

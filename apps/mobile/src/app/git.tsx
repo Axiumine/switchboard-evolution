@@ -2,9 +2,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { FileIcon } from '@/components/files/FileIcon';
+import { usePullRefresh } from '@/components/PullRefresh';
 import { STATUS_COLORS, statusLetter, treeRows, type Change, type Repository, type TreeRow } from '@/git/model';
 import { refreshGit, stageFiles, useCanStage } from '@/git/stage-requests';
 import { letterColor, sectionPaths, sideLetter, stagingSections, pathsToStage, type Section, type Side } from '@/git/staging';
@@ -30,6 +31,7 @@ export default function GitScreen() {
   // Back from the Git Graph, where an action may have changed everything.
   const { refetch } = info;
   useFocusEffect(useCallback(() => { refetch(); }, [refetch]));
+  const pull = usePullRefresh(() => info.refetch());
 
   return (
     <View style={styles.screen}>
@@ -43,7 +45,7 @@ export default function GitScreen() {
           ),
         }}
       />
-      <ScrollView refreshControl={<RefreshControl refreshing={info.isRefetching} onRefresh={() => { info.refetch(); }} tintColor={colors.accent} />}>
+      <ScrollView refreshControl={pull}>
         {info.isLoading ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : null}
         {info.data?.error ? <Text style={styles.empty}>{info.data.error}</Text> : null}
         {!info.isLoading && !repositories.length ? <Text style={styles.empty}>No folder of this project is attached yet.</Text> : null}

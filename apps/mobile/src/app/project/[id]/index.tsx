@@ -31,7 +31,7 @@ import { colors } from '@/theme';
  */
 export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { project, isLoading, refetch, isRefetching } = useProject(id);
+  const { project, isLoading, refetch } = useProject(id);
   const plan = useProjectPlan(id);
   const now = useMinute();
   const nav = useProjectTab(id);
@@ -47,7 +47,7 @@ export default function ProjectScreen() {
   const [snoozing, setSnoozing] = useState(false);
   const [rename, setRename] = useState<Rename | null>(null);
 
-  const refresh = useCallback(() => { refetch(); plan.refetch(); }, [refetch, plan]);
+  const refresh = useCallback(() => Promise.all([refetch(), plan.refetch()]), [refetch, plan]);
   const tabs = useMemo(() => PROJECT_TABS.filter(({ key }) => key !== 'session' || !!sessionId), [sessionId]);
   const run = async (method: string, params: unknown[], after?: () => void) => {
     try { await act(method, params); after?.(); } catch (err: any) { Alert.alert('That did not work', err.message); }
@@ -59,7 +59,6 @@ export default function ProjectScreen() {
   }
 
   const snoozed = projectSnoozed(project, now);
-  const refreshing = isRefetching || plan.isRefetching;
   const meta = plan.data && !plan.data.error && plan.data.plan.total ? { plan: `${plan.data.plan.done}/${plan.data.plan.total}` } : undefined;
 
   const projectOptions: SheetOption[] = [
@@ -77,8 +76,8 @@ export default function ProjectScreen() {
   ];
 
   const bodies: Record<ProjectTab, ReactNode> = {
-    overview: <OverviewTab project={project} now={now} run={run} onRename={setRename} refreshing={refreshing} onRefresh={refresh} />,
-    plan: <PlanTab project={project} plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} refreshing={refreshing} onRefresh={refresh} />,
+    overview: <OverviewTab project={project} now={now} run={run} onRename={setRename} onRefresh={refresh} />,
+    plan: <PlanTab project={project} plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
     files: <FilesTab project={project} />,
     git: <GitTab project={project} active={tab === 'git'} />,
     settings: <SettingsTab project={project} now={now} run={run} onSelectTab={selectTab} />,

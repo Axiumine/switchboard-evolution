@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
 import { router, Stack, useNavigation } from 'expo-router';
 import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   barShare,
@@ -27,6 +27,7 @@ import {
   type OwnedProcess,
   type ProcessUsage,
 } from '@/processes/model';
+import { usePullRefresh } from '@/components/PullRefresh';
 import { useShown } from '@/layout/shown';
 import { openSessionFromTabs } from '@/projects/open-session';
 import { queryClient } from '@/remote/query';
@@ -67,7 +68,6 @@ export default function ProcessesScreen() {
   const [stopping, setStopping] = useState<Set<string>>(() => new Set());
   const [stopAsked, setStopAsked] = useState<Set<string>>(() => new Set());
   const [killAsked, setKillAsked] = useState<Set<string>>(() => new Set());
-  const [pulling, setPulling] = useState(false);
 
   const usage = useQuery({
     queryKey: ['process-usage'],
@@ -75,7 +75,10 @@ export default function ProcessesScreen() {
     enabled: online && supported,
     refetchOnMount: 'always',
     refetchInterval: (query) => (focused ? refreshInterval(query.state.data?.platform) : false),
+    // It polls: no SyncBar for it.
+    meta: { quiet: true },
   });
+  const pull = usePullRefresh(() => usage.refetch());
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => request<Folder[]>('get-projects', [false]), enabled: online });
   const sessions = useMemo(() => sessionsById(projects.data), [projects.data]);
 
@@ -195,7 +198,7 @@ export default function ProcessesScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={pulling} onRefresh={async () => { setPulling(true); await usage.refetch(); setPulling(false); }} tintColor={colors.accent} />}
+      refreshControl={pull}
     >
       <Stack.Screen options={{ title: 'Task Manager' }} />
       {!data ? (

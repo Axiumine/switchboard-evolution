@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { usePullRefresh } from '@/components/PullRefresh';
 import { useShown } from '@/layout/shown';
 import { limitRows, recentActivity, type LimitRow } from '@/usage/model';
 import { request, useConnection } from '@/store/connection';
@@ -29,14 +30,14 @@ export default function UsageScreen() {
   // Up to the day the stats were last worked out, which can be a while ago.
   const days = useMemo(() => recentActivity(stats.data, DAYS, (stats.data as any)?.lastComputedDate || new Date().toISOString().slice(0, 10)), [stats.data]);
   const most = Math.max(1, ...days.map((d) => d.messages));
-  const refreshing = claude.isRefetching || codex.isRefetching || stats.isRefetching;
+  const pull = usePullRefresh(() => Promise.all([claude.refetch(), codex.refetch(), stats.refetch()]));
   const s: any = stats.data;
 
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { claude.refetch(); codex.refetch(); stats.refetch(); }} tintColor={colors.accent} />}
+      refreshControl={pull}
     >
       <Limits title="Claude" loading={claude.isLoading} usage={claude.data} />
       <Limits title="Codex" loading={codex.isLoading} usage={codex.data} />

@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { usePullRefresh } from '@/components/PullRefresh';
 import type { Timeline, TimelineEntry } from '@/files/model';
 import { relativeTime } from '@/sessions/model';
 import { request, useConnection } from '@/store/connection';
@@ -23,6 +24,7 @@ export default function TimelineScreen() {
     queryFn: () => request<Timeline>('get-file-timeline', [root, path]),
     enabled: online && !!root && !!path,
   });
+  const pull = usePullRefresh(() => timeline.refetch());
   const data = timeline.data;
   const isDir = !!dir;
   const rows: Row[] = [];
@@ -55,7 +57,7 @@ export default function TimelineScreen() {
       <FlatList
         data={rows}
         keyExtractor={(row) => row.key}
-        refreshControl={<RefreshControl refreshing={timeline.isRefetching} onRefresh={() => { timeline.refetch(); }} tintColor={colors.accent} />}
+        refreshControl={pull}
         renderItem={({ item }) => (
           <Pressable
             onPress={() => openChange(item)}
