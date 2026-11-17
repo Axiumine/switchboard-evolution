@@ -46,6 +46,9 @@ const FICONS = {
   paste: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>`,
   explorer: (s = 15) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7Z"/><path d="M15 2v5h5"/><path d="M3 7v13a2 2 0 0 0 2 2h10"/></svg>`,
   more: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>`,
+  expand: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>`,
+  // "Select": a dashed box and a pointer, not a tick, which reads as an option already on.
+  select: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.03 12.68a.5.5 0 0 1 .65-.65l9 3.5a.5.5 0 0 1-.03.94l-3.45 1.07a1 1 0 0 0-.66.66l-1.07 3.44a.5.5 0 0 1-.94.03z"/><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h2"/><path d="M14 3h1"/><path d="M3 9v1"/><path d="M21 9v2"/><path d="M3 14v1"/></svg>`,
 };
 
 const isMacPlatform = () => window.api.platform === 'darwin';
@@ -504,7 +507,7 @@ function explorerSelectionItems(project, root, body, state) {
   const list = () => body.querySelector('#ws-files-list');
   const rerender = async () => { if (list()) await renderFileTree(project, list(), state); };
   if (!state.selecting) {
-    return [{ label: 'Enable Selection', icon: PICONS.check(14), onClick: async () => { state.selecting = true; await rerender(); } }];
+    return [{ label: 'Enable Selection', icon: FICONS.select(14), onClick: async () => { state.selecting = true; await rerender(); } }];
   }
   const count = state.picked.size;
   const set = (picked) => { state.picked = picked; if (list()) refreshPicks(list(), state); };
@@ -1141,11 +1144,21 @@ async function renderFilesTab(project, body) {
     if (act === 'more') {
       button.onclick = () => {
         // The actions the narrow header folded away, then (explorer) the selection.
+        // Collapse All and Expand All are always in the explorer's menu, so Collapse is not repeated among the folded ones.
         const folded = filesHeadActions(view)
-          .filter(a => a.fold && head.querySelector(`[data-act="${a.act}"]`)?.offsetParent === null)
+          .filter(a => a.fold && (view === 'search' || a.act !== 'collapse') && head.querySelector(`[data-act="${a.act}"]`)?.offsetParent === null)
           .map(a => ({ label: a.label, icon: a.icon, onClick: handlers[a.act] }));
+        const tree = view === 'search' ? [] : [
+          { label: 'Expand All', icon: FICONS.expand(14), onClick: handlers['expand-all'] },
+          { label: 'Collapse All', icon: FICONS.collapse(14), onClick: handlers.collapse },
+        ];
         const selection = view === 'search' ? [] : explorerSelectionItems(project, root, body, state);
-        const items = folded.length && selection.length ? [...folded, { sep: true }, ...selection] : [...folded, ...selection];
+        const items = [];
+        for (const part of [folded, tree, selection]) {
+          if (!part.length) continue;
+          if (items.length) items.push({ sep: true });
+          items.push(...part);
+        }
         if (items.length) showContextMenu(items, { anchor: button });
       };
     } else if (handlers[act]) {
@@ -1196,6 +1209,12 @@ function explorerHeadHandlers(project, root, body, state) {
     },
     collapse: async () => {
       state.expanded.clear();
+      if (list()) await renderFileTree(project, list(), state);
+    },
+    // Every folder, level by level, without node_modules or .git, up to a limit (file-selection.js).
+    'expand-all': async () => {
+      const folders = await FileSelection.collectFolders(rel => listProjectDir(project, state, rel));
+      state.expanded = new Set(folders);
       if (list()) await renderFileTree(project, list(), state);
     },
     'new-file': () => explorerNewEntry(project, root, selectedFolderOf(state), 'file'),

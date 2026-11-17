@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  LIST_MAX, isWithin, selectAll, invertSelection, togglePicked, topLevelPicks, trashQuestion, remapAfterTrash, failuresText,
+  LIST_MAX, isWithin, selectAll, invertSelection, togglePicked, topLevelPicks, trashQuestion, remapAfterTrash, failuresText, collectFolders,
 } = require('../public/file-selection');
 
 const sorted = set => [...set].sort();
@@ -57,4 +57,20 @@ test('failures read as a short list', () => {
   assert.equal(failuresText([{ rel: 'a.md', error: 'No longer exists' }]), '1 item could not be moved:\na.md: No longer exists');
   const many = Array.from({ length: 10 }, (_, i) => ({ rel: `f${i}`, error: 'x' }));
   assert.match(failuresText(many, 3), /^10 items could not be moved:\nf0: x\nf1: x\nf2: x\n\+ 7 more$/);
+});
+
+test('Expand All opens folders level by level, without node_modules or .git, up to a limit', async () => {
+  const tree = {
+    '': [{ name: 'src', relativePath: 'src', type: 'directory' }, { name: 'node_modules', relativePath: 'node_modules', type: 'directory' }, { name: '.git', relativePath: '.git', type: 'directory' }, { name: 'a.md', relativePath: 'a.md', type: 'file' }],
+    src: [{ name: 'lib', relativePath: 'src/lib', type: 'directory' }],
+    'src/lib': [{ name: 'deep', relativePath: 'src/lib/deep', type: 'directory' }],
+    'src/lib/deep': [],
+  };
+  const asked = [];
+  const listDir = async (rel) => { asked.push(rel); return tree[rel]; };
+  assert.deepEqual(await collectFolders(listDir), ['src', 'src/lib', 'src/lib/deep']);
+  assert.ok(!asked.includes('node_modules') && !asked.includes('.git'));
+  assert.deepEqual(await collectFolders(listDir, { maxFolders: 2 }), ['src', 'src/lib']);
+  assert.deepEqual(await collectFolders(listDir, { maxDepth: 1 }), ['src']);
+  assert.deepEqual(await collectFolders(async () => { throw new Error('gone'); }), []);
 });
