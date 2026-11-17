@@ -190,18 +190,25 @@ function gitGraphResolvePullRequestUrl(ctx, branchName, remoteName) {
 
 // --- Commit row ---
 
+/** Compare, at the top of the menu of a commit and of Uncommitted Changes:
+ * Compare with the commit open (or the only one ticked), and the tick of the
+ * History's first column. */
+function gitGraphCompareMenuItems(ctx, hash) {
+  const base = ctx.compareBase && ctx.compareBase.hash !== hash ? ctx.compareBase : null;
+  const checked = !!(ctx.isChecked && ctx.isChecked(hash));
+  const items = [];
+  if (base) items.push({ id: 'compareWithSelected', label: `Compare with ${base.label}`, onClick: () => ctx.onCompare && ctx.onCompare(hash) });
+  items.push({ id: 'selectForCompare', label: checked ? 'Unselect for Compare' : 'Select for Compare', onClick: () => ctx.onSelectForCompare && ctx.onSelectForCompare(hash) });
+  items.push({ sep: true });
+  return items;
+}
+
 function gitGraphBuildCommitMenu(ctx) {
   const commit = ctx.commit || {};
   const isHead = gitGraphIsHeadCommit(ctx);
   const isCurrentBranchTip = gitGraphIsCurrentBranchTip(ctx);
   const dropVisible = gitGraphCommitDropVisible(commit);
-  // Comparing two commits: the one selected (marked here, or open) and this one.
-  const base = ctx.compareBase && ctx.compareBase.hash !== commit.hash ? ctx.compareBase : null;
-  const isBase = !!(ctx.compareBase && ctx.compareBase.hash === commit.hash);
-  const items = [];
-  if (base) items.push({ id: 'compareWithSelected', label: `Compare with ${base.label}`, onClick: () => ctx.onCompare && ctx.onCompare(commit.hash) });
-  if (!isBase) items.push({ id: 'selectForCompare', label: 'Select for Compare', onClick: () => ctx.onSelectForCompare && ctx.onSelectForCompare(commit.hash) });
-  items.push({ sep: true });
+  const items = gitGraphCompareMenuItems(ctx, commit.hash);
   items.push(
     { id: 'addTag', label: 'Add Tag…', icon: gitGraphMenuIcon('tag'), onClick: () => gitGraphShowAddTagDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, commitHash: commit.hash, commitShortHash: commit.shortHash, remotes: ctx.remotes, suggestedName: gitGraphSuggestNextTagName(ctx.tags), defaults: ctx.dialogDefaults && ctx.dialogDefaults.addTag }) },
     { id: 'createBranch', label: 'Create Branch…', icon: gitGraphMenuIcon('branch'), onClick: () => gitGraphShowCreateBranchDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, commitHash: commit.hash, defaults: ctx.dialogDefaults && ctx.dialogDefaults.createBranch }) },
@@ -233,6 +240,7 @@ function gitGraphBuildCommitMenu(ctx) {
 
 function gitGraphBuildUncommittedMenu(ctx) {
   const items = [
+    ...gitGraphCompareMenuItems(ctx, '#uncommitted'),
     { id: 'stash', label: 'Stash uncommitted changes…', icon: gitGraphMenuIcon('stash'), onClick: () => gitGraphShowStashPushDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, defaults: ctx.dialogDefaults && ctx.dialogDefaults.stashUncommittedChanges }) },
     { id: 'reset', label: 'Reset uncommitted changes…', danger: true, onClick: () => gitGraphShowResetUncommittedDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, defaults: ctx.dialogDefaults && ctx.dialogDefaults.resetUncommittedChanges }) },
   ];
@@ -494,7 +502,7 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphCopyText, gitGraphOpenExternal, gitGraphRunImmediateAction, gitGraphRunCreateArchive, gitGraphSuggestNextTagName, gitGraphIsBranchSelected,
     gitGraphIsHeadCommit, gitGraphIsCurrentBranchTip, gitGraphCommitDropVisible,
     gitGraphBuildIssueUrl, gitGraphParseRemoteUrl, gitGraphBuildPullRequestUrl, gitGraphResolvePullRequestUrl,
-    gitGraphBuildCommitMenu, gitGraphBuildUncommittedMenu, gitGraphBuildLocalBranchMenu,
+    gitGraphCompareMenuItems, gitGraphBuildCommitMenu, gitGraphBuildUncommittedMenu, gitGraphBuildLocalBranchMenu,
     gitGraphBuildRemoteBranchMenu, gitGraphBuildTagMenu, gitGraphBuildStashMenu, gitGraphBuildFileMenu,
     gitGraphBuildColumnHeaderMenu, gitGraphBuildLinkMenu, gitGraphApplyMenuVisibility,
     gitGraphClosestAttr, gitGraphReadTargetAttrs, gitGraphBuildMenuItems, gitGraphShowContextMenu,

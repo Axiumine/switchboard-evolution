@@ -1746,6 +1746,7 @@ function renderOverview() {
   else if (tabName === 'settings') renderSettings(project, body);
   else if (tabName === 'files') renderFilesTab(project, body);
   else if (tabName === 'plan') renderPlanTab(project, body);
+  else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.compare) renderGitCompareWindow(project, body);
   else if (tabName === 'git') renderProjectGitWorkspace(project, body);
   else renderOverviewBody(project, body);
 
@@ -1780,7 +1781,7 @@ function tabWithWindow(tab, tabButton) {
 
 /** The header of a project window: the project, the tab it shows and the pin. */
 function projectWindowHeaderHtml(project, tabName) {
-  const label = PROJECT_WINDOW_TAB_LABELS[tabName] || 'Overview';
+  const label = PROJECT_WINDOW.compare ? 'Compare' : (PROJECT_WINDOW_TAB_LABELS[tabName] || 'Overview');
   document.title = `${project.name} · ${label}`;
   const state = groupState(projectSessionsAll(project));
   return `
@@ -1796,6 +1797,12 @@ function projectWindowHeaderHtml(project, tabName) {
         <button type="button" id="tool-window-pin" class="tool-window-btn" aria-pressed="false"></button>
       </div>
     </div>`;
+}
+
+/** A Compare window's page (main.js openGitCompareWindow): the comparison of its commits, filling the window. */
+function renderGitCompareWindow(project, body) {
+  const { repo, hashes, labels } = PROJECT_WINDOW.compare;
+  gitGraphRenderCompareView(body, { projectId: project.id, repoPath: repo, hashes, labels: labels || [] });
 }
 
 /** A project window's page, once the projects are loaded: its project on its tab. */

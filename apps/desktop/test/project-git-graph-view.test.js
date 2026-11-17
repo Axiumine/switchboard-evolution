@@ -84,6 +84,9 @@ Object.assign(global, render);
 const settings = require(path.join(__dirname, '../public/git-graph-settings.js'));
 Object.assign(global, settings);
 
+const compareModule = require(path.join(__dirname, '../public/git-graph-compare.js'));
+Object.assign(global, compareModule);
+
 const view = require(path.join(__dirname, '../public/project-git-graph-view.js'));
 Object.assign(global, view);
 
@@ -979,7 +982,7 @@ test('Ctrl-clicking an older ancestor after a newer commit still compares from t
   assert.deepEqual(calls[0].slice(2), ['older', 'newer']);
 });
 
-test('the right-click menu selects a commit for compare, then compares another with it, ancestor first', async () => {
+test('the right-click menu ticks a commit for compare, then compares another with it, ancestor first', async () => {
   const state = view.gitGraphState('proj-cmp-menu');
   state.repositories = [{ path: '/repo', git: true }];
   state.selectedRepo = '/repo';
@@ -995,16 +998,98 @@ test('the right-click menu selects a commit for compare, then compares another w
 
   assert.equal(view.gitGraphBuildMenuCtx(project, state, body, repo, null).compareBase, null);
   view.gitGraphBuildMenuCtx(project, state, body, repo, null).onSelectForCompare('newer');
-  assert.equal(state.selectedHash, 'newer');
-  assert.equal(state.detailsData, null, 'selecting does not open the details');
+  assert.ok(state.checkedHashes.has('newer'), 'Select for Compare ticks the commit');
+  assert.equal(view.gitGraphBuildMenuCtx(project, state, body, repo, null).isChecked('newer'), true);
+  assert.equal(state.detailsData, null, 'ticking does not open the details');
   assert.deepEqual(view.gitGraphBuildMenuCtx(project, state, body, repo, null).compareBase, { hash: 'newer', label: 'newer12' });
 
   view.gitGraphBuildMenuCtx(project, state, body, repo, null).onCompare('older');
   assert.equal(state.detailsData.mode, 'compare');
   assert.equal(state.detailsData.fromHash, 'older');
   assert.equal(state.detailsData.toHash, 'newer');
+  assert.equal(state.selectedHash, 'newer', 'the panel opens under the commit ticked first');
   assert.deepEqual(calls[0].slice(2), ['older', 'newer']);
   await new Promise(resolve => setImmediate(resolve));
+
+  // Select for Compare again unticks it.
+  view.gitGraphBuildMenuCtx(project, state, body, repo, null).onSelectForCompare('newer');
+  assert.equal(state.checkedHashes.has('newer'), false);
+});
+
+test('with two or more commits ticked there is no single base: Compare with follows the open record only', () => {
+  const state = view.gitGraphState('proj-cmp-base');
+  state.rows = [{ hash: 'c', shortHash: 'ccc' }, { hash: 'b', shortHash: 'bbb' }, { hash: 'a', shortHash: 'aaa' }];
+  state.checkedHashes = new Set(['a', 'b']);
+  state.selectedHash = null;
+  assert.equal(view.gitGraphCompareBase(state), null);
+  state.selectedHash = 'c';
+  assert.deepEqual(view.gitGraphCompareBase(state), { hash: 'c', label: 'ccc' });
+  state.selectedHash = '#uncommitted';
+  assert.deepEqual(view.gitGraphCompareBase(state), { hash: '#uncommitted', label: 'Uncommitted Changes' });
+});
+
+test('every row starts with its checkbox, ticked when the commit is, before the graph', () => {
+  const state = view.gitGraphState('proj-cmp-rows');
+  state.checkedHashes = new Set(['b2']);
+  const showCols = { date: false, author: false, commit: false };
+  const ticked = view.gitGraphRowHtml({ hash: 'b2', kind: 'commit', subject: 's', refs: { heads: [], remotes: [], tags: [] } }, {}, state, showCols, 0);
+  const plain = view.gitGraphRowHtml({ hash: 'a1', kind: 'commit', subject: 's', refs: { heads: [], remotes: [], tags: [] } }, {}, state, showCols, 1);
+  assert.ok(ticked.indexOf('gg-cell-select') < ticked.indexOf('gg-cell-graph'));
+  assert.match(ticked, /class="gg-select-box"[^>]*checked/);
+  assert.match(ticked, /gg-row-checked/);
+  assert.doesNotMatch(plain, /checked/);
+  assert.match(view.gitGraphHeaderHtml(state), /<div class="gg-th gg-th-select" data-col="select"><\/div><div class="gg-th" data-col="graph"/);
+});
+
+test('a click in the first column ticks the row without opening it; elsewhere it opens', () => {
+  const inCell = { closest: (sel) => (sel === '.gg-cell-select' ? {} : null) };
+  const outside = { closest: () => null };
+  assert.equal(view.gitGraphInSelectCell(inCell), true);
+  assert.equal(view.gitGraphInSelectCell(outside), false);
+  assert.equal(view.gitGraphInSelectCell(null), false);
+});
+
+test('the toolbar has Select all and Clear before the search, and Compare once two are ticked', () => {
+  const state = view.gitGraphState('proj-cmp-toolbar');
+  state.rows = [{ hash: 'c' }, { hash: 'b' }, { hash: 'a' }];
+  state.checkedHashes = new Set();
+  let html = view.gitGraphControlBarHtml({ id: 'proj-cmp-toolbar' }, state);
+  assert.ok(html.indexOf('gg-select-all-btn') < html.indexOf('gg-find-btn'));
+  assert.ok(html.indexOf('gg-select-none-btn') < html.indexOf('gg-find-btn'));
+  assert.match(html, /id="gg-select-none-btn"[^>]*disabled/);
+  assert.doesNotMatch(html, /gg-compare-btn/);
+  state.checkedHashes = new Set(['a', 'c', 'gone']);
+  html = view.gitGraphControlBarHtml({ id: 'proj-cmp-toolbar' }, state);
+  assert.match(html, /Compare 2/, 'a ticked commit no longer loaded does not count');
+  assert.doesNotMatch(html, /id="gg-select-none-btn"[^>]*disabled/);
+});
+
+test('Compare opens the popup on the ticked commits oldest first, or a window of their own; nothing outside 2 to 4', () => {
+  const state = view.gitGraphState('proj-cmp-open');
+  state.selectedRepo = '/repo';
+  state.rows = [{ hash: '#uncommitted', kind: 'uncommitted' }, { hash: 'e', shortHash: 'eee' }, { hash: 'd', shortHash: 'ddd' }, { hash: 'c', shortHash: 'ccc' }, { hash: 'b', shortHash: 'bbb' }, { hash: 'a', shortHash: 'aaa' }];
+  const project = { id: 'proj-cmp-open' };
+  const popups = [];
+  const windows = [];
+  global.gitGraphShowComparePopup = (spec) => popups.push(spec);
+  global.window = { api: { openGitCompareWindow: (...args) => { windows.push(args); return Promise.resolve(true); } } };
+  try {
+    state.checkedHashes = new Set(['#uncommitted', 'a', 'd']);
+    const spec = view.gitGraphOpenCompare(project, state, { inWindow: false });
+    assert.deepEqual(spec.hashes, ['a', 'd', '#uncommitted']);
+    assert.deepEqual(spec.labels, ['aaa', 'ddd', 'Uncommitted']);
+    assert.equal(popups.length, 1);
+    view.gitGraphOpenCompare(project, state, { inWindow: true });
+    assert.deepEqual(windows[0], ['proj-cmp-open', '/repo', ['a', 'd', '#uncommitted'], ['aaa', 'ddd', 'Uncommitted']]);
+
+    state.checkedHashes = new Set(['a']);
+    assert.equal(view.gitGraphOpenCompare(project, state, { inWindow: false }), null);
+    state.checkedHashes = new Set(['a', 'b', 'c', 'd', 'e']);
+    assert.equal(view.gitGraphOpenCompare(project, state, { inWindow: false }), null);
+    assert.equal(popups.length, 1, 'no popup for 1 or 5 commits');
+  } finally {
+    global.gitGraphShowComparePopup = compareModule.gitGraphShowComparePopup;
+  }
 });
 
 // === Commit-details file list reuses #98's tree builder ===

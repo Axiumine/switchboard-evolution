@@ -35,11 +35,13 @@ function labels(items) { return items.filter(i => !i.sep).map(i => i.label); }
 
 // --- Commit menu ---
 
-test('commit menu: Select for Compare on any commit, Compare with the selected one on the others', () => {
+test('commit menu: Select for Compare ticks the commit, Unselect once ticked, Compare with the selected one on the others', () => {
   resetWindowApi();
   const calls = [];
+  const ticked = new Set();
   const base = {
     projectId: 'p', folderPath: '/repo', head: { hash: 'zzz', branch: 'main' },
+    isChecked: (hash) => ticked.has(hash),
     onSelectForCompare: (hash) => calls.push(['select', hash]),
     onCompare: (hash) => calls.push(['compare', hash]),
   };
@@ -51,14 +53,32 @@ test('commit menu: Select for Compare on any commit, Compare with the selected o
   nothingSelected.find(i => i.id === 'selectForCompare').onClick();
   assert.deepEqual(calls.pop(), ['select', 'def456']);
 
+  ticked.add('def456');
+  assert.equal(labels(menus.gitGraphBuildCommitMenu({ ...base, commit }))[0], 'Unselect for Compare');
+
   const otherSelected = menus.gitGraphBuildCommitMenu({ ...base, commit, compareBase: { hash: 'abc123', label: 'abc1234' } });
-  assert.equal(labels(otherSelected)[0], 'Compare with abc1234');
+  assert.deepEqual(labels(otherSelected).slice(0, 2), ['Compare with abc1234', 'Unselect for Compare']);
   otherSelected.find(i => i.id === 'compareWithSelected').onClick();
   assert.deepEqual(calls.pop(), ['compare', 'def456']);
 
   // On the selected commit itself there is nothing to compare with.
   const itself = menus.gitGraphBuildCommitMenu({ ...base, commit, compareBase: { hash: 'def456', label: 'def456' } });
-  assert.ok(!labels(itself).some(l => /Compare/.test(l)));
+  assert.ok(!labels(itself).some(l => /^Compare with/.test(l)));
+});
+
+test('Uncommitted Changes menu: Select for Compare and Compare with the selected commit come first', () => {
+  resetWindowApi();
+  const calls = [];
+  const items = menus.gitGraphBuildUncommittedMenu({
+    projectId: 'p', folderPath: '/repo', compareBase: { hash: 'abc123', label: 'abc1234' },
+    isChecked: () => false,
+    onSelectForCompare: (hash) => calls.push(['select', hash]),
+    onCompare: (hash) => calls.push(['compare', hash]),
+  });
+  assert.deepEqual(labels(items).slice(0, 2), ['Compare with abc1234', 'Select for Compare']);
+  items.find(i => i.id === 'selectForCompare').onClick();
+  items.find(i => i.id === 'compareWithSelected').onClick();
+  assert.deepEqual(calls, [['select', '#uncommitted'], ['compare', '#uncommitted']]);
 });
 
 test('commit menu hides Checkout on the currently checked-out commit, shows it otherwise', () => {

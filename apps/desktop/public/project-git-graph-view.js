@@ -54,6 +54,8 @@ function gitGraphState(projectId) {
       combineLocalAndRemote: true,
       selectedHash: null,
       compareHash: null,
+      // The commits ticked in the first column, for Compare (git-graph-compare.js).
+      checkedHashes: new Set(),
       detailsLocation: 'inline',
       detailsData: null,
       detailsLoading: false,
@@ -332,7 +334,8 @@ function gitGraphBuildMenuCtx(project, state, body, repo, target) {
     hasUntrackedFiles: !!(state.uncommitted && (state.uncommitted.changes || []).some(f => f.status === 'untracked')),
     codeReview: state.codeReview ? { key: state.codeReview.key, reviewedPaths: state.codeReview.reviewedPaths } : null,
     compareBase: gitGraphCompareBase(state),
-    onSelectForCompare: (hash) => gitGraphSelectForCompare(project, state, body, hash),
+    isChecked: (hash) => state.checkedHashes.has(hash),
+    onSelectForCompare: (hash) => gitGraphToggleChecked(project, state, body, hash),
     onCompare: (hash) => gitGraphCompareWithSelected(project, state, body, hash),
     onMarkFileReviewed: (path, reviewed) => gitGraphSetFileReviewed(project, state, body, path, reviewed),
     onViewDiff: (file) => gitGraphOpenFileDiff(project, state, body, repo, file.path),
@@ -699,6 +702,7 @@ function gitGraphWireRepoPicker(project, state, body) {
       state.selectedRepo = repo.path;
       state.selectedHash = null;
       state.detailsData = null;
+      state.checkedHashes.clear();
       gitGraphSaveUiPrefs(project.id, state);
       gitGraphLoadGraph(project, state, body, { reset: true });
     };
@@ -724,6 +728,9 @@ function gitGraphControlBarHtml(project, state) {
         <label class="gg-checkbox"><input type="checkbox" id="gg-show-remote" ${state.showRemoteBranches ? 'checked' : ''}> Show Remote</label>
       </div>
       <div class="gg-toolbar-right">
+        <span class="gg-compare-slot" id="gg-compare-slot">${gitGraphCompareSlotHtml(state)}</span>
+        <button type="button" class="gg-icon-btn" id="gg-select-all-btn" title="Select all loaded commits for Compare (only the ones found, while searching)">${gitGraphIcon('selectAll', 14)}</button>
+        <button type="button" class="gg-icon-btn" id="gg-select-none-btn" title="Clear the selection" ${gitGraphCheckedCount(state) ? '' : 'disabled'}>${gitGraphIcon('selectNone', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-find-btn" title="Find (Ctrl/Cmd+F)">${gitGraphIcon('search', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-settings-btn" title="Repository Settings">${gitGraphIcon('gear', 14)}</button>
         ${state.remotes.length ? `<button type="button" class="gg-icon-btn" id="gg-fetch-btn" title="Fetch from Remote(s)">${gitGraphIcon('fetch', 14)}</button>` : ''}
@@ -743,6 +750,15 @@ function gitGraphWireControlBar(project, state, body) {
     gitGraphLoadGraph(project, state, body, { reset: true });
   };
   body.querySelector('#gg-find-btn').onclick = () => { state.findOpen = !state.findOpen; gitGraphPaint(project, state, body); };
+  body.querySelector('#gg-select-all-btn').onclick = () => {
+    for (const hash of gitGraphSelectAllHashes(state)) state.checkedHashes.add(hash);
+    gitGraphRefreshChecks(project, state, body);
+  };
+  body.querySelector('#gg-select-none-btn').onclick = () => {
+    state.checkedHashes.clear();
+    gitGraphRefreshChecks(project, state, body);
+  };
+  gitGraphWireCompareSlot(project, state, body);
   body.querySelector('#gg-settings-btn').onclick = () => gitGraphToggleSettings(project, state, body);
   const fetchBtn = body.querySelector('#gg-fetch-btn');
   if (fetchBtn) {
@@ -917,7 +933,7 @@ function gitGraphHeaderHtml(state) {
     const width = state.columnWidths[col.key] ? ` style="width:${state.columnWidths[col.key]}px"` : '';
     return `<div class="gg-th" data-col="${col.key}"${width}>${escapeHtml(col.label)}<span class="gg-col-resizer" data-col="${col.key}"></span></div>`;
   }).join('');
-  return `<div class="gg-thead" id="gg-thead" data-gg-kind="column-header">${cells}</div>`;
+  return `<div class="gg-thead" id="gg-thead" data-gg-kind="column-header"><div class="gg-th gg-th-select" data-col="select"></div>${cells}</div>`;
 }
 
 function gitGraphWireHeader(project, state, body) {
@@ -975,7 +991,8 @@ function gitGraphRowsHtml(project, state) {
 function gitGraphRowHtml(row, layoutEntry, state, showCols, index) {
   const kind = row.kind === 'uncommitted' ? 'uncommitted' : (row.kind === 'stash' ? 'stash' : 'commit');
   const selected = row.hash === state.selectedHash || row.hash === state.compareHash;
-  const classes = gitGraphRowClasses({ ...row, selected }, state);
+  const checked = !!(state.checkedHashes && state.checkedHashes.has(row.hash));
+  const classes = gitGraphRowClasses({ ...row, selected }, state) + (checked ? ' gg-row-checked' : '');
   const dateValue = state.dateType === 'commit' ? row.commitDate : row.authorDate;
   const dateText = kind === 'uncommitted' ? gitGraphFormatDate(new Date().toISOString(), state.dateFormat) : gitGraphFormatDate(dateValue, state.dateFormat);
   const avatarHtml = (kind === 'commit' && gitGraphAvatarsEnabled(state)) ? gitGraphAvatarHtml(row.authorEmail, gitGraphAvatarUrlFor(state, row.authorEmail)) : '';
@@ -985,6 +1002,7 @@ function gitGraphRowHtml(row, layoutEntry, state, showCols, index) {
   const stashBadge = kind === 'stash' ? `<span class="gg-stash-badge" data-gg-kind="stash" data-gg-hash="${escapeAttr(row.hash)}" title="Stash">stash@{${row.stashIndex}}</span>` : '';
   return `
     <div class="${classes}" data-gg-kind="${kind}" data-gg-hash="${escapeAttr(row.hash)}" data-row-index="${index}">
+      <div class="gg-cell gg-cell-select" title="Select for Compare"><input type="checkbox" class="gg-select-box" tabindex="-1" aria-label="Select for Compare" ${checked ? 'checked' : ''}></div>
       <div class="gg-cell gg-cell-graph"></div>
       <div class="gg-cell gg-cell-description">${pills}${stashBadge}<span class="gg-subject">${gitGraphLinkifySubject(row.subject || '', state.repoConfig && state.repoConfig.issueLinking)}</span></div>
       ${showCols.date ? `<div class="gg-cell gg-cell-date">${escapeHtml(dateText)}</div>` : ''}
@@ -1039,8 +1057,17 @@ function gitGraphWireRows(project, state, body) {
     // pill would fire its own handler and then bubble to the row's, whose
     // showContextMenu() call replaces (rather than coexists with) whatever
     // the pill just opened.
-    el.onclick = (e) => { e.stopPropagation(); gitGraphHandleRowClick(project, state, body, el, e); };
-    el.ondblclick = (e) => { e.stopPropagation(); gitGraphHandleDoubleClick(project, state, body, el, clickCtx); };
+    el.onclick = (e) => {
+      e.stopPropagation();
+      // The first column ticks the row for Compare: it does not open it.
+      if (gitGraphInSelectCell(e.target)) { gitGraphToggleChecked(project, state, body, el.dataset.ggHash); return; }
+      gitGraphHandleRowClick(project, state, body, el, e);
+    };
+    el.ondblclick = (e) => {
+      e.stopPropagation();
+      if (gitGraphInSelectCell(e.target)) return;
+      gitGraphHandleDoubleClick(project, state, body, el, clickCtx);
+    };
     el.oncontextmenu = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1151,44 +1178,97 @@ function gitGraphHandleRowClick(project, state, body, el, event) {
   gitGraphOpenDetails(project, state, body, row);
 }
 
-/** Compares `hash` with the selected commit (the one open, or marked with
- * Select for Compare): Ctrl/Cmd+click and the right-click menu. False when
+/** Compares `hash` with the selected commit (the one open, or the only one
+ * ticked for Compare): Ctrl/Cmd+click and the right-click menu. False when
  * there is no other commit selected. */
 function gitGraphCompareWithSelected(project, state, body, hash) {
-  if (!state.selectedHash || state.selectedHash === hash) return false;
-  const first = state.selectedHash, second = hash;
+  const base = gitGraphCompareBase(state);
+  if (!base || base.hash === hash) return false;
+  const first = base.hash, second = hash;
   // Order-independent: the comparison always reads from whichever side
   // is actually the ancestor toward the descendant. Click order only
   // decides it when neither is reachable from the other within the
   // loaded window (e.g. unrelated histories) — the default below.
   let fromHash = first, toHash = second;
   if (gitGraphIsAncestor(state.rows, second, first)) { fromHash = second; toHash = first; }
+  // The panel opens under the first of the two.
+  state.selectedHash = first;
   state.compareHash = hash;
   gitGraphOpenComparison(project, state, body, fromHash, toHash);
   return true;
 }
 
-/** Marks a commit as the one the next Compare starts from, without opening
- * its details (the row shows as selected). */
-function gitGraphSelectForCompare(project, state, body, hash) {
-  state.detailsRequest = (state.detailsRequest || 0) + 1; // a load still on its way no longer lands
-  state.detailsData = null;
-  state.detailsLoading = false;
-  state.codeReview = null;
-  state.lastViewedFilePath = null;
-  state.selectedHash = hash;
-  state.compareHash = null;
-  const dock = body.querySelector('#gg-details-docked');
-  if (dock) dock.style.display = 'none';
-  gitGraphPaint(project, state, body, { preserveScroll: true });
+/** The commit a two-commit comparison starts from: the open one, or else the
+ * only one ticked. Null when there is none. */
+function gitGraphCompareBase(state) {
+  let hash = state.selectedHash;
+  if (!hash) {
+    const ticked = gitGraphCompareOrder(state.rows, state.checkedHashes || []);
+    if (ticked.length !== 1) return null;
+    hash = ticked[0];
+  }
+  if (hash === '#uncommitted') return { hash, label: 'Uncommitted Changes' };
+  const row = (state.rows || []).find(r => r.hash === hash);
+  return { hash, label: (row && row.shortHash) || hash.slice(0, 8) };
 }
 
-/** The selected commit as the right-click menu names it, or null. */
-function gitGraphCompareBase(state) {
-  if (!state.selectedHash) return null;
-  if (state.selectedHash === '#uncommitted') return { hash: state.selectedHash, label: 'Uncommitted Changes' };
-  const row = (state.rows || []).find(r => r.hash === state.selectedHash);
-  return { hash: state.selectedHash, label: (row && row.shortHash) || state.selectedHash.slice(0, 8) };
+// --- The first column: commits ticked for Compare (git-graph-compare.js) ---
+
+function gitGraphInSelectCell(target) {
+  return !!(target && typeof target.closest === 'function' && target.closest('.gg-cell-select'));
+}
+
+/** The ticked commits that are still loaded. */
+function gitGraphCheckedCount(state) {
+  return gitGraphCompareOrder(state.rows, state.checkedHashes || []).length;
+}
+
+function gitGraphCompareSlotHtml(state) {
+  return gitGraphCompareButtonsHtml(gitGraphCheckedCount(state));
+}
+
+/** Ticks `hash` (or unticks it), without repainting the table. */
+function gitGraphToggleChecked(project, state, body, hash) {
+  if (!hash) return;
+  if (state.checkedHashes.has(hash)) state.checkedHashes.delete(hash);
+  else state.checkedHashes.add(hash);
+  gitGraphRefreshChecks(project, state, body);
+}
+
+/** The ticks on the rows, and the toolbar's Clear and Compare, as the ticked commits now are. */
+function gitGraphRefreshChecks(project, state, body) {
+  body.querySelectorAll('.gg-tbody .gg-row[data-gg-hash]').forEach((rowEl) => {
+    const on = state.checkedHashes.has(rowEl.dataset.ggHash);
+    rowEl.classList.toggle('gg-row-checked', on);
+    const box = rowEl.querySelector('.gg-select-box');
+    if (box) box.checked = on;
+  });
+  const none = body.querySelector('#gg-select-none-btn');
+  if (none) none.disabled = !gitGraphCheckedCount(state);
+  const slot = body.querySelector('#gg-compare-slot');
+  if (slot) { slot.innerHTML = gitGraphCompareSlotHtml(state); gitGraphWireCompareSlot(project, state, body); }
+}
+
+function gitGraphWireCompareSlot(project, state, body) {
+  const compareBtn = body.querySelector('#gg-compare-btn');
+  if (compareBtn) compareBtn.onclick = () => gitGraphOpenCompare(project, state, { inWindow: false });
+  const windowBtn = body.querySelector('#gg-compare-window-btn');
+  if (windowBtn) windowBtn.onclick = () => gitGraphOpenCompare(project, state, { inWindow: true });
+}
+
+/** What Compare compares: the ticked commits, oldest first, with their names. Null outside 2 to GG_COMPARE_MAX. */
+function gitGraphCompareSpec(project, state) {
+  const hashes = gitGraphCompareOrder(state.rows, state.checkedHashes || []);
+  if (hashes.length < 2 || hashes.length > GG_COMPARE_MAX) return null;
+  return { projectId: project.id, repoPath: state.selectedRepo, hashes, labels: hashes.map(hash => gitGraphCompareLabel(state.rows, hash)) };
+}
+
+function gitGraphOpenCompare(project, state, { inWindow }) {
+  const spec = gitGraphCompareSpec(project, state);
+  if (!spec) return null;
+  if (inWindow) gitGraphApi('openGitCompareWindow', spec.projectId, spec.repoPath, spec.hashes, spec.labels);
+  else gitGraphShowComparePopup(spec);
+  return spec;
 }
 
 function gitGraphShowTooltip(el, state) {
@@ -1656,6 +1736,8 @@ function gitGraphBindKeyboard(project, state, body) {
   if (state.keydownHandler) document.removeEventListener('keydown', state.keydownHandler);
   const handler = (e) => {
     if (!gitGraphStillActive(project) || !body.isConnected) return;
+    // The Compare popup over the History keeps the keys to itself.
+    if (document.getElementById('gg-cmp-overlay')) return;
     if (gitGraphIsEditableTarget(e.target) && e.key !== 'Escape') return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
@@ -1837,5 +1919,7 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphMaybeAutoCenterDetails, gitGraphDetailsBodyHtml, gitGraphRowsHtml, gitGraphIsAncestor, gitGraphHandleRowClick, gitGraphBindKeyboard,
     gitGraphSameBranchNeighbor, gitGraphAlternateBranchNeighbor, gitGraphMoveDetailsFocus,
     gitGraphSameStringSet, gitGraphRepoList, gitGraphEnsureWatcherBound,
+    gitGraphCompareBase, gitGraphCompareWithSelected, gitGraphToggleChecked, gitGraphCompareSpec, gitGraphOpenCompare,
+    gitGraphRowHtml, gitGraphHeaderHtml, gitGraphControlBarHtml, gitGraphInSelectCell,
   };
 }

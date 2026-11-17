@@ -293,7 +293,7 @@ function createWindow() {
     taskManager.shutdown();
     // They close with the main window, and open again with the next one.
     freezeOpenWindows();
-    for (const win of [...toolWindows.values(), ...projectWindows.values()]) if (!win.isDestroyed()) win.close();
+    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows]) if (!win.isDestroyed()) win.close();
     mainWindow = null;
   });
 }
@@ -1655,6 +1655,33 @@ function openProjectWindow(projectId, tab, { bounds, inactive = false } = {}) {
   return true;
 }
 
+// --- The Git History's Compare in a window of its own ---
+// From the toolbar of the History or the Compare popup (git-graph-compare.js):
+// index.html again, as a project window that shows only the comparison of
+// 2 to 4 commits, oldest first. Not opened again at the next start, and
+// without the events of a project's page: the commits it compares fix what
+// it shows. They close with the main window.
+const compareWindows = new Set();
+const GIT_COMPARE_WINDOW_SPEC = { title: 'Compare', width: 1280, height: 820, minWidth: 640, minHeight: 420, onTop: false };
+const GIT_COMPARE_HASH = /^(#uncommitted|[0-9a-f]{4,64})$/i;
+
+function openGitCompareWindow(projectId, repoPath, hashes, labels) {
+  if (typeof projectId !== 'string' || !projectId || projectId.length > 200) return false;
+  if (typeof repoPath !== 'string' || !repoPath || repoPath.length > 4096) return false;
+  if (!Array.isArray(hashes) || hashes.length < 2 || hashes.length > 4) return false;
+  if (!hashes.every(hash => typeof hash === 'string' && GIT_COMPARE_HASH.test(hash))) return false;
+  const names = hashes.map((_, i) => String((Array.isArray(labels) && labels[i]) || '').slice(0, 60));
+  const win = createPageWindow('git-compare', GIT_COMPARE_WINDOW_SPEC, { offset: 24 * compareWindows.size });
+  compareWindows.add(win);
+  win.loadFile(path.join(__dirname, 'public', 'index.html'), {
+    query: { projectWindow: projectId, tab: 'git', compare: JSON.stringify({ repo: repoPath, hashes, labels: names }) },
+  });
+  win.on('closed', () => compareWindows.delete(win));
+  return true;
+}
+
+ipcMain.handle('open-git-compare-window', (_event, projectId, repoPath, hashes, labels) => openGitCompareWindow(projectId, repoPath, hashes, labels));
+
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When
 // the app quits, or the main window closes and takes the others with it,
@@ -1708,6 +1735,7 @@ function restoreOpenWindows() {
 function toolWindowKindOf(webContents) {
   for (const [kind, win] of toolWindows) if (!win.isDestroyed() && win.webContents === webContents) return kind;
   for (const [key, win] of projectWindows) if (!win.isDestroyed() && win.webContents === webContents) return `project-${key.split('\n')[1]}`;
+  for (const win of compareWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-compare';
   return null;
 }
 
