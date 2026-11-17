@@ -1580,6 +1580,19 @@ ipcMain.handle('get-process-usage', () => {
   return current.promise;
 });
 
+// How much disk each project takes with its attached folders (disk-usage.js):
+// measured in the background, kept for half an hour; the Task Manager's disk
+// ring asks while it is open, and "Measure again" forces a new measurement.
+const { createDiskUsage } = require('./disk-usage');
+const diskUsage = createDiskUsage({
+  listProjects: () => dbModule.listProjects().map(p => ({
+    id: p.id, name: p.name, root: p.root, status: p.status,
+    folders: dbModule.listProjectFolders(p.id).map(f => f.path),
+  })),
+  log,
+});
+ipcMain.handle('get-project-disk-usage', (_event, force) => diskUsage.get({ force: force === true }));
+
 // --- Pages in a window of their own: the Task Manager and Stats ---
 // From the button in their tab's tooltip: a small window that can stay above
 // the others, so the numbers stay in sight while working. Each remembers its

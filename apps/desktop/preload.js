@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   stopSession: (id) => ipcRenderer.invoke('stop-session', id),
   // RAM task manager: memory per session/task tree, and the ways to end one
   getProcessUsage: () => ipcRenderer.invoke('get-process-usage'),
+  getProjectDiskUsage: (force) => ipcRenderer.invoke('get-project-disk-usage', force === true),
   stopOwner: (owner) => ipcRenderer.invoke('stop-owner', owner),
   killOwnedProcess: (owner, pid, force) => ipcRenderer.invoke('kill-owned-process', owner, pid, force),
   forceStopOwner: (owner) => ipcRenderer.invoke('force-stop-owner', owner),

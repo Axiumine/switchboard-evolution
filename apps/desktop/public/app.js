@@ -1600,6 +1600,35 @@ function renderDefaultStatus() {
   statusBarInfo.textContent = parts.join(' \u00b7 ');
 }
 
+// RAM and disk after the counts: what Switchboard and its sessions use / what
+// is in use on the computer / what is installed, then the main disk's used /
+// size. The Task Manager's own measurement (cached in main), every 15 s while
+// the window is visible; a click opens the Task Manager.
+const statusBarResources = document.getElementById('status-bar-resources');
+const RESOURCE_STATUS_MS = 15000;
+
+async function refreshResourceStatus() {
+  if (!statusBarResources || PROJECT_WINDOW || document.hidden) return;
+  try {
+    const status = UsageChart.resourceStatus(await window.api.getProcessUsage());
+    const parts = [status.ram, status.disk].filter(Boolean);
+    statusBarResources.textContent = parts.length ? `\u00a0\u00b7 ${parts.join(' \u00b7 ')}` : '';
+    statusBarResources.title = status.title ? `${status.title}\nClick to open the Task Manager` : 'Open the Task Manager';
+  } catch {}
+}
+
+if (statusBarResources && !PROJECT_WINDOW) {
+  refreshResourceStatus();
+  setInterval(refreshResourceStatus, RESOURCE_STATUS_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshResourceStatus(); });
+  statusBarResources.addEventListener('click', () => openProcessViewer());
+  statusBarResources.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openProcessViewer();
+  });
+}
+
 window.api.onStatusUpdate((text, type) => {
   if (activityTimer) clearTimeout(activityTimer);
   statusBarActivity.textContent = text;

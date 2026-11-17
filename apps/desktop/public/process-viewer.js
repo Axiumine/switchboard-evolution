@@ -105,50 +105,144 @@
     return ICONS.terminal(14);
   }
 
-  function formatBytes(bytes) {
-    if (!bytes) return '0 MB';
-    if (bytes >= GB) return (bytes / GB).toFixed(bytes >= 10 * GB ? 1 : 2) + ' GB';
-    if (bytes >= MB) return Math.round(bytes / MB) + ' MB';
-    return Math.max(1, Math.round(bytes / 1024)) + ' KB';
-  }
+  const formatBytes = (bytes) => UsageChart.formatBytes(bytes);
 
   /**
    * Disk sizes as the system shows them: the Finder counts 1000 bytes to the
    * kilobyte, Windows and Linux 1024.
    */
-  function formatDisk(bytes) {
-    const base = data?.platform === 'darwin' ? 1000 : 1024;
-    const gb = base ** 3;
-    const tb = base ** 4;
-    if (bytes >= tb) return (bytes / tb).toFixed(bytes >= 10 * tb ? 1 : 2) + ' TB';
-    if (bytes >= gb) return (bytes / gb).toFixed(bytes >= 100 * gb ? 0 : 1) + ' GB';
-    return Math.round(bytes / base ** 2) + ' MB';
-  }
+  const formatDisk = (bytes) => UsageChart.formatDisk(bytes, data?.platform);
 
   /** A disk's bar: how full it is, amber under 20% free, red under 10%. */
   function diskBar(disk) {
-    const used = disk.totalBytes ? Math.min(100, ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100) : 0;
-    const freeShare = disk.totalBytes ? disk.freeBytes / disk.totalBytes : 1;
-    const tone = freeShare < 0.1 ? 'high' : freeShare < 0.2 ? 'mid' : 'low';
-    return `<div class="pm-meter"><span class="pm-level-${tone}" style="width:${used.toFixed(2)}%"></span></div>`;
+    const { used, level: tone } = UsageChart.diskLevel(disk);
+    return `<div class="pm-meter"><span class="pm-level-${tone}" style="width:${(used * 100).toFixed(2)}%"></span></div>`;
   }
 
-  /** Free disk space: the disk of home and the projects first, any other below it. */
+  // --- Rings (usage-chart.js) ---
+
+  // Colours that follow each session from one refresh to the next, and the
+  // slice under the pointer or the keyboard ('mem:<key>' or 'disk:<key>').
+  let ringColors = null;
+  let diskColors = null;
+  let activeSlice = null;
+  // Project sizes for the disk ring (disk-usage.js), and its legend rows opened.
+  let projectDisk = null;
+  const openLegend = new Set();
+
+  /**
+   * A ring and its legend. Pointing at a slice or a legend row lights both
+   * and shows that slice in the middle; otherwise the middle shows `center`.
+   */
+  function ringHtml(ring, slices, { label, center, format, total, details }) {
+    const active = activeSlice?.startsWith(`${ring}:`) ? activeSlice.slice(ring.length + 1) : null;
+    const byKey = new Map(slices.map(slice => [slice.key, slice]));
+    const state = (key) => (active === key ? ' is-active' : active ? ' is-dim' : '');
+    const owner = (slice) => (slice.owner ? ` data-owner="${escapeAttr(ownerKey(slice.owner))}"` : '');
+    const share = (bytes) => UsageChart.formatPercent(bytes, total);
+    const shown = (slice) => slice.display ?? slice.bytes;
+    const paths = UsageChart.donutPaths(slices, { size: 120, thickness: 14 }).map(({ key, d }) => {
+      const slice = byKey.get(key);
+      return `<path class="pm-slice${state(key)}" d="${d}" fill="${slice.color}" data-slice="${ring}:${escapeAttr(key)}"${owner(slice)}></path>`;
+    }).join('');
+    const pointed = active ? byKey.get(active) : null;
+    const middle = pointed
+      ? `<span class="pm-ring-big">${escapeHtml(format(shown(pointed)))}</span><span class="pm-ring-small">${escapeHtml(pointed.label)} · ${escapeHtml(share(shown(pointed)))}</span>`
+      : `<span class="pm-ring-big">${escapeHtml(center.big)}</span><span class="pm-ring-small">${escapeHtml(center.small)}</span>`;
+    const legend = slices.map((slice) => {
+      const sub = details ? details(slice) : null;
+      const id = `${ring}:${slice.key}`;
+      const open = !!sub && openLegend.has(id);
+      const shared = slice.display != null && slice.display > slice.bytes;
+      const expand = sub ? ` data-expand="${escapeAttr(id)}" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} its folders"` : '';
+      return `
+            <li class="pm-legend-row${state(slice.key)}${slice.owner || sub ? ' pm-legend-owner' : ''}" tabindex="0" data-slice="${escapeAttr(id)}"${owner(slice)}${slice.owner ? ' title="Show it in the list"' : ''}${expand}>
+              <span class="pm-dot" style="background:${slice.color}"></span>
+              <span class="pm-legend-name">${sub ? `<span class="pm-legend-chevron${open ? ' open' : ''}">${CHEVRON}</span>` : ''}${escapeHtml(slice.label)}${shared ? '<span class="pm-legend-tag" title="Part of it is also in another project, where the ring counts it">shared</span>' : ''}</span>
+              <span class="pm-legend-value">${escapeHtml(format(shown(slice)))}</span>
+              <span class="pm-legend-share">${escapeHtml(share(shown(slice)))}</span>
+            </li>${open ? sub : ''}`;
+    }).join('');
+    return `
+          <div class="pm-ring-wrap">
+            <div class="pm-ring" role="img" aria-label="${escapeAttr(label)}">
+              <svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true">${paths}</svg>
+              <div class="pm-ring-center">${middle}</div>
+            </div>
+            <ul class="pm-legend">${legend}</ul>
+          </div>`;
+  }
+
+  function agoText(at) {
+    const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    return `${hours} h ago`;
+  }
+
+  /** Under the disk ring: how fresh the project sizes are, and Measure again. */
+  function projectsMeasureHtml() {
+    if (!projectDisk) return '';
+    if (projectDisk.measuring) {
+      return projectDisk.projects ? 'Measuring the projects again…' : 'Measuring the projects (their folder and attached folders)…';
+    }
+    if (!projectDisk.measuredAt) return '';
+    return `Projects measured ${escapeHtml(agoText(projectDisk.measuredAt))} · <button type="button" class="pm-link" data-disk-action="measure">Measure again</button>`;
+  }
+
+  /** A project's folders under its legend row; the projects behind "N other projects". */
+  function diskDetails(slice) {
+    const row = (name, bytes, note, title) => `
+            <li class="pm-legend-sub"${title ? ` title="${escapeAttr(title)}"` : ''}>
+              <span></span>
+              <span class="pm-legend-name">${escapeHtml(name)}${note ? `<span class="pm-legend-note">${escapeHtml(note)}</span>` : ''}</span>
+              <span class="pm-legend-value">${bytes == null ? '—' : escapeHtml(formatDisk(bytes))}</span>
+              <span></span>
+            </li>`;
+    if (slice.project) {
+      return slice.project.folders.map((folder) => {
+        const notes = [];
+        if (folder.isRoot) notes.push('project folder');
+        if (folder.inside) notes.push(`inside ${folder.inside}`);
+        if (folder.alsoIn?.length) notes.push(`also in ${folder.alsoIn.join(', ')}`);
+        return row(folder.name, folder.bytes, notes.join(' · '), folder.path);
+      }).join('');
+    }
+    if (slice.projects) return slice.projects.map(project => row(project.name, project.bytes, '', '')).join('');
+    return null;
+  }
+
+  /** The disk of home and the projects as a ring; any other disk below it as a bar. */
   function disksHtml() {
     const disks = data.disks || [];
     if (!disks.length) return '';
     const [main, ...others] = disks;
+    const ring = UsageChart.diskSlices(main, { projects: projectDisk?.projects, previous: diskColors });
+    diskColors = ring.colors;
+    const used = Math.max(0, (main.totalBytes || 0) - (main.freeBytes || 0));
     const otherRows = others.map(disk => `
           <div class="pm-disk" title="${escapeAttr(disk.mount)}">
             <div class="pm-disk-top"><span class="pm-disk-name">${escapeHtml(disk.name)}</span><span class="pm-disk-free">${formatDisk(disk.freeBytes)} free of ${formatDisk(disk.totalBytes)}</span></div>
             ${diskBar(disk)}
           </div>`).join('');
+    const low = ring.level === 'high' ? ' · <span class="pm-low pm-low-high">Almost full</span>'
+      : ring.level === 'mid' ? ' · <span class="pm-low">Low on space</span>' : '';
+    const label = `${main.name}: ${formatDisk(used)} used of ${formatDisk(main.totalBytes)}, ${formatDisk(main.freeBytes)} free`;
     return `
         <div class="pm-card pm-card-disks">
-          <div class="pm-card-label">Disk space${disks.length > 1 ? ` · ${disks.length} disks` : ''}</div>
-          <div class="pm-card-value">${formatDisk(main.freeBytes)} <span class="pm-card-unit">free</span></div>
-          ${diskBar(main)}
-          <div class="pm-card-hint" title="${escapeAttr(main.mount)}">of ${formatDisk(main.totalBytes)} on ${escapeHtml(main.name)}</div>
+          <div class="pm-card-label">Disk${disks.length > 1 ? ` · ${disks.length} disks` : ''}</div>
+          <div class="pm-card-value">${formatDisk(used)} <span class="pm-card-unit">/ ${formatDisk(main.totalBytes)}</span></div>
+          <div class="pm-card-key">used / size</div>
+          ${ringHtml('disk', ring.slices, {
+            label,
+            total: main.totalBytes,
+            format: formatDisk,
+            center: { big: UsageChart.formatPercent(used, main.totalBytes) || '—', small: 'used' },
+            details: diskDetails,
+          })}
+          <div class="pm-card-hint" title="${escapeAttr(main.mount)}">${formatDisk(main.freeBytes)} free on ${escapeHtml(main.name)}${low}</div>
+          <div class="pm-card-hint">${projectsMeasureHtml()}</div>
           ${otherRows}
         </div>`;
   }
@@ -167,11 +261,6 @@
   function formatShare(bytes) {
     const percent = formatPercent(bytes);
     return percent ? `${percent} of RAM` : '';
-  }
-
-  /** A width for a bar: the part of the installed memory, never past it. */
-  function widthOf(bytes) {
-    return data?.totalMemBytes ? Math.min(100, (bytes / data.totalMemBytes) * 100) : 0;
   }
 
   function formatUptime(startedAt) {
@@ -193,40 +282,38 @@
   // --- Rendering ---
 
   /**
-   * The memory in use on the whole computer and what Switchboard uses (the
-   * app, its terminal host and every session and task), each over the memory
-   * installed; then the free disk space. The bar under "In use" shows
-   * Switchboard's part of it.
+   * One card for the memory, one for the disk. The memory card shows what
+   * Switchboard uses with its sessions, what is in use on the whole computer
+   * and what is installed, and a ring that splits the installed memory into
+   * the app, each of the largest sessions and tasks, other apps and free.
    */
   function summaryHtml(owners) {
-    const installed = data.totalMemBytes || 0;
-    const ownersBytes = owners.reduce((sum, owner) => sum + owner.rssBytes, 0);
-    const ownersProcesses = owners.reduce((sum, owner) => sum + owner.processCount, 0);
-    const appBytes = data.app?.rssBytes || 0;
-    const ours = data.switchboard?.rssBytes ?? appBytes + ownersBytes;
-    const processes = data.switchboard?.processCount ?? ownersProcesses + (data.app?.processCount || 0);
-    const used = Math.max(ours, Math.min(installed || Infinity, data.usedMemBytes ?? ours));
-    const sessions = owners.filter(owner => owner.kind === 'session').length;
-    const tasks = owners.length - sessions;
-    const running = [`${sessions} session${sessions === 1 ? '' : 's'}`];
-    if (tasks) running.push(`${tasks} task${tasks === 1 ? '' : 's'}`);
-    const oursWidth = widthOf(ours);
-    const othersWidth = Math.max(0, widthOf(used) - oursWidth);
-    const ofInstalled = `<span class="pm-card-unit">/ ${formatBytes(installed)}</span>`;
+    const totals = UsageChart.memoryTotals(data);
+    const { slices, colors } = UsageChart.memorySlices(data, { labelFor: ownerTitle, previous: ringColors });
+    ringColors = colors;
+    const running = [`${totals.sessions} session${totals.sessions === 1 ? '' : 's'}`];
+    if (totals.tasks) running.push(`${totals.tasks} task${totals.tasks === 1 ? '' : 's'}`);
+    const hint = [
+      `app ${formatBytes(totals.appBytes)}`,
+      `${running.join(', ')} ${formatBytes(totals.ownersBytes)}`,
+      `${totals.processes} process${totals.processes === 1 ? '' : 'es'}`,
+    ];
+    if (totals.free !== null) hint.push(`${formatBytes(totals.free)} free`);
+    const used = totals.used === null ? '' : ` <span class="pm-v-used">/ ${formatBytes(totals.used)}</span>`;
+    const label = totals.used === null
+      ? `Switchboard and its sessions use ${formatBytes(totals.ours)} of ${formatBytes(totals.installed)} installed`
+      : `Switchboard and its sessions use ${formatBytes(totals.ours)}; ${formatBytes(totals.used)} of ${formatBytes(totals.installed)} is in use on this computer`;
+    const center = totals.used === null
+      ? { big: UsageChart.formatPercent(totals.ours, totals.installed) || '—', small: 'Switchboard' }
+      : { big: UsageChart.formatPercent(totals.used, totals.installed) || '—', small: 'in use' };
     return `
       <div class="pm-summary">
-        <div class="pm-card">
-          <div class="pm-card-label">In use</div>
-          <div class="pm-card-value">${formatBytes(used)} ${ofInstalled}</div>
-          <div class="pm-meter pm-meter-stack" title="Switchboard's part, then everything else"><span class="pm-seg-ours" style="width:${oursWidth.toFixed(2)}%"></span><span class="pm-seg-others" style="width:${othersWidth.toFixed(2)}%"></span></div>
-          <div class="pm-card-hint">${escapeHtml(formatPercent(used))} of installed, by everything on this computer · ${formatBytes(Math.max(0, installed - used))} free</div>
-        </div>
-        <div class="pm-card pm-card-ours">
-          <div class="pm-card-label">Switchboard and its sessions</div>
-          <div class="pm-card-value">${formatBytes(ours)} ${ofInstalled}</div>
-          <div class="pm-meter"><span class="pm-seg-ours" style="width:${oursWidth.toFixed(2)}%"></span></div>
-          <div class="pm-card-hint">${escapeHtml(formatPercent(ours))} of installed · app ${formatBytes(appBytes)} · ${escapeHtml(running.join(', '))} ${formatBytes(ownersBytes)}</div>
-          <div class="pm-card-hint">${processes} process${processes === 1 ? '' : 'es'} in all</div>
+        <div class="pm-card pm-card-mem">
+          <div class="pm-card-label">Memory</div>
+          <div class="pm-card-value"><span class="pm-v-ours">${formatBytes(totals.ours)}</span>${used} <span class="pm-card-unit">/ ${formatBytes(totals.installed)}</span></div>
+          <div class="pm-card-key">Switchboard and its sessions${totals.used === null ? '' : ' / in use'} / installed</div>
+          ${ringHtml('mem', slices, { label, total: totals.installed, format: formatBytes, center })}
+          <div class="pm-card-hint">${escapeHtml(hint.join(' · '))}</div>
         </div>
         ${disksHtml()}
       </div>`;
@@ -378,7 +465,12 @@
     inFlight = true;
     refreshBtn.classList.add('spinning');
     try {
-      data = await window.api.getProcessUsage();
+      const [usage, disk] = await Promise.all([
+        window.api.getProcessUsage(),
+        window.api.getProjectDiskUsage ? window.api.getProjectDiskUsage().catch(() => null) : null,
+      ]);
+      data = usage;
+      if (disk?.ok) projectDisk = disk;
       error = null;
     } catch (err) {
       error = err?.message || String(err);
@@ -487,6 +579,66 @@
       case 'force': forceStopOwner(owner); break;
       case 'kill': killProcess(owner, Number(target.dataset.pid)); break;
     }
+  });
+
+  // The rings: pointing at a slice or a legend row lights both.
+  function pointAt(slice) {
+    if (slice === activeSlice) return;
+    activeSlice = slice;
+    render();
+  }
+  const sliceAt = (node) => node?.closest?.('[data-slice]') || null;
+  body.addEventListener('mouseover', (event) => {
+    const el = sliceAt(event.target);
+    if (el) pointAt(el.dataset.slice);
+  });
+  body.addEventListener('mouseout', (event) => {
+    if (!sliceAt(event.target)) return;
+    const next = sliceAt(event.relatedTarget);
+    pointAt(next ? next.dataset.slice : null);
+  });
+  body.addEventListener('focusin', (event) => {
+    const el = sliceAt(event.target);
+    if (el) pointAt(el.dataset.slice);
+  });
+  body.addEventListener('focusout', (event) => {
+    if (sliceAt(event.target) && !sliceAt(event.relatedTarget)) pointAt(null);
+  });
+
+  /** From a session's slice to its row in the list. */
+  function showOwnerRow(key) {
+    const row = [...body.querySelectorAll('.pm-owner')].find(el => el.dataset.key === key);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.remove('pm-flash');
+    void row.offsetWidth;
+    row.classList.add('pm-flash');
+    setTimeout(() => row.classList.remove('pm-flash'), 1600);
+  }
+  function toggleLegend(id) {
+    if (openLegend.has(id)) openLegend.delete(id); else openLegend.add(id);
+    render();
+  }
+  async function measureDisks() {
+    const disk = await window.api.getProjectDiskUsage?.(true).catch(() => null);
+    if (disk?.ok) projectDisk = disk;
+    render();
+  }
+  body.addEventListener('click', (event) => {
+    if (event.target.closest?.('[data-disk-action="measure"]')) { measureDisks(); return; }
+    const expand = event.target.closest?.('[data-expand]');
+    if (expand && body.contains(expand)) { toggleLegend(expand.dataset.expand); return; }
+    const el = event.target.closest?.('[data-owner]');
+    if (el && body.contains(el)) showOwnerRow(el.dataset.owner);
+  });
+  body.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const expand = event.target.closest?.('[data-expand]');
+    if (expand) { event.preventDefault(); toggleLegend(expand.dataset.expand); return; }
+    const el = event.target.closest?.('[data-owner]');
+    if (!el) return;
+    event.preventDefault();
+    showOwnerRow(el.dataset.owner);
   });
 
   refreshBtn.addEventListener('click', () => { refresh(); schedule(); });

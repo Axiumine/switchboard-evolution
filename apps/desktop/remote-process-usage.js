@@ -29,6 +29,7 @@ const isPid = v => Number.isInteger(v) && v > 0 && v < 2 ** 31;
 const isOptionalBool = v => v === undefined || v === null || typeof v === 'boolean';
 
 allow('get-process-usage');
+allow('get-project-disk-usage', [isOptionalBool]);
 allow('stop-owner', [isOwner]);
 allow('kill-owned-process', [isOwner, isPid, isOptionalBool]);
 allow('force-stop-owner', [isOwner]);
