@@ -56,6 +56,8 @@ function gitGraphState(projectId) {
       compareHash: null,
       // The commits ticked in the first column, for Compare (git-graph-compare.js).
       checkedHashes: new Set(),
+      // The first column only shows after Enable Selection (the toolbar's "•••").
+      selecting: false,
       detailsLocation: 'inline',
       detailsData: null,
       detailsLoading: false,
@@ -335,7 +337,11 @@ function gitGraphBuildMenuCtx(project, state, body, repo, target) {
     codeReview: state.codeReview ? { key: state.codeReview.key, reviewedPaths: state.codeReview.reviewedPaths } : null,
     compareBase: gitGraphCompareBase(state),
     isChecked: (hash) => state.checkedHashes.has(hash),
-    onSelectForCompare: (hash) => gitGraphToggleChecked(project, state, body, hash),
+    // Ticking from the menu turns the selection on, so the tick is in sight.
+    onSelectForCompare: (hash) => {
+      if (!state.selecting) gitGraphSetSelecting(project, state, body, true);
+      gitGraphToggleChecked(project, state, body, hash);
+    },
     onCompare: (hash) => gitGraphCompareWithSelected(project, state, body, hash),
     onMarkFileReviewed: (path, reviewed) => gitGraphSetFileReviewed(project, state, body, path, reviewed),
     onViewDiff: (file) => gitGraphOpenFileDiff(project, state, body, repo, file.path),
@@ -658,7 +664,7 @@ function gitGraphPaint(project, state, body, opts = {}) {
       ${gitGraphRepoPickerHtml(repos, repo)}
       ${gitGraphControlBarHtml(project, state)}
       ${gitGraphFindWidgetHtml(state)}
-      <div class="gg-table-wrap">
+      <div class="gg-table-wrap${state.selecting ? '' : ' gg-no-select'}">
         ${gitGraphHeaderHtml(state)}
         <div class="gg-tbody" id="gg-tbody">${gitGraphRowsHtml(project, state)}</div>
         ${state.hasMore ? '<button type="button" class="gg-load-more" id="gg-load-more">Load More Commits</button>' : ''}
@@ -777,8 +783,8 @@ function gitGraphControlBarHtml(project, state) {
       </div>
       <div class="gg-toolbar-right">
         <span class="gg-compare-slot" id="gg-compare-slot">${gitGraphCompareSlotHtml(state)}</span>
-        <button type="button" class="gg-icon-btn" id="gg-select-all-btn" title="Select all loaded commits for Compare (only the ones found, while searching)">${gitGraphIcon('selectAll', 14)}</button>
-        <button type="button" class="gg-icon-btn" id="gg-select-none-btn" title="Clear the selection" ${gitGraphCheckedCount(state) ? '' : 'disabled'}>${gitGraphIcon('selectNone', 14)}</button>
+        ${state.selecting ? `<span class="gg-selected-count" id="gg-selected-count">${gitGraphCheckedCount(state)} selected</span>` : ''}
+        <button type="button" class="gg-icon-btn" id="gg-select-menu-btn" title="Selection: tick commits to compare them" aria-label="Selection">${gitGraphIcon('more', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-find-btn" title="Find (Ctrl/Cmd+F)">${gitGraphIcon('search', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-settings-btn" title="Repository Settings">${gitGraphIcon('gear', 14)}</button>
         ${state.remotes.length ? `<button type="button" class="gg-icon-btn" id="gg-fetch-btn" title="Fetch from Remote(s)">${gitGraphIcon('fetch', 14)}</button>` : ''}
@@ -798,14 +804,8 @@ function gitGraphWireControlBar(project, state, body) {
     gitGraphLoadGraph(project, state, body, { reset: true });
   };
   body.querySelector('#gg-find-btn').onclick = () => { state.findOpen = !state.findOpen; gitGraphPaint(project, state, body); };
-  body.querySelector('#gg-select-all-btn').onclick = () => {
-    for (const hash of gitGraphSelectAllHashes(state)) state.checkedHashes.add(hash);
-    gitGraphRefreshChecks(project, state, body);
-  };
-  body.querySelector('#gg-select-none-btn').onclick = () => {
-    state.checkedHashes.clear();
-    gitGraphRefreshChecks(project, state, body);
-  };
+  const selectBtn = body.querySelector('#gg-select-menu-btn');
+  selectBtn.onclick = () => showContextMenu(gitGraphSelectionMenuItems(project, state, body), { anchor: selectBtn });
   gitGraphWireCompareSlot(project, state, body);
   body.querySelector('#gg-settings-btn').onclick = () => gitGraphToggleSettings(project, state, body);
   const fetchBtn = body.querySelector('#gg-fetch-btn');
@@ -1257,6 +1257,48 @@ function gitGraphCompareBase(state) {
 
 // --- The first column: commits ticked for Compare (git-graph-compare.js) ---
 
+/**
+ * The toolbar's "•••": Enable Selection shows the first column; then Select
+ * All (the loaded commits, or the ones found while searching), Deselect All,
+ * Invert Selection and Cancel Selection, which hides the column and unticks.
+ */
+function gitGraphSelectionMenuItems(project, state, body) {
+  if (!state.selecting) {
+    return [{ label: 'Enable Selection', icon: typeof FICONS !== 'undefined' ? FICONS.select(14) : '', onClick: () => gitGraphSetSelecting(project, state, body, true) }];
+  }
+  const count = gitGraphCheckedCount(state);
+  const visible = gitGraphSelectAllHashes(state);
+  return [
+    { head: `${count} selected` },
+    { label: 'Select All', onClick: () => { for (const hash of visible) state.checkedHashes.add(hash); gitGraphRefreshChecks(project, state, body); } },
+    { label: 'Deselect All', disabled: !count, onClick: () => { state.checkedHashes.clear(); gitGraphRefreshChecks(project, state, body); } },
+    {
+      label: 'Invert Selection',
+      onClick: () => {
+        const was = new Set(state.checkedHashes);
+        state.checkedHashes = new Set(visible.filter(hash => !was.has(hash)));
+        gitGraphRefreshChecks(project, state, body);
+      },
+    },
+    { sep: true },
+    { label: 'Cancel Selection', onClick: () => gitGraphSetSelecting(project, state, body, false) },
+  ];
+}
+
+/** Show or hide the first column; hiding it unticks every commit. */
+function gitGraphSetSelecting(project, state, body, on) {
+  state.selecting = !!on;
+  if (!on) state.checkedHashes.clear();
+  body.querySelector('.gg-table-wrap')?.classList.toggle('gg-no-select', !on);
+  const count = body.querySelector('#gg-selected-count');
+  if (on && !count) {
+    body.querySelector('#gg-select-menu-btn')?.insertAdjacentHTML('beforebegin', `<span class="gg-selected-count" id="gg-selected-count"></span>`);
+  } else if (!on && count) {
+    count.remove();
+  }
+  gitGraphRefreshChecks(project, state, body);
+}
+
 function gitGraphInSelectCell(target) {
   return !!(target && typeof target.closest === 'function' && target.closest('.gg-cell-select'));
 }
@@ -1286,8 +1328,8 @@ function gitGraphRefreshChecks(project, state, body) {
     const box = rowEl.querySelector('.gg-select-box');
     if (box) box.checked = on;
   });
-  const none = body.querySelector('#gg-select-none-btn');
-  if (none) none.disabled = !gitGraphCheckedCount(state);
+  const count = body.querySelector('#gg-selected-count');
+  if (count) count.textContent = `${gitGraphCheckedCount(state)} selected`;
   const slot = body.querySelector('#gg-compare-slot');
   if (slot) { slot.innerHTML = gitGraphCompareSlotHtml(state); gitGraphWireCompareSlot(project, state, body); }
 }
@@ -1963,7 +2005,7 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphSameBranchNeighbor, gitGraphAlternateBranchNeighbor, gitGraphMoveDetailsFocus,
     gitGraphSameStringSet, gitGraphRepoList, gitGraphEnsureWatcherBound,
     gitGraphCompareBase, gitGraphCompareWithSelected, gitGraphToggleChecked, gitGraphCompareSpec, gitGraphOpenCompare,
-    gitGraphRowHtml, gitGraphHeaderHtml, gitGraphControlBarHtml, gitGraphInSelectCell,
+    gitGraphRowHtml, gitGraphHeaderHtml, gitGraphControlBarHtml, gitGraphInSelectCell, gitGraphSelectionMenuItems, gitGraphSetSelecting,
     gitGraphInlineScrolls, gitGraphRestoreInlineScrolls, gitGraphFitDetailsHeight,
   };
 }

@@ -1009,6 +1009,7 @@ test('the right-click menu ticks a commit for compare, then compares another wit
     assert.equal(view.gitGraphBuildMenuCtx(project, state, body, repo, null).compareBase, null);
     view.gitGraphBuildMenuCtx(project, state, body, repo, null).onSelectForCompare('newer');
     assert.ok(state.checkedHashes.has('newer'), 'Select for Compare ticks the commit');
+    assert.equal(state.selecting, true, 'and turns the selection on, so the tick shows');
     assert.equal(view.gitGraphBuildMenuCtx(project, state, body, repo, null).isChecked('newer'), true);
     assert.equal(state.detailsData, null, 'ticking does not open the details');
     assert.deepEqual(view.gitGraphBuildMenuCtx(project, state, body, repo, null).compareBase, { hash: 'newer', label: 'newer12' });
@@ -1105,19 +1106,43 @@ test('a click in the first column ticks the row without opening it; elsewhere it
   assert.equal(view.gitGraphInSelectCell(null), false);
 });
 
-test('the toolbar has Select all and Clear before the search, and Compare once two are ticked', () => {
+test('the toolbar has a "•••" for the selection before the search, and Compare once two are ticked', () => {
   const state = view.gitGraphState('proj-cmp-toolbar');
   state.rows = [{ hash: 'c' }, { hash: 'b' }, { hash: 'a' }];
   state.checkedHashes = new Set();
   let html = view.gitGraphControlBarHtml({ id: 'proj-cmp-toolbar' }, state);
-  assert.ok(html.indexOf('gg-select-all-btn') < html.indexOf('gg-find-btn'));
-  assert.ok(html.indexOf('gg-select-none-btn') < html.indexOf('gg-find-btn'));
-  assert.match(html, /id="gg-select-none-btn"[^>]*disabled/);
+  assert.ok(html.indexOf('gg-select-menu-btn') < html.indexOf('gg-find-btn'));
+  assert.doesNotMatch(html, /gg-select-all-btn|gg-select-none-btn/);
+  assert.doesNotMatch(html, /gg-selected-count/, 'no count while the selection is off');
   assert.doesNotMatch(html, /gg-compare-btn/);
+  state.selecting = true;
   state.checkedHashes = new Set(['a', 'c', 'gone']);
   html = view.gitGraphControlBarHtml({ id: 'proj-cmp-toolbar' }, state);
   assert.match(html, /Compare 2/, 'a ticked commit no longer loaded does not count');
-  assert.doesNotMatch(html, /id="gg-select-none-btn"[^>]*disabled/);
+  assert.match(html, /2 selected/);
+});
+
+test('the selection is off by default; its menu turns it on, then selects, inverts and cancels', () => {
+  const state = view.gitGraphState('proj-cmp-select-menu');
+  assert.equal(state.selecting, false);
+  state.rows = [{ hash: 'c' }, { hash: 'b' }, { hash: 'a' }];
+  const project = { id: 'proj-cmp-select-menu' };
+  const body = fakeElement();
+  const labels = (items) => items.filter(i => i.label).map(i => i.label);
+  assert.deepEqual(labels(view.gitGraphSelectionMenuItems(project, state, body)), ['Enable Selection']);
+  view.gitGraphSelectionMenuItems(project, state, body)[0].onClick();
+  assert.equal(state.selecting, true);
+  let items = view.gitGraphSelectionMenuItems(project, state, body);
+  assert.deepEqual(labels(items), ['Select All', 'Deselect All', 'Invert Selection', 'Cancel Selection']);
+  assert.equal(items.find(i => i.label === 'Deselect All').disabled, true);
+  items.find(i => i.label === 'Select All').onClick();
+  assert.deepEqual([...state.checkedHashes].sort(), ['a', 'b', 'c']);
+  state.checkedHashes = new Set(['a']);
+  view.gitGraphSelectionMenuItems(project, state, body).find(i => i.label === 'Invert Selection').onClick();
+  assert.deepEqual([...state.checkedHashes].sort(), ['b', 'c']);
+  view.gitGraphSelectionMenuItems(project, state, body).find(i => i.label === 'Cancel Selection').onClick();
+  assert.equal(state.selecting, false);
+  assert.equal(state.checkedHashes.size, 0);
 });
 
 test('Compare opens the popup on the ticked commits oldest first, or a window of their own; nothing outside 2 to 4', () => {

@@ -289,6 +289,11 @@
 .gg-select-box { margin: 0; width: 12px; height: 12px; cursor: pointer; accent-color: #7a84ff; opacity: 0.45; }
 .gg-row:hover .gg-select-box, .gg-select-box:checked { opacity: 1; }
 .gg-row.gg-row-checked { box-shadow: inset 2px 0 0 #7a84ff; }
+/* Selection off (the default): no first column until Enable Selection in the toolbar's "•••". */
+.gg-table-wrap.gg-no-select { --gg-select-width: 0px; }
+.gg-table-wrap.gg-no-select .gg-cell-select,
+.gg-table-wrap.gg-no-select .gg-th[data-col="select"] { display: none; }
+.gg-selected-count { font-size: 11px; color: #a6abff; white-space: nowrap; font-variant-numeric: tabular-nums; margin-right: 4px; }
 .gg-cell-description { flex: 1 1 auto; min-width: 200px; gap: 6px; }
 .gg-cell-date { width: 140px; flex: 0 0 auto; color: #8989a0; }
 .gg-cell-author { width: 130px; flex: 0 0 auto; color: #8989a0; }
