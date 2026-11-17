@@ -26,7 +26,7 @@ import { useProjectUi } from '@/projects/ui-store';
 import { useOpenSession } from '@/projects/open-session';
 import { getDraft, setDraftText } from '@/sessions/drafts';
 import { sessionTitle, type Session } from '@/sessions/model';
-import { failuresText, invertSelection, selectAll, topLevelPicks, trashQuestion } from '@/shared/vendor/file-selection';
+import { collectFolders, failuresText, invertSelection, selectAll, topLevelPicks, trashQuestion } from '@/shared/vendor/file-selection';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 
@@ -277,10 +277,26 @@ export function FilesTab({ project }: { project: Project }) {
     return options;
   };
 
+  /** Expand All: every folder, level by level, without node_modules or .git, up to a limit (file-selection.js). */
+  const expandAll = () => run('expand the folders', async () => {
+    const folders = await collectFolders(async (rel) => {
+      const listing = await queryClient.fetchQuery({
+        queryKey: ['directory', root, rel],
+        queryFn: () => request<Listing>('list-project-directory', [root, rel]),
+      });
+      return listing?.entries ?? [];
+    });
+    setExpanded(folders);
+  });
+  const treeOptions: SheetOption[] = [
+    { label: 'Expand All', hint: 'not node_modules or .git', onPress: expandAll },
+    { label: 'Collapse All', onPress: () => setExpanded([]) },
+  ];
+
   const menuOptions = (target: FileEntry | 'root'): SheetOption[] => {
     // While ticking, the folder's menu is about the ticks first.
-    if (target === 'root' && selecting) return [...selectionOptions(), ...entryMenuOptions(target)];
-    if (target === 'root') return [...entryMenuOptions(target), ...selectionOptions()];
+    if (target === 'root' && selecting) return [...selectionOptions(), ...treeOptions, ...entryMenuOptions(target)];
+    if (target === 'root') return [...entryMenuOptions(target), ...treeOptions, ...selectionOptions()];
     return entryMenuOptions(target);
   };
 
