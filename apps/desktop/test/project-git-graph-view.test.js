@@ -1090,11 +1090,15 @@ test('gitGraphEnsureWatcherBound binds the repo-change listener once and repaint
   }
 });
 
-// === Enhanced accessibility file-status glyph ===
+// === File-status letter ===
 
-test('gitGraphFileStatusGlyph is colour-only (empty) by default, and shows the letter once enhancedAccessibility is on', () => {
-  assert.equal(render.gitGraphFileStatusGlyph('renamed', false), '');
-  assert.equal(render.gitGraphFileStatusGlyph('renamed', true), 'R');
+test('every file in the commit details shows its status letter', () => {
+  assert.equal(render.gitGraphFileStatusGlyph('added'), 'A');
+  assert.equal(render.gitGraphFileStatusGlyph('modified'), 'M');
+  assert.equal(render.gitGraphFileStatusGlyph('deleted'), 'D');
+  assert.equal(render.gitGraphFileStatusGlyph('renamed'), 'R');
+  const row = view.gitGraphFileRowHtml({ path: 'src/a.js', status: 'deleted' }, { name: 'a.js' });
+  assert.match(row, /<span class="gg-file-status gg-file-status-deleted">D<\/span>/);
 });
 
 // === Code Review file-list styling ===
@@ -1263,6 +1267,50 @@ test('beside an inline panel a lane change still bends within one row, then the 
   const d = pathOf(render.gitGraphRenderGraphSvg(rows, layout, { rowY: [15, 245], height: 260, bendHeight: 30 }));
   const lane = (n) => render.GG_LANE_WIDTH / 2 + n * render.GG_LANE_WIDTH;
   assert.equal(d, `M${lane(1)} 15 L${lane(1)} 45 L${lane(1)} 215 C${lane(1)} 230, ${lane(0)} 230, ${lane(0)} 245`);
+});
+
+test('Tree/List and Code Review share one bar above the files, and the commit text starts at the top', () => {
+  const state = inlineDetailsState('proj-inline-7');
+  state.detailsData = { mode: 'single', hash: 'c2', kind: 'commit', commit: { hash: 'c2', parents: ['c1'] }, files: [] };
+  const html = view.gitGraphDetailsBodyHtml(state);
+  const bar = /<div class="gg-details-files-bar">([\s\S]*?)<\/div>\s*<div class="gg-empty-row">/.exec(html);
+  assert.ok(bar, 'the bar sits right above the file list');
+  assert.match(bar[1], /data-view="tree"/);
+  assert.match(bar[1], /data-view="list"/);
+  assert.match(bar[1], /Start Code Review/);
+  assert.ok(html.indexOf('gg-details-text') < html.indexOf('gg-details-files-bar'), 'nothing above the commit text');
+});
+
+test('every record opens in the Tree view, even after List was chosen on the one before', async () => {
+  const state = inlineDetailsState('proj-inline-8');
+  const project = { id: 'proj-inline-8' };
+  const body = fakeScrollBody();
+  global.window = { api: { getGitGraphCommitDetail: () => Promise.resolve({ ok: true, commit: { hash: 'c2', parents: ['c1'] }, files: [] }) } };
+  state.fileViewType = 'list';
+  view.gitGraphOpenDetails(project, state, body, state.rows[1]);
+  assert.equal(state.fileViewType, 'tree');
+  await new Promise(resolve => setImmediate(resolve));
+  // The "File list layout" setting is still the default when set to List.
+  state.globalPrefs = { fileViewType: 'list' };
+  view.gitGraphOpenDetails(project, state, body, state.rows[2]);
+  assert.equal(state.fileViewType, 'list');
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('the Uncommitted Changes node and its line are grey, not the lane colour', () => {
+  const rows = [
+    { hash: '#uncommitted', kind: 'uncommitted', parents: ['head'] },
+    { hash: 'head', kind: 'commit', parents: [] },
+  ];
+  const layout = [
+    { lane: 0, colorIndex: 0, edges: [{ parentHash: 'head', toLane: 0 }] },
+    { lane: 0, colorIndex: 0, edges: [] },
+  ];
+  const svg = render.gitGraphRenderGraphSvg(rows, layout, { palette: ['#00ff00'] });
+  const grey = render.GG_UNCOMMITTED_COLOR;
+  assert.match(svg, new RegExp(`<path [^>]*stroke="${grey}"`));
+  assert.match(svg, new RegExp(`<circle [^>]*stroke="${grey}"[^>]*gg-node-uncommitted`));
+  assert.match(svg, /<circle [^>]*fill="#00ff00"[^>]*gg-node-normal/, 'the commit below keeps its lane colour');
 });
 
 test('folding a folder in the Commit Details hides its files', () => {

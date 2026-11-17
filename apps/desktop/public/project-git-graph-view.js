@@ -86,7 +86,6 @@ function gitGraphState(projectId) {
       loadMoreAutomatically: true,
       repositoryDropdownOrder: 'attachmentOrder',
       markdownRendering: true,
-      enhancedAccessibility: false,
       referenceLabelAlignment: 'normal',
       globalFetchAvatars: false,
       autoCenterDetails: true,
@@ -133,7 +132,6 @@ function gitGraphSaveUiPrefs(projectId, state) {
       showRemoteBranches: state.showRemoteBranches,
       order: state.order,
       findOpen: state.findOpen,
-      fileViewType: state.fileViewType,
     }));
   } catch { /* private-browsing / disabled storage: ephemeral state only */ }
 }
@@ -567,7 +565,6 @@ function renderProjectGitGraphTab(project, body) {
     refSort: prefs.refSort || state.refSort,
     showRemoteBranches: prefs.showRemoteBranches !== undefined ? prefs.showRemoteBranches : state.showRemoteBranches,
     order: prefs.order || state.order,
-    fileViewType: prefs.fileViewType || state.fileViewType,
   });
   body.className = 'git-workspace-view gg-tab-body';
   gitGraphBindKeyboard(project, state, body);
@@ -1175,12 +1172,20 @@ function gitGraphHideTooltip() { /* native title tooltip needs no teardown */ }
 
 // --- Commit Details / Comparison ---
 
+/** The file layout every record opens in: the "File list layout" setting,
+ * which is Tree unless changed there. Tree/List in the panel only switch the
+ * record that is open. */
+function gitGraphDefaultFileView(state) {
+  return state.globalPrefs && state.globalPrefs.fileViewType === 'list' ? 'list' : 'tree';
+}
+
 function gitGraphOpenDetails(project, state, body, row) {
   if (!row) return;
   const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
   const request = ++state.detailsRequest;
   state.detailsLoading = true;
   state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind };
+  state.fileViewType = gitGraphDefaultFileView(state);
   state.lastViewedFilePath = null;
   state.detailsJustOpened = true;
   gitGraphHydrateCodeReviewForDetails(state);
@@ -1206,6 +1211,7 @@ function gitGraphOpenComparison(project, state, body, fromHash, toHash) {
   const request = ++state.detailsRequest;
   state.detailsLoading = true;
   state.detailsData = { mode: 'compare', fromHash, toHash };
+  state.fileViewType = gitGraphDefaultFileView(state);
   state.lastViewedFilePath = null;
   state.detailsJustOpened = true;
   gitGraphHydrateCodeReviewForDetails(state);
@@ -1286,20 +1292,23 @@ function gitGraphDetailsBodyHtml(state) {
     : gitGraphSingleCommitHeaderHtml(data.commit, data.kind, state);
   const files = data.files || [];
   const reviewControls = gitGraphCodeReviewControlsHtml(state);
+  // Tree/List and Code Review share one bar at the top of the files column,
+  // so the commit's own text starts at the top of the panel beside it.
   return `
     <button type="button" class="gg-details-close" id="gg-details-close">×</button>
-    ${reviewControls ? `<div class="gg-details-review-bar">${reviewControls}</div>` : ''}
     <div class="gg-details-grid">
       <div class="gg-details-text">${header}</div>
       <div class="gg-details-files">
-        <div class="gg-file-view-toggle">
-          <button type="button" class="gg-toggle-btn${state.fileViewType !== 'list' ? ' active' : ''}" data-view="tree">Tree</button>
-          <button type="button" class="gg-toggle-btn${state.fileViewType === 'list' ? ' active' : ''}" data-view="list">List</button>
+        <div class="gg-details-files-bar">
+          <div class="gg-file-view-toggle">
+            <button type="button" class="gg-toggle-btn${state.fileViewType !== 'list' ? ' active' : ''}" data-view="tree">Tree</button>
+            <button type="button" class="gg-toggle-btn${state.fileViewType === 'list' ? ' active' : ''}" data-view="list">List</button>
+          </div>
+          ${reviewControls}
         </div>
         ${gitGraphFileListHtml(files, {
           fileViewType: state.fileViewType, compactFolders: state.compactFolders, collapsedFolders: state.collapsedFolders,
-          codeReview: state.codeReview, enhancedAccessibility: state.enhancedAccessibility,
-          lastViewedFilePath: state.lastViewedFilePath,
+          codeReview: state.codeReview, lastViewedFilePath: state.lastViewedFilePath,
         })}
       </div>
     </div>`;
@@ -1396,15 +1405,15 @@ function gitGraphFolderRowHtml(row) {
 }
 
 /** `opts.codeReview` (`{key, reviewedPaths: Set}` or null/undefined) drives
- * the "still needs review" bold styling; `opts.enhancedAccessibility`
- * gates the A/M/D/R/U letter, whose documented default is colour-only. */
+ * the "still needs review" bold styling. Every file shows its A/M/D/R/U
+ * letter, as in the Changes view. */
 function gitGraphFileRowHtml(file, opts = {}) {
   const depth = opts.depth || 0;
   const codeReview = opts.codeReview;
   const reviewed = !!(codeReview && codeReview.reviewedPaths.has(file.path));
   const rowClass = codeReview && !reviewed ? ' gg-file-unreviewed' : '';
   const eyeHtml = opts.lastViewedFilePath === file.path ? '<span class="gg-file-eye" title="Most recently viewed">◉</span>' : '';
-  const glyph = gitGraphFileStatusGlyph(file.status, opts.enhancedAccessibility);
+  const glyph = gitGraphFileStatusGlyph(file.status);
   return `
     <div class="gg-file-row${rowClass}" data-gg-kind="file" data-gg-file-path="${escapeAttr(file.path)}" style="--depth:${depth}">
       <span class="gg-file-status gg-file-status-${escapeAttr(file.status)}">${escapeHtml(glyph)}</span>
@@ -1418,7 +1427,8 @@ function gitGraphWireDetailsPanel(project, state, body, container) {
   const closeBtn = container.querySelector('#gg-details-close');
   if (closeBtn) closeBtn.onclick = () => gitGraphCloseDetails(project, state, body);
   container.querySelectorAll('[data-view]').forEach((btn) => {
-    btn.onclick = () => { state.fileViewType = btn.dataset.view; gitGraphPatchGlobalPrefs(state, { fileViewType: btn.dataset.view }); gitGraphRenderDetailsPanel(project, state, body); };
+    // Only for the record that is open: the next one opens in the default view again.
+    btn.onclick = () => { state.fileViewType = btn.dataset.view; gitGraphRenderDetailsPanel(project, state, body); };
   });
   container.querySelectorAll('.gg-tree-folder').forEach((btn) => {
     btn.onclick = () => {
@@ -1794,7 +1804,7 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphSingleCommitHeaderHtml, gitGraphLinkifyBody, gitGraphLinkifySubject, gitGraphFileRowHtml, gitGraphFileListHtml,
     gitGraphFolderRowHtml, gitGraphOpenFileDiff, gitGraphViewFileAtRevision, gitGraphRunNetworkAction,
     gitGraphOpenDetails, gitGraphOpenComparison, gitGraphCloseDetails, gitGraphNoteFileViewed,
-    gitGraphMaybeAutoCenterDetails, gitGraphRowsHtml, gitGraphIsAncestor, gitGraphHandleRowClick, gitGraphBindKeyboard,
+    gitGraphMaybeAutoCenterDetails, gitGraphDetailsBodyHtml, gitGraphRowsHtml, gitGraphIsAncestor, gitGraphHandleRowClick, gitGraphBindKeyboard,
     gitGraphSameBranchNeighbor, gitGraphAlternateBranchNeighbor, gitGraphMoveDetailsFocus,
     gitGraphSameStringSet, gitGraphRepoList, gitGraphEnsureWatcherBound,
   };

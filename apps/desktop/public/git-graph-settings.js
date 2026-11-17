@@ -180,7 +180,6 @@ function gitGraphApplyGlobalPrefsToState(state, prefs) {
   state.loadMoreAutomatically = prefs.loadMoreAutomatically !== false;
   state.repositoryDropdownOrder = prefs.repositoryDropdownOrder || 'attachmentOrder';
   state.markdownRendering = prefs.markdownRendering !== false;
-  state.enhancedAccessibility = !!prefs.enhancedAccessibility;
   state.referenceLabelAlignment = prefs.referenceLabelAlignment || 'normal';
   state.globalFetchAvatars = !!prefs.fetchAvatars;
 }
@@ -482,7 +481,6 @@ function gitGraphGlobalPreferencesHtml(state) {
     <section class="gg-settings-section">
       <div class="gg-settings-title">Content</div>
       ${gitGraphSettingsCheckboxRow('gg-pref-markdown', 'Render Markdown in commit messages', prefs.markdownRendering !== false)}
-      ${gitGraphSettingsCheckboxRow('gg-pref-a11y', 'Enhanced accessibility (A/M/D/R/U file-status letters)', !!prefs.enhancedAccessibility)}
     </section>
     <section class="gg-settings-section">
       <div class="gg-settings-title">Commit Details View</div>
@@ -672,7 +670,6 @@ function gitGraphWireGlobalPreferences(project, state, body, drawer) {
   drawer.querySelector('#gg-pref-ref-alignment').onchange = (e) => patch({ referenceLabelAlignment: e.target.value });
   drawer.querySelector('#gg-pref-combine-labels').onchange = (e) => patch({ combineLocalAndRemoteBranchLabels: e.target.checked });
   drawer.querySelector('#gg-pref-markdown').onchange = (e) => patch({ markdownRendering: e.target.checked });
-  drawer.querySelector('#gg-pref-a11y').onchange = (e) => patch({ enhancedAccessibility: e.target.checked });
   drawer.querySelector('#gg-pref-details-location').onchange = (e) => patch({ commitDetailsView: { ...(state.globalPrefs && state.globalPrefs.commitDetailsView), location: e.target.value } });
   drawer.querySelector('#gg-pref-auto-center').onchange = (e) => patch({ commitDetailsView: { ...(state.globalPrefs && state.globalPrefs.commitDetailsView), autoCenter: e.target.checked } });
   drawer.querySelector('#gg-pref-file-view').onchange = (e) => patch({ fileViewType: e.target.value });

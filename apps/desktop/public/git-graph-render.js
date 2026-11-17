@@ -20,6 +20,8 @@ const GG_DEFAULT_PALETTE = [
 const GG_ROW_HEIGHT = 28;
 const GG_LANE_WIDTH = 16;
 const GG_NODE_RADIUS = 4.5;
+// The Uncommitted Changes node and its line: grey, never a lane colour.
+const GG_UNCOMMITTED_COLOR = '#808094';
 
 // Palette entries can come from the user's own "Lane colours" preference
 // (free text, not format-checked), and every caller drops the result straight
@@ -184,7 +186,9 @@ function gitGraphRenderGraphSvg(rows, laneAssignments, opts = {}) {
     const assignment = laneAssignments[i] || { lane: 0, colorIndex: 0, edges: [] };
     const cx = laneWidth / 2 + assignment.lane * laneWidth;
     const cy = yOf(i);
-    const color = gitGraphPaletteColor(palette, assignment.colorIndex || 0);
+    // Uncommitted Changes are not a commit yet: their node and the line down
+    // to the checked-out commit are grey, not a branch colour.
+    const color = row.kind === 'uncommitted' ? GG_UNCOMMITTED_COLOR : gitGraphPaletteColor(palette, assignment.colorIndex || 0);
 
     for (const edge of assignment.edges || []) {
       // An edge bends into its own lane on the first row, runs straight down,
@@ -419,16 +423,13 @@ function gitGraphRenderMarkdownInline(escapedText) {
     .replace(/`([^`\n]+)`/g, '<code>$1</code>');
 }
 
-// --- File-status glyph, gated by "enhanced accessibility" ---
+// --- File-status glyph ---
 //
-// `gitGraphAccessibilityBadge` above always returns a letter and is left
-// alone (it's a small pure mapping other code may still want unconditionally);
-// this wrapper is what the file list actually renders, so a colour-only dot
-// is the default per the setting's own documented default of `false`, and
-// the four letter/deleted etc. badges only appear once the preference is on.
+// What the commit-details file list renders before each file: the status
+// letter (A/M/D/R/U, coloured by status), always, as the Changes view does.
 
-function gitGraphFileStatusGlyph(status, enhancedAccessibility) {
-  return enhancedAccessibility ? gitGraphAccessibilityBadge(status) : '';
+function gitGraphFileStatusGlyph(status) {
+  return gitGraphAccessibilityBadge(status);
 }
 
 // The commit-details file tree itself is built by #98's buildGitChangeTree/
@@ -437,7 +438,7 @@ function gitGraphFileStatusGlyph(status, enhancedAccessibility) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    GG_DEFAULT_PALETTE, GG_ROW_HEIGHT, GG_LANE_WIDTH,
+    GG_DEFAULT_PALETTE, GG_ROW_HEIGHT, GG_LANE_WIDTH, GG_UNCOMMITTED_COLOR,
     gitGraphPaletteColor, gitGraphFormatDate, gitGraphFormatRelative, gitGraphFormatFullDate,
     gitGraphBuildLayoutInput, gitGraphFallbackLayout, gitGraphResolveLayoutFn,
     gitGraphRenderGraphSvg, gitGraphRenderRefPills, gitGraphRowClasses, gitGraphIcon, gitGraphRefName,

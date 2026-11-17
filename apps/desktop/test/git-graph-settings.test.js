@@ -131,7 +131,7 @@ test('gitGraphApplyGlobalPrefsToState copies date/graph/columns/loading preferen
     dateFormat: 'iso', dateType: 'commit', graphStyle: 'angular', graphColours: ['#111', '#222'],
     columnVisibility: { date: false, author: true, commit: true }, combineLocalAndRemoteBranchLabels: false,
     fileViewType: 'list', compactFolders: false, initialLoad: 500, loadMore: 50, loadMoreAutomatically: false,
-    markdownRendering: false, enhancedAccessibility: true, fetchAvatars: true,
+    markdownRendering: false, fetchAvatars: true,
   });
   assert.equal(state.dateFormat, 'iso');
   assert.equal(state.dateType, 'commit');
@@ -145,7 +145,6 @@ test('gitGraphApplyGlobalPrefsToState copies date/graph/columns/loading preferen
   assert.equal(state.loadMore, 50);
   assert.equal(state.loadMoreAutomatically, false);
   assert.equal(state.markdownRendering, false);
-  assert.equal(state.enhancedAccessibility, true);
   assert.equal(state.globalFetchAvatars, true);
 });
 
