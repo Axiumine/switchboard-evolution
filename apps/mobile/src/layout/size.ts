@@ -25,6 +25,11 @@ export function useAreaWidth(): number {
   return area ?? width;
 }
 
+/** The height of the window (a Surface Duo's two screens share it). */
+export function useWindowHeight(): number {
+  return useWindowDimensions().height;
+}
+
 /** The class of the area now (it follows rotation, Split View, multi-window and a Surface Duo's screens). */
 export function useLayoutClass(): LayoutClass {
   return layoutClass(useAreaWidth());

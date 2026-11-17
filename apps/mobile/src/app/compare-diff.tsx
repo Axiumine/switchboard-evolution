@@ -11,26 +11,30 @@ import { colors, spacing } from '@/theme';
  * queries as the compare screen, so they are already in the cache.
  */
 export default function CompareDiffScreen() {
-  const { projectId, folder, hashes, labels: labelsParam, path, step: stepParam } = useLocalSearchParams<{
-    projectId: string; folder: string; hashes: string; labels: string; path: string; step?: string;
+  const { projectId, folder, hashes, labels: labelsParam, path, step: stepParam, n } = useLocalSearchParams<{
+    projectId: string; folder: string; hashes: string; labels: string; path: string; step?: string; n?: string;
   }>();
+  return (
+    <View style={styles.screen}>
+      <Stack.Screen options={{ title: (path || '').split('/').pop() || 'Compare' }} />
+      {/* On a Surface Duo the table changes this screen's params instead of pushing another one: a new file or step starts the pager afresh. */}
+      <Host key={`${path}:${stepParam}:${n}`} projectId={projectId} folder={folder} hashes={hashes} labelsParam={labelsParam} path={path} stepParam={stepParam} />
+    </View>
+  );
+}
+
+function Host({ projectId, folder, hashes, labelsParam, path, stepParam }: {
+  projectId: string; folder: string; hashes: string; labelsParam: string; path: string; stepParam?: string;
+}) {
   const labels = splitParam(labelsParam);
   const { steps, matrix, loading, error } = useCompareSteps(projectId, folder, hashes);
   const [step, setStep] = useState(Math.max(0, parseInt(stepParam || '0', 10) || 0));
   const row = matrix.find((item) => item.path === path);
 
-  let content;
-  if (loading) content = <ActivityIndicator style={styles.spinner} color={colors.accent} />;
-  else if (error) content = <Text style={[styles.message, styles.error]}>{error}</Text>;
-  else if (!steps.length || !row) content = <Text style={styles.message}>This file is not in the comparison.</Text>;
-  else content = <StepDiffPager projectId={projectId} folder={folder} path={path} steps={steps} labels={labels} cells={row.cells} step={step} onStep={setStep} />;
-
-  return (
-    <View style={styles.screen}>
-      <Stack.Screen options={{ title: (path || '').split('/').pop() || 'Compare' }} />
-      {content}
-    </View>
-  );
+  if (loading) return <ActivityIndicator style={styles.spinner} color={colors.accent} />;
+  if (error) return <Text style={[styles.message, styles.error]}>{error}</Text>;
+  if (!steps.length || !row) return <Text style={styles.message}>This file is not in the comparison.</Text>;
+  return <StepDiffPager projectId={projectId} folder={folder} path={path} steps={steps} labels={labels} cells={row.cells} step={step} onStep={setStep} />;
 }
 
 const styles = StyleSheet.create({

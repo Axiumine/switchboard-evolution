@@ -1,6 +1,8 @@
 import { expect, test } from '@jest/globals';
 
-import { COMPARE_MAX, compareLabel, compareMatrix, compareOrder, compareSteps, compareTarget, type FileChange } from '../compare';
+import {
+  COMPARE_MAX, compareBase, compareLabel, compareMatrix, compareOrder, compareParams, compareSteps, compareTarget, diffRouteAfter, parseSubjects, type FileChange,
+} from '../compare';
 
 // Newest first, the Uncommitted Changes row on top, as the History lists them.
 const history = [{ hash: '#uncommitted' }, { hash: 'e' }, { hash: 'd' }, { hash: 'c' }, { hash: 'b' }, { hash: 'a' }];
@@ -64,4 +66,48 @@ test('a renamed file is listed under its new path', () => {
 test('no steps or no files make an empty table', () => {
   expect(compareMatrix([])).toEqual([]);
   expect(compareMatrix([[], []])).toEqual([]);
+});
+
+const rows = [
+  { hash: '#uncommitted', kind: 'uncommitted' as const, shortHash: '', subject: 'Uncommitted Changes' },
+  { hash: 'bbbbbbbb1', kind: 'commit' as const, shortHash: 'bbbbbbb', subject: 'fix(db): retry, then give up' },
+  { hash: 'aaaaaaaa1', kind: 'commit' as const, shortHash: 'aaaaaaa', subject: 'Add "quotes" and, commas' },
+];
+
+test('the params of the compare screen keep the order and put the subjects in JSON', () => {
+  const params = compareParams(rows, ['aaaaaaaa1', 'bbbbbbbb1', '#uncommitted']);
+  expect(params.hashes).toBe('aaaaaaaa1,bbbbbbbb1,#uncommitted');
+  expect(params.labels).toBe('aaaaaaa,bbbbbbb,Uncommitted');
+  expect(parseSubjects(params.subjects)).toEqual(['Add "quotes" and, commas', 'fix(db): retry, then give up', 'Uncommitted Changes']);
+});
+
+test('the params skip a hash that is not in the rows', () => {
+  const params = compareParams(rows, ['aaaaaaaa1', 'gone']);
+  expect(params.hashes).toBe('aaaaaaaa1');
+  expect(parseSubjects(params.subjects)).toHaveLength(1);
+});
+
+test('the subjects param is read defensively', () => {
+  expect(parseSubjects(undefined)).toEqual([]);
+  expect(parseSubjects('')).toEqual([]);
+  expect(parseSubjects('not json')).toEqual([]);
+  expect(parseSubjects('{"a":1}')).toEqual([]);
+  expect(parseSubjects('["a",3,null,"b"]')).toEqual(['a', '', '', 'b']);
+  expect(parseSubjects(['a'])).toEqual([]);
+});
+
+test('Compare with starts from the open row, else the only ticked one', () => {
+  expect(compareBase('x', ['y'])).toBe('x');
+  expect(compareBase(null, ['y'])).toBe('y');
+  expect(compareBase(null, new Set(['y', 'z']))).toBeNull();
+  expect(compareBase(null, [])).toBeNull();
+});
+
+test('only a diff screen right after the comparison is changed rather than pushed', () => {
+  const routes = [{ key: 'h', name: 'graph' }, { key: 'c', name: 'compare' }, { key: 'd', name: 'compare-diff' }];
+  expect(diffRouteAfter(routes, 'c')).toBe(routes[2]);
+  expect(diffRouteAfter(routes, 'h')).toBeNull();
+  expect(diffRouteAfter(routes, 'd')).toBeNull();
+  expect(diffRouteAfter(routes, 'missing')).toBeNull();
+  expect(diffRouteAfter(routes.slice(0, 2), 'c')).toBeNull();
 });

@@ -2,17 +2,16 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { FileViewToggle, type FileView } from '@/components/git/FileViewToggle';
 import type { FileChange } from '@/git/compare';
 import type { Passing } from '@/git/graph';
 import type { HistoryRow } from '@/git/history';
 import { STATUS_COLORS, statusLetter, treeRows, type TreeRow } from '@/git/model';
-import { useAreaWidth } from '@/layout/size';
+import { useAreaWidth, useWindowHeight } from '@/layout/size';
 import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
-
-export type FileView = 'tree' | 'list';
 
 type CommitInfo = {
   hash: string; shortHash: string; parents: string[];
@@ -29,6 +28,10 @@ const MAX_ROWS = 200;
 // From this width the details and the files sit side by side, as on the desktop.
 const TWO_COLUMNS = 700;
 const INDENT = 14;
+// However long the commit and its files, the panel stays within this share of the window.
+const MAX_HEIGHT_SHARE = 0.75;
+
+export type { FileView };
 const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
 /**
@@ -53,6 +56,7 @@ export function CommitDetails({
 }) {
   const online = useConnection((s) => s.status.state === 'online');
   const width = useAreaWidth();
+  const windowHeight = useWindowHeight();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [all, setAll] = useState(false);
   const announced = useRef(false);
@@ -110,15 +114,7 @@ export function CommitDetails({
         <View style={width >= TWO_COLUMNS ? styles.column : styles.filesBelow}>
           <View style={styles.filesHeader}>
             <Text style={styles.heading}>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} changed` : 'No files changed'}</Text>
-            {files.length ? (
-              <View style={styles.toggle}>
-                {(['tree', 'list'] as const).map((view) => (
-                  <Pressable key={view} onPress={() => onFileView(view)} style={[styles.toggleButton, fileView === view && styles.toggleActive]} accessibilityRole="button" accessibilityState={{ selected: fileView === view }}>
-                    <Text style={[styles.toggleText, fileView === view && styles.toggleTextActive]}>{view === 'tree' ? 'Tree' : 'List'}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
+            {files.length ? <FileViewToggle view={fileView} onChange={onFileView} /> : null}
           </View>
           {shown.map((item) => (item.kind === 'folder' ? (
             <Pressable
@@ -159,6 +155,8 @@ export function CommitDetails({
     );
   }
 
+  // The panel's own padding and the gap under it come out of the share, so the whole stays within it.
+  const scrollHeight = Math.round(windowHeight * MAX_HEIGHT_SHARE) - spacing.md * 2 - spacing.sm;
   return (
     <View
       style={styles.wrap}
@@ -173,7 +171,7 @@ export function CommitDetails({
         <Pressable onPress={onClose} hitSlop={10} style={styles.close} accessibilityRole="button" accessibilityLabel="Close the details">
           <Ionicons name="close" size={18} color={colors.textDim} />
         </Pressable>
-        {content}
+        <ScrollView nestedScrollEnabled style={{ maxHeight: scrollHeight }}>{content}</ScrollView>
       </View>
     </View>
   );
@@ -249,11 +247,6 @@ const styles = StyleSheet.create({
   link: { color: colors.accent },
   filesHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.xs, paddingRight: spacing.xl },
   heading: { color: colors.textDim, fontSize: 12, fontWeight: '700' },
-  toggle: { flexDirection: 'row', borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, overflow: 'hidden' },
-  toggleButton: { paddingHorizontal: spacing.sm, paddingVertical: 3 },
-  toggleActive: { backgroundColor: colors.raised },
-  toggleText: { color: colors.textFaint, fontSize: 12 },
-  toggleTextActive: { color: colors.text },
   treeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32 },
   pressed: { backgroundColor: colors.raised },
   folderName: { flex: 1, color: colors.textDim, fontSize: 13, fontFamily: mono },

@@ -9,7 +9,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { CommitDetails, type FileView } from '@/components/git/CommitDetails';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
-import { COMPARE_MAX, compareLabel, compareOrder } from '@/git/compare';
+import { COMPARE_MAX, compareBase, compareLabel, compareOrder, compareParams } from '@/git/compare';
 import { forceRetry, pushAction, rowActions, type GraphAction } from '@/git/actions';
 import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, type GraphRow } from '@/git/graph';
 import { buildLayoutInput, type GraphCommit, type HistoryRow, type Stash, type Uncommitted } from '@/git/history';
@@ -124,20 +124,17 @@ export default function GraphScreen() {
     scrollToRow(hash);
   }
 
+  // Compare with, as on the desktop: the commit open, else the only one ticked.
+  const base = compareBase(open, ticked);
   const toggleCheck = (hash: string) => setChecked((previous) => {
     const next = new Set(previous);
     if (next.has(hash)) next.delete(hash); else next.add(hash);
     return next;
   });
 
-  /** Opens the comparison of the ticked commits, oldest first. */
-  function compare() {
-    const ordered = compareOrder(history, ticked);
-    const byHash = new Map(history.map((row) => [row.hash, row]));
-    router.push({
-      pathname: '/compare',
-      params: { projectId, folder, hashes: ordered.join(','), labels: ordered.map((hash) => compareLabel(byHash.get(hash)!)).join(',') },
-    });
+  /** Opens the comparison of these commits, oldest first. */
+  function compare(hashes: Iterable<string>) {
+    router.push({ pathname: '/compare', params: { projectId, folder, ...compareParams(history, compareOrder(history, hashes)) } });
   }
 
   async function run(action: GraphAction) {
@@ -259,7 +256,7 @@ export default function GraphScreen() {
         <View style={[styles.compareBar, { paddingBottom: insets.bottom + spacing.md }]}>
           <Text style={styles.compareText}>{ticked.size > COMPARE_MAX ? `Compare up to ${COMPARE_MAX} commits` : `${ticked.size} selected`}</Text>
           <Pressable
-            onPress={compare}
+            onPress={() => compare(ticked)}
             disabled={ticked.size > COMPARE_MAX}
             style={({ pressed }) => [styles.compareButton, ticked.size > COMPARE_MAX && styles.compareDisabled, pressed && styles.compareDisabled]}
             accessibilityRole="button"
@@ -273,6 +270,9 @@ export default function GraphScreen() {
         visible={!!selected}
         title={selected ? `${selected.shortHash ? `${selected.shortHash} · ` : ''}${selected.subject}` : ''}
         options={selected ? [
+          ...(base && base !== selected.hash
+            ? [{ label: `Compare with ${compareLabel(history.find((row) => row.hash === base)!)}`, onPress: () => { setExpanded(null); compare([base, selected.hash]); } }]
+            : []),
           { label: ticked.has(selected.hash) ? 'Unselect for Compare' : 'Select for Compare', onPress: () => toggleCheck(selected.hash) },
           ...rowActions(selected, { currentBranch, remotes: remoteNames, upstreams }).map((action) => ({ label: action.label, destructive: action.destructive, onPress: () => choose(action) })),
         ] : []}

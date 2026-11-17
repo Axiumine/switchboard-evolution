@@ -64,3 +64,47 @@ export function compareMatrix<F extends { path: string }>(stepFiles: F[][]): Mat
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     .map((path) => ({ path, cells: byPath.get(path)! }));
 }
+
+/** What the compare screen is opened with, from the ordered hashes: lists, so each is one param. */
+export function compareParams(
+  rows: { hash: string; kind: 'commit' | 'stash' | 'uncommitted'; shortHash: string; stashIndex?: number | null; subject: string }[],
+  ordered: string[],
+): { hashes: string; labels: string; subjects: string } {
+  const byHash = new Map(rows.map((row) => [row.hash, row]));
+  const picked = ordered.map((hash) => byHash.get(hash)).filter((row): row is NonNullable<typeof row> => !!row);
+  return {
+    hashes: picked.map((row) => row.hash).join(','),
+    labels: picked.map(compareLabel).join(','),
+    // Subjects hold commas: a JSON array, not a joined string.
+    subjects: JSON.stringify(picked.map((row) => row.subject)),
+  };
+}
+
+/** The subjects param back into a list; anything that is not a JSON array of strings reads as no subjects. */
+export function parseSubjects(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((item) => (typeof item === 'string' ? item : '')) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The commit "Compare with" starts from, as on the desktop: the open row, else the only ticked one. */
+export function compareBase(open: string | null, ticked: Iterable<string>): string | null {
+  if (open) return open;
+  const all = [...ticked];
+  return all.length === 1 ? all[0] : null;
+}
+
+/**
+ * The diff screen right after `key` in the stack, if that is what follows it
+ * (on a Surface Duo, the screen on the right of the comparison): its params
+ * are changed rather than a new one pushed.
+ */
+export function diffRouteAfter<R extends { key: string; name: string }>(routes: R[], key: string): R | null {
+  const at = routes.findIndex((route) => route.key === key);
+  const next = at >= 0 ? routes[at + 1] : undefined;
+  return next && next.name === 'compare-diff' ? next : null;
+}
