@@ -109,6 +109,9 @@ export function memorySlices<O extends UsageOwner>(
   options?: { maxOwners?: number; labelFor?: (owner: O) => string; previous?: Colors | null },
 ): { slices: Slice<O>[]; colors: Colors; total: number };
 
+/** How close the memory in use is to what is installed: 'mid' from 90%, 'high' from 95%. */
+export function ramLevel(totals: { installed: number; used: number | null } | null | undefined): 'low' | 'mid' | 'high';
+
 export function diskLevel(disk: { totalBytes: number; freeBytes: number } | null | undefined): { used: number; level: 'low' | 'mid' | 'high' };
 
 export function diskSlices(
@@ -121,4 +124,10 @@ export function donutPaths(
   options?: { size?: number; thickness?: number; gap?: number; minAngle?: number },
 ): { key: string; d: string }[];
 
-export function resourceStatus(data: UsageData | null | undefined): { ram: string; disk: string; title: string };
+export function resourceStatus(data: UsageData | null | undefined): {
+  ram: string;
+  disk: string;
+  title: string;
+  ramLevel: 'low' | 'mid' | 'high';
+  diskLevel: 'low' | 'mid' | 'high';
+};

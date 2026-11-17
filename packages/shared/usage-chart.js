@@ -147,6 +147,16 @@
     return { slices, colors, total: Math.max(totals.installed, usedSoFar) };
   }
 
+  /**
+   * How close the memory in use is to what is installed: 'mid' (amber) from
+   * 90%, 'high' (red) from 95%. 'low' when a desktop too old to measure it.
+   */
+  function ramLevel(totals) {
+    if (!totals?.installed || totals.used == null) return 'low';
+    const share = totals.used / totals.installed;
+    return share >= 0.95 ? 'high' : share >= 0.9 ? 'mid' : 'low';
+  }
+
   /** How full a disk is, 0 to 1, and its level: amber under 20% free, red under 10%. */
   function diskLevel(disk) {
     if (!disk?.totalBytes) return { used: 0, level: 'low' };
@@ -285,10 +295,11 @@
   /**
    * The status bar's short line: "RAM 4.1 / 27.4 / 36 GB" (Switchboard and
    * its sessions / in use on the computer / installed) and "Disk 412 / 994 GB"
-   * (used / size of the main disk), with a plain-words title for the tooltip.
+   * (used / size of the main disk), each with its level ('low', 'mid' amber,
+   * 'high' red), and a plain-words title for the tooltip.
    */
   function resourceStatus(data) {
-    if (!data) return { ram: '', disk: '', title: '' };
+    if (!data) return { ram: '', disk: '', title: '', ramLevel: 'low', diskLevel: 'low' };
     const totals = memoryTotals(data);
     const ram = totals.installed
       ? `RAM ${[totals.ours, ...(totals.used === null ? [] : [totals.used]), totals.installed].map(gigabytes).join(' / ')} GB`
@@ -296,17 +307,21 @@
     const disk = (data.disks || [])[0];
     const platform = data.platform;
     const diskText = disk?.totalBytes ? `Disk ${diskPair(disk.totalBytes - disk.freeBytes, disk.totalBytes, platform)}` : '';
+    const memory = ram ? ramLevel(totals) : 'low';
+    const space = diskText ? diskLevel(disk).level : 'low';
     const lines = [];
     if (ram) {
       const parts = [`Switchboard and its sessions ${formatBytes(totals.ours)}`];
       if (totals.used !== null) parts.push(`in use on this computer ${formatBytes(totals.used)}`);
       parts.push(`installed ${formatBytes(totals.installed)}`);
-      lines.push(`RAM: ${parts.join(' · ')}`);
+      const warn = memory === 'high' ? ' — memory almost full' : memory === 'mid' ? ' — memory running low' : '';
+      lines.push(`RAM: ${parts.join(' · ')}${warn}`);
     }
     if (diskText) {
-      lines.push(`Disk${disk.name ? ` (${disk.name})` : ''}: ${formatDisk(disk.totalBytes - disk.freeBytes, platform)} used of ${formatDisk(disk.totalBytes, platform)} · ${formatDisk(disk.freeBytes, platform)} free`);
+      const warn = space === 'high' ? ' — disk almost full' : space === 'mid' ? ' — disk low on space' : '';
+      lines.push(`Disk${disk.name ? ` (${disk.name})` : ''}: ${formatDisk(disk.totalBytes - disk.freeBytes, platform)} used of ${formatDisk(disk.totalBytes, platform)} · ${formatDisk(disk.freeBytes, platform)} free${warn}`);
     }
-    return { ram, disk: diskText, title: lines.join('\n') };
+    return { ram, disk: diskText, title: lines.join('\n'), ramLevel: memory, diskLevel: space };
   }
 
   const api = {
@@ -318,6 +333,7 @@
     memoryTotals,
     assignColors,
     memorySlices,
+    ramLevel,
     diskLevel,
     diskSlices,
     donutPaths,

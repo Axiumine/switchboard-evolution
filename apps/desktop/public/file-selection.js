@@ -14,6 +14,9 @@
   /** Past this many entries the question gives the count instead of the list. */
   const LIST_MAX = 10;
 
+  /** Never opened by Expand All: they can hold more than anyone wants to scroll. */
+  const EXPAND_SKIP = new Set(['.git', '.svn', '.hg', 'CVS', 'node_modules']);
+
   const norm = (rel) => String(rel || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
   /** Whether `rel` is `parent` or inside it. */
@@ -88,6 +91,31 @@
     return [...(rels || [])].filter(rel => rel && !gone.some(parent => isWithin(rel, parent)));
   }
 
+  /**
+   * Expand All: the folders of a tree, level by level, with `listDir(rel)`
+   * giving a folder's entries ({ name, relativePath, type }). Stops at
+   * `maxFolders` or `maxDepth` levels and leaves out version-control folders
+   * and node_modules, so a big repository does not open thousands of rows.
+   */
+  async function collectFolders(listDir, { maxFolders = 200, maxDepth = 6 } = {}) {
+    const out = [];
+    let level = [''];
+    for (let depth = 0; depth < maxDepth && level.length; depth++) {
+      const listings = await Promise.all(level.map(rel => Promise.resolve(listDir(rel)).catch(() => [])));
+      const next = [];
+      for (const entries of listings) {
+        for (const entry of entries || []) {
+          if (entry.type !== 'directory' || EXPAND_SKIP.has(entry.name)) continue;
+          out.push(entry.relativePath);
+          next.push(entry.relativePath);
+          if (out.length >= maxFolders) return out;
+        }
+      }
+      level = next;
+    }
+    return out;
+  }
+
   /** "2 could not be moved: a.txt (No longer exists), …" for the failures of a batch. */
   function failuresText(failed, max = 8) {
     const list = failed || [];
@@ -107,6 +135,7 @@
     trashQuestion,
     remapAfterTrash,
     failuresText,
+    collectFolders,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FileSelection = api;

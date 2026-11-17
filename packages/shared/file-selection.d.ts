@@ -16,3 +16,11 @@ export function trashQuestion(
 ): { title: string; detail: string; confirm: string };
 export function remapAfterTrash(rels: Iterable<string>, removed: Iterable<string>): string[];
 export function failuresText(failed: { rel: string; error: string }[], max?: number): string;
+/**
+ * Expand All: the folders of a tree, level by level, without version-control
+ * folders and node_modules, up to `maxFolders` and `maxDepth` levels.
+ */
+export function collectFolders(
+  listDir: (rel: string) => Promise<{ name: string; relativePath: string; type: string }[] | null | undefined> | { name: string; relativePath: string; type: string }[],
+  options?: { maxFolders?: number; maxDepth?: number },
+): Promise<string[]>;
