@@ -4,16 +4,16 @@ import { router } from 'expo-router';
 import { useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { FileChange } from '@/git/compare';
 import type { Passing } from '@/git/graph';
 import type { HistoryRow } from '@/git/history';
-import { STATUS_COLORS, statusLetter, treeRows, type Change, type TreeRow } from '@/git/model';
+import { STATUS_COLORS, statusLetter, treeRows, type TreeRow } from '@/git/model';
 import { useAreaWidth } from '@/layout/size';
 import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 
 export type FileView = 'tree' | 'list';
 
-type FileChange = { path: string; oldPath: string | null; status: Change['status']; insertions: number; deletions: number };
 type CommitInfo = {
   hash: string; shortHash: string; parents: string[];
   authorName: string; authorEmail: string; authorDate: string;
@@ -38,11 +38,13 @@ const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
  * lines go on beside it.
  */
 export function CommitDetails({
-  projectId, folder, row, headHash, below, graphWidth, colour,
+  projectId, folder, row, headHash, below, graphWidth, leading = 0, colour,
   fileView, onFileView, compact, lastViewed, onViewed, isLoaded, onOpenCommit, onClose, onShown,
 }: {
   projectId: string; folder: string; row: HistoryRow; headHash: string | null;
   below: Passing[]; graphWidth: number; colour: (index: number) => string;
+  /** Room taken before the graph (the checkboxes): the lines and the panel move over by it. */
+  leading?: number;
   fileView: FileView; onFileView: (view: FileView) => void; compact: boolean;
   lastViewed: string | null; onViewed: (path: string) => void;
   isLoaded: (hash: string) => boolean; onOpenCommit: (hash: string) => void; onClose: () => void;
@@ -166,8 +168,8 @@ export function CommitDetails({
         onShown?.();
       }}
     >
-      {below.map((line) => <View key={line.x} style={[styles.line, { left: spacing.sm + line.x - 1, backgroundColor: colour(line.colorIndex) }]} />)}
-      <View style={[styles.panel, { marginLeft: spacing.sm + graphWidth + spacing.sm }]}>
+      {below.map((line) => <View key={line.x} style={[styles.line, { left: spacing.sm + leading + line.x - 1, backgroundColor: colour(line.colorIndex) }]} />)}
+      <View style={[styles.panel, { marginLeft: spacing.sm + leading + graphWidth + spacing.sm }]}>
         <Pressable onPress={onClose} hitSlop={10} style={styles.close} accessibilityRole="button" accessibilityLabel="Close the details">
           <Ionicons name="close" size={18} color={colors.textDim} />
         </Pressable>
@@ -211,7 +213,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** "+N −M", each part only when it is not zero, as the desktop's gitGraphDiffStatHtml. */
-function DiffStat({ file }: { file: FileChange }) {
+export function DiffStat({ file }: { file: FileChange }) {
   if (!file.insertions && !file.deletions) return null;
   return (
     <Text style={styles.stat}>

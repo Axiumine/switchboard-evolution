@@ -1,12 +1,15 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { CommitDetails, type FileView } from '@/components/git/CommitDetails';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
+import { COMPARE_MAX, compareLabel, compareOrder } from '@/git/compare';
 import { forceRetry, pushAction, rowActions, type GraphAction } from '@/git/actions';
 import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, type GraphRow } from '@/git/graph';
 import { buildLayoutInput, type GraphCommit, type HistoryRow, type Stash, type Uncommitted } from '@/git/history';
@@ -30,6 +33,8 @@ const PAGE = 300;
 const MORE = 100;
 // The most the computer sends at once.
 const MAX_COMMITS = 5000;
+// The tick box before the graph in each row.
+const CHECK_WIDTH = 24;
 // A push or a fetch may take the computer up to two minutes.
 const ACTION_TIMEOUT_MS = 130_000;
 
@@ -47,8 +52,11 @@ export default function GraphScreen() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [lastViewed, setLastViewed] = useState<string | null>(null);
+  // The commits ticked for Compare.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const list = useRef<FlatList<HistoryRow>>(null);
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
 
   const graph = useQuery({
     queryKey: ['git-graph', projectId, folder, limit],
@@ -84,7 +92,10 @@ export default function GraphScreen() {
   const loaded = useMemo(() => new Set(history.map((row) => row.hash)), [history]);
   // A row dropped or reset away takes its details with it.
   const open = expanded && loaded.has(expanded) ? expanded : null;
-  const extraData = useMemo(() => ({ open, view, lastViewed }), [open, view, lastViewed]);
+  // A row dropped or reset away is no longer ticked (like the open row, it is read against what is loaded).
+  const ticked = useMemo(() => new Set([...checked].filter((hash) => loaded.has(hash))), [checked, loaded]);
+  const extraData = useMemo(() => ({ open, view, lastViewed, ticked }), [open, view, lastViewed, ticked]);
+
 
   // The repository changed (here, on the computer, or from a terminal), and the progress of a network action.
   useEffect(() => onDesktopEvent((event, args) => {
@@ -111,6 +122,22 @@ export default function GraphScreen() {
     setFileView(null);
     setLastViewed(null);
     scrollToRow(hash);
+  }
+
+  const toggleCheck = (hash: string) => setChecked((previous) => {
+    const next = new Set(previous);
+    if (next.has(hash)) next.delete(hash); else next.add(hash);
+    return next;
+  });
+
+  /** Opens the comparison of the ticked commits, oldest first. */
+  function compare() {
+    const ordered = compareOrder(history, ticked);
+    const byHash = new Map(history.map((row) => [row.hash, row]));
+    router.push({
+      pathname: '/compare',
+      params: { projectId, folder, hashes: ordered.join(','), labels: ordered.map((hash) => compareLabel(byHash.get(hash)!)).join(',') },
+    });
   }
 
   async function run(action: GraphAction) {
@@ -148,9 +175,19 @@ export default function GraphScreen() {
         options={{
           title: shortProjectPath(folder || ''),
           headerRight: () => (
-            <Pressable onPress={() => { remotes.refetch(); setToolbar(true); }} hitSlop={10} accessibilityLabel="Repository actions">
-              <Text style={styles.headerButton}>•••</Text>
-            </Pressable>
+            <View style={styles.headerButtons}>
+              <Pressable onPress={() => setChecked(new Set(history.map((row) => row.hash)))} hitSlop={10} accessibilityLabel="Select all loaded commits">
+                <Ionicons name="checkmark-done-outline" size={22} color={colors.text} />
+              </Pressable>
+              {ticked.size ? (
+                <Pressable onPress={() => setChecked(new Set())} hitSlop={10} accessibilityLabel="Clear the selection">
+                  <Ionicons name="close-circle-outline" size={22} color={colors.text} />
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => { remotes.refetch(); setToolbar(true); }} hitSlop={10} accessibilityLabel="Repository actions">
+                <Text style={styles.headerButton}>•••</Text>
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -178,6 +215,8 @@ export default function GraphScreen() {
               lanes={lanes}
               palette={palette}
               selected={item.hash === open}
+              checked={ticked.has(item.hash)}
+              onToggleCheck={() => toggleCheck(item.hash)}
               onPress={() => toggle(item.hash)}
               onLongPress={() => { remotes.refetch(); setSelected(item); }}
             />
@@ -190,6 +229,7 @@ export default function GraphScreen() {
                 headHash={headHash}
                 below={layout[index].below}
                 graphWidth={Math.max(lanes, 1) * LANE_WIDTH}
+                leading={CHECK_WIDTH}
                 colour={(i) => laneColour(palette, i)}
                 fileView={view}
                 onFileView={setFileView}
@@ -215,10 +255,27 @@ export default function GraphScreen() {
         ListEmptyComponent={graph.isLoading ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : <Text style={styles.empty}>No commits.</Text>}
         ListFooterComponent={data?.hasMore && limit < MAX_COMMITS ? <ActivityIndicator style={{ margin: spacing.lg }} color={colors.textFaint} /> : undefined}
       />
+      {ticked.size >= 2 ? (
+        <View style={[styles.compareBar, { paddingBottom: insets.bottom + spacing.md }]}>
+          <Text style={styles.compareText}>{ticked.size > COMPARE_MAX ? `Compare up to ${COMPARE_MAX} commits` : `${ticked.size} selected`}</Text>
+          <Pressable
+            onPress={compare}
+            disabled={ticked.size > COMPARE_MAX}
+            style={({ pressed }) => [styles.compareButton, ticked.size > COMPARE_MAX && styles.compareDisabled, pressed && styles.compareDisabled]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: ticked.size > COMPARE_MAX }}
+          >
+            <Text style={styles.compareButtonText}>Compare</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <Sheet
         visible={!!selected}
         title={selected ? `${selected.shortHash ? `${selected.shortHash} · ` : ''}${selected.subject}` : ''}
-        options={selected ? rowActions(selected, { currentBranch, remotes: remoteNames, upstreams }).map((action) => ({ label: action.label, destructive: action.destructive, onPress: () => choose(action) })) : []}
+        options={selected ? [
+          { label: ticked.has(selected.hash) ? 'Unselect for Compare' : 'Select for Compare', onPress: () => toggleCheck(selected.hash) },
+          ...rowActions(selected, { currentBranch, remotes: remoteNames, upstreams }).map((action) => ({ label: action.label, destructive: action.destructive, onPress: () => choose(action) })),
+        ] : []}
         onClose={() => setSelected(null)}
       />
       <Sheet visible={toolbar} title={shortProjectPath(folder || '')} options={toolbarOptions} onClose={() => setToolbar(false)} />
@@ -243,8 +300,9 @@ function confirmThen(action: GraphAction, run: (action: GraphAction) => void) {
   ]);
 }
 
-const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, onPress, onLongPress }: {
-  row: HistoryRow; geometry: GraphRow; lanes: number; palette: string[]; selected: boolean; onPress: () => void; onLongPress: () => void;
+const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, checked, onToggleCheck, onPress, onLongPress }: {
+  row: HistoryRow; geometry: GraphRow; lanes: number; palette: string[]; selected: boolean; checked: boolean;
+  onToggleCheck: () => void; onPress: () => void; onLongPress: () => void;
 }) {
   const colour = (index: number) => laneColour(palette, index);
   const refs = row.refs || { heads: [], remotes: [], tags: [] };
@@ -263,6 +321,17 @@ const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selec
       accessibilityState={{ expanded: selected }}
       accessibilityHint="Shows the files it changed. Long press for actions."
     >
+      {/* Its own press: ticking a row does not open it. */}
+      <Pressable
+        onPress={onToggleCheck}
+        hitSlop={{ top: 4, bottom: 4, left: 8, right: 0 }}
+        style={styles.check}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked }}
+        accessibilityLabel="Select for Compare"
+      >
+        <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={20} color={checked ? colors.accent : colors.textFaint} />
+      </Pressable>
       <Svg width={Math.max(lanes, 1) * LANE_WIDTH} height={ROW_HEIGHT}>
         {geometry.segments.map((segment, i) => <Path key={i} d={segment.d} stroke={colour(segment.colorIndex)} strokeWidth={2} fill="none" />)}
         <Circle
@@ -285,6 +354,7 @@ const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selec
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  headerButtons: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   headerButton: { color: colors.text, fontSize: 18, paddingHorizontal: spacing.sm },
   branch: { color: colors.textDim, fontSize: 12, paddingHorizontal: spacing.lg, paddingVertical: spacing.xs },
   running: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, backgroundColor: colors.surface },
@@ -293,6 +363,7 @@ const styles = StyleSheet.create({
   empty: { color: colors.textFaint, textAlign: 'center', marginTop: spacing.xl, paddingHorizontal: spacing.lg },
   row: { flexDirection: 'row', alignItems: 'center', height: ROW_HEIGHT, paddingLeft: spacing.sm, paddingRight: spacing.md },
   pressed: { backgroundColor: colors.surface },
+  check: { width: CHECK_WIDTH, height: ROW_HEIGHT, alignItems: 'center', justifyContent: 'center' },
   selected: { backgroundColor: colors.raised },
   text: { flex: 1, marginLeft: spacing.sm, gap: 1 },
   subjectLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -304,4 +375,9 @@ const styles = StyleSheet.create({
   badgeRemote: { backgroundColor: 'rgba(255,255,255,0.1)', color: colors.textDim },
   badgeTag: { backgroundColor: 'rgba(224,160,80,0.3)' },
   more: { color: colors.textFaint, fontSize: 10 },
+  compareBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  compareText: { flex: 1, color: colors.text, fontSize: 14 },
+  compareButton: { minHeight: 40, paddingHorizontal: spacing.lg, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(128,136,255,0.22)' },
+  compareDisabled: { opacity: 0.4 },
+  compareButtonText: { color: '#e4e4fa', fontSize: 14.5, fontWeight: '600' },
 });

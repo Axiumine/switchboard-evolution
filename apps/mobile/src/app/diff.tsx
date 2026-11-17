@@ -2,11 +2,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LINE_STYLES, mono } from '@/components/git/diff-style';
 import { lineDiff } from '@/git/history';
-import { diffLines, type DiffLine } from '@/git/model';
+import { diffLines } from '@/git/model';
 import { refreshGit, stageFiles, stageLines, useCanStage } from '@/git/stage-requests';
 import {
   diffRows, hunkPick, linesLabel, NO_PICKS, pickedLines, stageVerb, toggleHunk, toggleLine, wholeFileOnlyReason, type DiffRow, type Picked, type Side,
@@ -14,16 +15,6 @@ import {
 import { changedLineIndices, parseUnifiedDiff } from '@/shared/vendor/git-diff-model';
 import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
-
-const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
-
-const LINE_STYLES: Record<DiffLine['kind'], object> = {
-  meta: { color: colors.textFaint },
-  hunk: { color: colors.accent },
-  add: { color: '#8fd19e', backgroundColor: 'rgba(76,175,143,0.12)' },
-  del: { color: '#f19aa1', backgroundColor: 'rgba(224,108,117,0.12)' },
-  context: { color: colors.text },
-};
 
 type SideDiff = { ok?: boolean; diff?: string; truncated?: boolean; diffId?: string; error?: string };
 

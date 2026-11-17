@@ -51,6 +51,8 @@ export default function RootLayout() {
           <Stack.Screen name="git" options={{ title: 'Git' }} />
           <Stack.Screen name="diff" options={{ title: 'Diff' }} />
           <Stack.Screen name="graph" options={{ title: 'Git Graph' }} />
+          <Stack.Screen name="compare" options={{ title: 'Compare' }} />
+          <Stack.Screen name="compare-diff" options={{ title: 'Compare' }} />
           <Stack.Screen name="worktrees/new" options={{ title: 'New worktree' }} />
           <Stack.Screen name="worktrees/remove" options={{ title: 'Remove worktree' }} />
           <Stack.Screen name="worktrees/merged" options={{ title: 'Remove merged' }} />
