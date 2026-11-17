@@ -1,3 +1,6 @@
+// Copied from packages/shared/usage-chart.js by scripts/sync-shared.mjs.
+// Do not edit: change it in packages/shared and run npm run sync-shared.
+
 // usage-chart.js — memory and disk use as the Task Manager draws them: the
 // numbers, the slices of the two rings (memory: the app, each session or task,
 // other apps, free; disk: used and free), the SVG geometry of a ring and the

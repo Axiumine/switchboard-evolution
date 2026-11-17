@@ -1,3 +1,6 @@
+// Copied from packages/shared/file-selection.js by scripts/sync-shared.mjs.
+// Do not edit: change it in packages/shared and run npm run sync-shared.
+
 // file-selection.js — ticking several files and folders in a Files tree and
 // moving them to the Trash together: Select All / Deselect All / Invert over
 // the rows the tree shows, which of the ticked entries to actually trash (a
