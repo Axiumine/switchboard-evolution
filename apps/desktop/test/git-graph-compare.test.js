@@ -105,3 +105,73 @@ test('a file renamed in a step is read under its old path on the old side', asyn
   await compare.gitGraphCompareFileDiff(spec, 'a1', null, 'c.txt', null);
   assert.deepEqual(calls, [['diff', 'p', '/repo', 'a1', null, 'c.txt']]);
 });
+
+// The files as a tree come from project-git-view.js in the app; a stand-in of
+// the same shape here (its own tests cover the real builder).
+function withTreeBuilder(fn) {
+  global.buildGitChangeTree = (changes) => {
+    const root = new Map();
+    for (const change of changes) {
+      const parts = change.path.split('/');
+      let level = root;
+      for (const part of parts.slice(0, -1)) {
+        if (!level.has(part)) level.set(part, { kind: 'folder', name: part, children: new Map() });
+        level = level.get(part).children;
+      }
+      level.set(`\0${parts[parts.length - 1]}`, { kind: 'file', name: parts[parts.length - 1], change });
+    }
+    // Folders before files, as the real builder sorts each level.
+    const sort = (nodes) => nodes.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'folder' ? -1 : 1));
+    const toArray = (map) => sort([...map.values()].map(n => (n.kind === 'folder' ? { ...n, children: toArray(n.children) } : n)));
+    return toArray(root);
+  };
+  global.gitTreeRows = (tree, collapsed, prefix, depth = 0) => {
+    const rows = [];
+    for (const node of tree) {
+      const key = prefix ? `${prefix}/${node.name}` : node.name;
+      if (node.kind === 'folder') {
+        rows.push({ kind: 'folder', depth, name: node.name, key, count: 1, collapsed: collapsed.has(key) });
+        if (!collapsed.has(key)) rows.push(...global.gitTreeRows(node.children, collapsed, key, depth + 1));
+      } else rows.push({ kind: 'file', depth, name: node.name, key, change: node.change });
+    }
+    return rows;
+  };
+  try { fn(); } finally { delete global.buildGitChangeTree; delete global.gitTreeRows; }
+}
+
+test('a comparison names each commit by its short hash and its title, the older first', () => {
+  const spec = compare.gitGraphCompareSpecFor('p', '/repo', rows.map(r => ({ ...r, subject: r.hash === 'a1' ? 'First <one>' : 'Later' })), ['a1', 'c3', '#uncommitted']);
+  assert.deepEqual(spec.labels, ['a1a1a1a', 'c3c3c3c', 'Uncommitted']);
+  assert.deepEqual(spec.subjects, ['First <one>', 'Later', 'Uncommitted Changes']);
+  const title = compare.gitGraphCompareTitleHtml(spec);
+  assert.ok(title.indexOf('a1a1a1a') < title.indexOf('First &lt;one&gt;'));
+  assert.ok(title.indexOf('First &lt;one&gt;') < title.indexOf('c3c3c3c'));
+  assert.doesNotMatch(title, /<one>/);
+  // The step's tooltip carries both titles.
+  const html = compare.gitGraphCompareTableHtml(spec, compare.gitGraphCompareSteps(spec.hashes), [], null);
+  assert.match(html, /title="a1a1a1a First &lt;one&gt; → c3c3c3c Later"/);
+});
+
+test('the table is a tree of folders by default, a flat list of paths on request', () => {
+  withTreeBuilder(() => {
+    const matrix = compare.gitGraphCompareMatrix([[{ path: 'src/a/x.js', status: 'modified' }, { path: 'README.md', status: 'added' }]]);
+    const spec = { hashes: ['a1', 'b2'], labels: ['a1', 'b2'] };
+    const steps = compare.gitGraphCompareSteps(spec.hashes);
+
+    const tree = compare.gitGraphCompareTableHtml(spec, steps, matrix, 'src/a/x.js', {});
+    assert.match(tree, /class="gg-cmp-folder" data-folder-key="src"/);
+    assert.match(tree, /data-folder-key="src\/a"/);
+    assert.match(tree, /data-path="src\/a\/x\.js"><td class="gg-cmp-file mono gg-cmp-indent gg-cmp-indent-file"[^>]*>x\.js</);
+
+    const folded = compare.gitGraphCompareTableHtml(spec, steps, matrix, null, { fileView: 'tree', collapsed: new Set(['src']) });
+    assert.doesNotMatch(folded, /x\.js/, 'a folded folder hides its files');
+
+    const list = compare.gitGraphCompareTableHtml(spec, steps, matrix, null, { fileView: 'list' });
+    assert.doesNotMatch(list, /gg-cmp-folder/);
+    assert.match(list, /<span class="gg-cmp-dir">src\/a\/<\/span>x\.js/);
+
+    // The first file picked is the first the table shows.
+    assert.equal(compare.gitGraphCompareFirstPath(matrix, { fileView: 'tree' }), 'src/a/x.js');
+    assert.equal(compare.gitGraphCompareFirstPath(matrix, { fileView: 'list' }), 'README.md');
+  });
+});

@@ -1665,22 +1665,23 @@ const compareWindows = new Set();
 const GIT_COMPARE_WINDOW_SPEC = { title: 'Compare', width: 1280, height: 820, minWidth: 640, minHeight: 420, onTop: false };
 const GIT_COMPARE_HASH = /^(#uncommitted|[0-9a-f]{4,64})$/i;
 
-function openGitCompareWindow(projectId, repoPath, hashes, labels) {
+function openGitCompareWindow(projectId, repoPath, hashes, labels, subjects) {
   if (typeof projectId !== 'string' || !projectId || projectId.length > 200) return false;
   if (typeof repoPath !== 'string' || !repoPath || repoPath.length > 4096) return false;
   if (!Array.isArray(hashes) || hashes.length < 2 || hashes.length > 4) return false;
   if (!hashes.every(hash => typeof hash === 'string' && GIT_COMPARE_HASH.test(hash))) return false;
   const names = hashes.map((_, i) => String((Array.isArray(labels) && labels[i]) || '').slice(0, 60));
+  const titles = hashes.map((_, i) => String((Array.isArray(subjects) && subjects[i]) || '').slice(0, 200));
   const win = createPageWindow('git-compare', GIT_COMPARE_WINDOW_SPEC, { offset: 24 * compareWindows.size });
   compareWindows.add(win);
   win.loadFile(path.join(__dirname, 'public', 'index.html'), {
-    query: { projectWindow: projectId, tab: 'git', compare: JSON.stringify({ repo: repoPath, hashes, labels: names }) },
+    query: { projectWindow: projectId, tab: 'git', compare: JSON.stringify({ repo: repoPath, hashes, labels: names, subjects: titles }) },
   });
   win.on('closed', () => compareWindows.delete(win));
   return true;
 }
 
-ipcMain.handle('open-git-compare-window', (_event, projectId, repoPath, hashes, labels) => openGitCompareWindow(projectId, repoPath, hashes, labels));
+ipcMain.handle('open-git-compare-window', (_event, projectId, repoPath, hashes, labels, subjects) => openGitCompareWindow(projectId, repoPath, hashes, labels, subjects));
 
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When

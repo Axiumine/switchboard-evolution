@@ -624,6 +624,7 @@ function gitGraphSameStringSet(a, b) {
 function gitGraphPaint(project, state, body, opts = {}) {
   const prevWrap = opts.preserveScroll ? body.querySelector('.gg-table-wrap') : null;
   const prevScrollTop = prevWrap ? prevWrap.scrollTop : null;
+  const prevInner = opts.preserveScroll ? gitGraphInlineScrolls(body, state) : null;
 
   const repos = state.repositories || [];
   if (!repos.length) {
@@ -666,6 +667,7 @@ function gitGraphPaint(project, state, body, opts = {}) {
       <div class="gg-settings-drawer" id="gg-settings-drawer" style="display:none"></div>
     </div>`;
 
+  gitGraphFitDetailsHeight(state, body.querySelector('.gg-table-wrap'));
   gitGraphWireRepoPicker(project, state, body);
   gitGraphWireControlBar(project, state, body);
   gitGraphWireFindWidget(project, state, body);
@@ -676,6 +678,7 @@ function gitGraphPaint(project, state, body, opts = {}) {
     const newWrap = body.querySelector('.gg-table-wrap');
     if (newWrap) newWrap.scrollTop = prevScrollTop;
   }
+  gitGraphRestoreInlineScrolls(body, state, prevInner);
   if (state.detailsData && state.detailsLocation === 'docked') {
     gitGraphRenderDetailsPanel(project, state, body);
   } else if (state.detailsData) {
@@ -687,6 +690,51 @@ function gitGraphPaint(project, state, body, opts = {}) {
   }
   if (state.settingsOpen) gitGraphRenderSettingsDrawer(project, state, body);
   if (state.progress) gitGraphRenderProgress(project, state, body);
+}
+
+// The inline panel is at most three quarters of the table's height, and its text
+// and its files scroll inside it (git-graph.css). Painting the table again
+// (a folder folded, Tree/List) keeps them where they were, for the same record.
+const GG_INLINE_SCROLLERS = ['.gg-details-text', '.gg-file-tree', '.gg-file-flat-list'];
+
+/** The inline panel's ceiling: three quarters of what the table shows, so the
+ * commits above and below it stay in sight (the window would be too much: the
+ * toolbar and the tabs take part of it). Follows the window as it is resized. */
+function gitGraphFitDetailsHeight(state, wrap) {
+  if (state.detailsResizeObserver) { state.detailsResizeObserver.disconnect(); state.detailsResizeObserver = null; }
+  if (!wrap || !wrap.style || typeof wrap.style.setProperty !== 'function') return;
+  const fit = () => { if (wrap.clientHeight) wrap.style.setProperty('--gg-details-max', `${Math.round(wrap.clientHeight * 0.75)}px`); };
+  fit();
+  if (typeof ResizeObserver === 'function') {
+    state.detailsResizeObserver = new ResizeObserver(fit);
+    state.detailsResizeObserver.observe(wrap);
+  }
+}
+
+function gitGraphDetailsKey(state) {
+  const data = state.detailsData;
+  return data ? `${data.mode}:${data.hash || ''}:${data.fromHash || ''}:${data.toHash || ''}` : null;
+}
+
+function gitGraphInlineScrolls(body, state) {
+  const panel = body.querySelector('#gg-details-inline');
+  if (!panel || typeof panel.querySelector !== 'function') return null;
+  const scrolls = {};
+  for (const selector of GG_INLINE_SCROLLERS) {
+    const el = panel.querySelector(selector);
+    if (el && el.scrollTop) scrolls[selector] = el.scrollTop;
+  }
+  return { key: gitGraphDetailsKey(state), scrolls };
+}
+
+function gitGraphRestoreInlineScrolls(body, state, saved) {
+  if (!saved || saved.key !== gitGraphDetailsKey(state)) return;
+  const panel = body.querySelector('#gg-details-inline');
+  if (!panel || typeof panel.querySelector !== 'function') return;
+  for (const [selector, top] of Object.entries(saved.scrolls)) {
+    const el = panel.querySelector(selector);
+    if (el) el.scrollTop = top;
+  }
 }
 
 function gitGraphRepoPickerHtml(repos, active) {
@@ -1179,22 +1227,17 @@ function gitGraphHandleRowClick(project, state, body, el, event) {
 }
 
 /** Compares `hash` with the selected commit (the one open, or the only one
- * ticked for Compare): Ctrl/Cmd+click and the right-click menu. False when
- * there is no other commit selected. */
+ * ticked for Compare): Ctrl/Cmd+click and the right-click menu. The open
+ * record closes and the comparison opens over the History, the same as for
+ * ticked commits, the older of the two first. False when there is no other
+ * commit selected. */
 function gitGraphCompareWithSelected(project, state, body, hash) {
   const base = gitGraphCompareBase(state);
   if (!base || base.hash === hash) return false;
-  const first = base.hash, second = hash;
-  // Order-independent: the comparison always reads from whichever side
-  // is actually the ancestor toward the descendant. Click order only
-  // decides it when neither is reachable from the other within the
-  // loaded window (e.g. unrelated histories) — the default below.
-  let fromHash = first, toHash = second;
-  if (gitGraphIsAncestor(state.rows, second, first)) { fromHash = second; toHash = first; }
-  // The panel opens under the first of the two.
-  state.selectedHash = first;
-  state.compareHash = hash;
-  gitGraphOpenComparison(project, state, body, fromHash, toHash);
+  const hashes = gitGraphCompareOrder(state.rows, [base.hash, hash]);
+  if (hashes.length !== 2) return false;
+  if (state.detailsData || state.selectedHash) gitGraphCloseDetails(project, state, body);
+  gitGraphShowComparePopup(gitGraphCompareSpecFor(project.id, state.selectedRepo, state.rows, hashes));
   return true;
 }
 
@@ -1256,17 +1299,17 @@ function gitGraphWireCompareSlot(project, state, body) {
   if (windowBtn) windowBtn.onclick = () => gitGraphOpenCompare(project, state, { inWindow: true });
 }
 
-/** What Compare compares: the ticked commits, oldest first, with their names. Null outside 2 to GG_COMPARE_MAX. */
+/** What Compare compares: the ticked commits, oldest first, with their names and titles. Null outside 2 to GG_COMPARE_MAX. */
 function gitGraphCompareSpec(project, state) {
   const hashes = gitGraphCompareOrder(state.rows, state.checkedHashes || []);
   if (hashes.length < 2 || hashes.length > GG_COMPARE_MAX) return null;
-  return { projectId: project.id, repoPath: state.selectedRepo, hashes, labels: hashes.map(hash => gitGraphCompareLabel(state.rows, hash)) };
+  return gitGraphCompareSpecFor(project.id, state.selectedRepo, state.rows, hashes);
 }
 
 function gitGraphOpenCompare(project, state, { inWindow }) {
   const spec = gitGraphCompareSpec(project, state);
   if (!spec) return null;
-  if (inWindow) gitGraphApi('openGitCompareWindow', spec.projectId, spec.repoPath, spec.hashes, spec.labels);
+  if (inWindow) gitGraphApi('openGitCompareWindow', spec.projectId, spec.repoPath, spec.hashes, spec.labels, spec.subjects);
   else gitGraphShowComparePopup(spec);
   return spec;
 }
@@ -1921,5 +1964,6 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphSameStringSet, gitGraphRepoList, gitGraphEnsureWatcherBound,
     gitGraphCompareBase, gitGraphCompareWithSelected, gitGraphToggleChecked, gitGraphCompareSpec, gitGraphOpenCompare,
     gitGraphRowHtml, gitGraphHeaderHtml, gitGraphControlBarHtml, gitGraphInSelectCell,
+    gitGraphInlineScrolls, gitGraphRestoreInlineScrolls, gitGraphFitDetailsHeight,
   };
 }

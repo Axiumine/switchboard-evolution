@@ -5,7 +5,7 @@
 // session it opens, or starts, goes to the main window, which has the
 // terminals. Loaded before the other scripts, so they can read PROJECT_WINDOW.
 
-// With `compare` ({ repo, hashes, labels }), the window shows only the
+// With `compare` ({ repo, hashes, labels, subjects }), the window shows only the
 // comparison of those commits (main.js openGitCompareWindow).
 const PROJECT_WINDOW = (() => {
   try {

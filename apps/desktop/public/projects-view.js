@@ -1801,8 +1801,8 @@ function projectWindowHeaderHtml(project, tabName) {
 
 /** A Compare window's page (main.js openGitCompareWindow): the comparison of its commits, filling the window. */
 function renderGitCompareWindow(project, body) {
-  const { repo, hashes, labels } = PROJECT_WINDOW.compare;
-  gitGraphRenderCompareView(body, { projectId: project.id, repoPath: repo, hashes, labels: labels || [] });
+  const { repo, hashes, labels, subjects } = PROJECT_WINDOW.compare;
+  gitGraphRenderCompareView(body, { projectId: project.id, repoPath: repo, hashes, labels: labels || [], subjects: subjects || [] });
 }
 
 /** A project window's page, once the projects are loaded: its project on its tab. */

@@ -365,6 +365,12 @@
    the lanes run on beside it to the rows below. */
 .gg-details-inline {
   margin-left: calc(var(--gg-select-width, 0px) + var(--gg-graph-width, 60px));
+  /* Never taller than three quarters of the table (--gg-details-max, set by
+     gitGraphFitDetailsHeight), so the commits above and below stay in sight:
+     the text and the files scroll inside it, the bar with Tree/List and Code
+     Review stays on top of the files. */
+  max-height: var(--gg-details-max, 75vh);
+  box-sizing: border-box;
   border-bottom: 1px solid rgba(255,255,255,0.07);
 }
 
@@ -711,3 +717,24 @@
 .gg-cmp-diff-body { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; }
 .gg-cmp-diff-none { color: #66667a; font-size: 12px; padding: 18px; text-align: center; }
 body.project-window .ws-body:has(> .gg-cmp-in-window) { padding: 0; display: flex; }
+
+/* The inline panel's columns within its ceiling (14px + 16px of padding). */
+.gg-details-inline .gg-details-text { max-height: calc(var(--gg-details-max, 75vh) - 30px); overflow: auto; min-height: 0; }
+.gg-details-inline .gg-details-files { max-height: calc(var(--gg-details-max, 75vh) - 30px); display: flex; flex-direction: column; min-height: 0; }
+.gg-details-inline .gg-details-files-bar { flex: 0 0 auto; }
+.gg-details-inline .gg-file-tree, .gg-details-inline .gg-file-flat-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+/* The comparison's title: each commit's name and title; Tree/List just before the window button. */
+.gg-cmp-heading { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gg-cmp-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+.gg-cmp-commit { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; flex: 0 1 auto; }
+.gg-cmp-subject { color: #a8a8bc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
+.gg-cmp-arrow { color: #66667a; flex: 0 0 auto; }
+.gg-cmp-view-toggle { flex: 0 0 auto; }
+.gg-cmp-indent { padding-left: calc(10px + var(--depth, 0) * 14px) !important; }
+.gg-cmp-indent-file { padding-left: calc(26px + var(--depth, 0) * 14px) !important; }
+.gg-cmp-folder { cursor: pointer; }
+.gg-cmp-folder:hover { background: rgba(255,255,255,0.03); }
+.gg-cmp-folder td { color: #a8a8bc; }
+.gg-cmp-folder .gg-tree-folder-chevron { display: inline-flex; vertical-align: middle; margin-right: 2px; }
+.gg-cmp-folder svg { vertical-align: middle; }
