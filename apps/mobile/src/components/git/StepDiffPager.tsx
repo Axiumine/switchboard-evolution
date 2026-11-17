@@ -107,7 +107,8 @@ function Page({ projectId, folder, path, step, changed }: { projectId: string; f
   }, [result.data]);
 
   if (!changed) return <Text style={styles.centered}>No change in this step</Text>;
-  if (result.isLoading) return <ActivityIndicator style={styles.spinner} color={colors.accent} />;
+  // Pending, not just loading: offline the query waits, disabled, and an empty answer would read as "No differences".
+  if (result.isPending) return <ActivityIndicator style={styles.spinner} color={colors.accent} />;
   const error = result.error?.message || result.data?.error;
   if (error) return <Text style={styles.centered}>{error}</Text>;
   if (!lines.length) return <Text style={styles.centered}>No differences.</Text>;

@@ -34,7 +34,8 @@ export function useCompareSteps(projectId: string, folder: string, hashes: strin
     })),
   });
 
-  const loading = results.some((r) => r.isLoading);
+  // Pending, not just loading: while the phone is offline the queries wait, disabled, with nothing to show yet.
+  const loading = results.some((r) => r.isPending);
   const failed = results.find((r) => r.error || r.data?.error || (r.data && !r.data.ok));
   const error = failed ? failed.error?.message || failed.data?.error || 'Could not load the changes.' : null;
   const stepFiles = results.map((r) => r.data?.files || []);
