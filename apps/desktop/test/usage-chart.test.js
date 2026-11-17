@@ -101,6 +101,7 @@ test('a session keeps its colour when its rank changes, a new one takes a free c
   assert.equal(colorOf(second, 'session:b'), colorOf(first, 'session:b'));
   assert.equal(colorOf(second, 'session:c'), COLORS.owners[2]);
   assert.deepEqual(assignColors({ x: 0, y: 0 }, ['x', 'y'], 5), { x: 0, y: 1 }, 'no two keys share a colour');
+  assert.deepEqual(assignColors(null, ['b', 'a'], 5), assignColors(null, ['a', 'b'], 5), 'without memory, colours go by key, not by rank');
 });
 
 test('diskSlices: used then free, coloured by how full the disk is', () => {

@@ -86,11 +86,13 @@
   /**
    * Colours follow the session, not its rank: a session keeps its colour while
    * it stays among the largest ones, and a new one takes the first free colour.
-   * `previous` is the map this returned last time ({ key: index }).
+   * `previous` is the map this returned last time ({ key: index }); without it
+   * colours go by key, so the same set of sessions always gets the same ones.
    */
   function assignColors(previous, keys, count) {
     const next = {};
     const taken = new Set();
+    keys = [...keys].sort();
     for (const key of keys) {
       const slot = previous?.[key];
       if (Number.isInteger(slot) && slot >= 0 && slot < count && !taken.has(slot)) {
