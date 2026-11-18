@@ -1,9 +1,9 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, highlightSpecialChars, ViewPlugin, Decoration } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, Compartment } from '@codemirror/state';
-import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, highlightSpecialChars, ViewPlugin, Decoration, rectangularSelection } from '@codemirror/view';
+import { EditorState, EditorSelection, StateField, StateEffect, Compartment } from '@codemirror/state';
+import { defaultKeymap, standardKeymap, indentWithTab, history, historyKeymap, selectLine, simplifySelection, addCursorAbove, addCursorBelow } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
-import { highlightSelectionMatches } from '@codemirror/search';
+import { highlightSelectionMatches, selectNextOccurrence, selectSelectionMatches } from '@codemirror/search';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
 import { tags } from '@lezer/highlight';
 import TextSearchLib from './text-search.js';
@@ -309,6 +309,7 @@ function openCMSearch(view, opts = {}) {
 const cmFindDomHandler = ViewPlugin.fromClass(class {
   constructor(view) {
     this._handler = (e) => {
+      if (e.defaultPrevented) return;
       const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
       if (e.key === 'f' && mod && !e.shiftKey && !e.altKey) {
         e.preventDefault();
@@ -408,6 +409,7 @@ const cmSaveKeymap = keymap.of([{
 const cmGotoLineDomHandler = ViewPlugin.fromClass(class {
   constructor(view) {
     this._handler = (e) => {
+      if (e.defaultPrevented) return;
       const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
       if (e.key === 'g' && mod && !e.shiftKey && !e.altKey) {
         e.preventDefault();
@@ -423,6 +425,7 @@ const cmGotoLineDomHandler = ViewPlugin.fromClass(class {
 const cmSaveDomHandler = ViewPlugin.fromClass(class {
   constructor(view) {
     this._handler = (e) => {
+      if (e.defaultPrevented) return;
       const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
       if (e.key === 's' && mod && !e.shiftKey && !e.altKey) {
         e.preventDefault();
@@ -434,6 +437,85 @@ const cmSaveDomHandler = ViewPlugin.fromClass(class {
   destroy() {}
 });
 
+// ── Multiple cursors, as in VS Code ─────────────────────────────────
+// Alt+click adds a cursor, Shift+Alt+drag selects a column, Cmd/Ctrl+D adds
+// the next occurrence of the selection, Cmd/Ctrl+Shift+L all of them (of
+// the word under the cursor when nothing is selected),
+// Shift+Alt+I a cursor at the end of every selected line, Cmd/Ctrl+L selects
+// the line. defaultKeymap and historyKeymap already have the rest with VS
+// Code's keys: Cmd+Alt+Up/Down (Ctrl+Alt elsewhere) a cursor above or below,
+// Esc back to one cursor, Cmd/Ctrl+U the last cursor undone, Alt+Up/Down and
+// Shift+Alt+Up/Down move and copy lines, Shift+Cmd+K deletes them, Cmd+/
+// comments them, Cmd+[ and Cmd+] indent, Shift+Cmd+\ goes to the matching
+// bracket. @replit/codemirror-vscode-keymap is not used: it replaces
+// defaultKeymap and would take Cmd+F and Ctrl+G from the find and go-to-line
+// bars above. The mobile app's editor has the same (scripts/editor-page/cursors.js).
+
+/** Shift+Alt+I: a cursor at the end of every line a selection covers. */
+function addCursorsAtLineEnds({ state, dispatch }) {
+  if (state.selection.ranges.every(range => range.empty)) return false;
+  const ranges = [];
+  for (const range of state.selection.ranges) {
+    if (range.empty) { ranges.push(range); continue; }
+    const first = state.doc.lineAt(range.from);
+    let last = state.doc.lineAt(range.to);
+    // A selection that ends at the start of a line does not take that line.
+    if (range.to === last.from && last.number > first.number) last = state.doc.line(last.number - 1);
+    for (let n = first.number; n <= last.number; n++) ranges.push(EditorSelection.cursor(state.doc.line(n).to));
+  }
+  dispatch(state.update({ selection: EditorSelection.create(ranges, ranges.length - 1), scrollIntoView: true, userEvent: 'select' }));
+  return true;
+}
+
+/** Every occurrence of the selection; with only a cursor, of the word it is in (as VS Code's Cmd+Shift+L). */
+function selectAllOccurrences(view) {
+  if (view.state.selection.main.empty && !selectNextOccurrence(view)) return false;
+  return selectSelectionMatches(view);
+}
+
+/** Esc with several cursors: back to one. With one it does nothing, so Esc still closes what is around a viewer. */
+function backToOneCursor(view) {
+  return view.state.selection.ranges.length > 1 && simplifySelection(view);
+}
+
+const multiCursorKeymap = [
+  // Also in defaultKeymap: here for the viewers, which do not have it.
+  { key: 'Mod-Alt-ArrowUp', run: addCursorAbove, preventDefault: true },
+  { key: 'Mod-Alt-ArrowDown', run: addCursorBelow, preventDefault: true },
+  { key: 'Escape', run: backToOneCursor },
+  { key: 'Mod-d', run: selectNextOccurrence, preventDefault: true },
+  { key: 'Mod-Shift-l', run: selectAllOccurrences, preventDefault: true },
+  { key: 'Mod-l', run: selectLine, preventDefault: true },
+];
+
+// Shift+Alt+I by its key, not its character: on a Mac it types ˆ, and
+// CodeMirror leaves Alt combinations there to the keyboard.
+const lineEndsKey = EditorView.domEventHandlers({
+  keydown(event, view) {
+    if (event.code !== 'KeyI' || !event.altKey || !event.shiftKey || event.metaKey || event.ctrlKey) return false;
+    if (!addCursorsAtLineEnds(view)) return false;
+    event.preventDefault();
+    return true;
+  },
+});
+
+/** Several cursors and selections, drawn, with VS Code's mouse gestures and keys. */
+function multipleCursors() {
+  return [
+    EditorState.allowMultipleSelections.of(true),
+    drawSelection(),
+    EditorView.clickAddsSelectionRange.of(event => event.altKey && !event.shiftKey),
+    rectangularSelection({ eventFilter: event => event.altKey && event.shiftKey }),
+    keymap.of(multiCursorKeymap),
+    lineEndsKey,
+  ];
+}
+
+// A read-only viewer's text takes the focus (CodeMirror leaves it not
+// focusable), so that after a click in it the keys above work there, and
+// copying takes every selection.
+const focusableText = EditorView.contentAttributes.of({ tabindex: '0' });
+
 function createPlanEditor(parent) {
   const wrapCompartment = new Compartment();
   const state = EditorState.create({
@@ -444,7 +526,7 @@ function createPlanEditor(parent) {
       highlightSpecialChars(),
       history(),
       foldGutter(),
-      drawSelection(),
+      multipleCursors(),
       indentOnInput(),
       bracketMatching(),
       highlightActiveLine(),
@@ -537,6 +619,8 @@ function createReadOnlyViewer(parent, content, filename) {
       foldGutter(),
       bracketMatching(),
       highlightSelectionMatches(),
+      multipleCursors(),
+      focusableText,
       keymap.of([...foldKeymap]),
       cmFindKeymap,
       cmFindDomHandler,
@@ -566,7 +650,7 @@ function createEditableViewer(parent, content, filename, { wrap = false } = {}) 
       highlightSpecialChars(),
       history(),
       foldGutter(),
-      drawSelection(),
+      multipleCursors(),
       indentOnInput(),
       bracketMatching(),
       highlightActiveLine(),
@@ -604,7 +688,10 @@ function createMergeViewer(parent, originalContent, modifiedContent, filename) {
     foldGutter(),
     bracketMatching(),
     highlightSelectionMatches(),
-    keymap.of([...foldKeymap]),
+    multipleCursors(),
+    focusableText,
+    // Moving and deleting act on every cursor, as typing does.
+    keymap.of([...foldKeymap, ...standardKeymap]),
     cmFindKeymap,
     cmFindDomHandler,
     cmFloatingSearch(),
@@ -644,7 +731,9 @@ function createUnifiedMergeViewer(parent, originalContent, modifiedContent, file
       foldGutter(),
       bracketMatching(),
       highlightSelectionMatches(),
-      keymap.of([...foldKeymap]),
+      multipleCursors(),
+      // Moving and deleting act on every cursor, as typing does.
+      keymap.of([...foldKeymap, ...standardKeymap]),
       cmFindKeymap,
       cmFindDomHandler,
       cmGotoLineDomHandler,
@@ -656,6 +745,7 @@ function createUnifiedMergeViewer(parent, originalContent, modifiedContent, file
       appThemePatch,
       readOnly ? EditorView.editable.of(false) : [],
       readOnly ? EditorState.readOnly.of(true) : [],
+      readOnly ? focusableText : [],
       unifiedMergeView({
         original: originalContent,
         gutter: true,
