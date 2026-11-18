@@ -1,14 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CodeEditor, type CodeEditorHandle } from '@/components/files/CodeEditor';
+import { CursorBar } from '@/components/files/CursorBar';
 import { LINE_STYLES, mono } from '@/components/git/diff-style';
+import { HeaderButton } from '@/components/HeaderButton';
+import type { EditorState } from '@/editor/bridge';
 import { lineDiff } from '@/git/history';
 import { diffLines } from '@/git/model';
-import { refreshGit, stageFiles, stageLines, useCanStage } from '@/git/stage-requests';
+import { readEditFile, refreshGit, saveEditFile, stageFiles, stageLines, useCanEdit, useCanStage, type EditFile } from '@/git/stage-requests';
+import { canEdit, editNote } from '@/shared/vendor/git-change-actions';
 import {
   diffRows, hunkPick, linesLabel, NO_PICKS, pickedLines, stageVerb, toggleHunk, toggleLine, wholeFileOnlyReason, type DiffRow, type Picked, type Side,
 } from '@/git/staging';
@@ -23,15 +28,21 @@ type SideDiff = { ok?: boolean; diff?: string; truncated?: boolean; diffId?: str
  * file between two revisions of the Git Graph (from, to). Opened from the
  * Git tab's Staged Changes or Changes (`side`), the computer's diff of that
  * side is shown with the means to stage or unstage a hunk, picked lines, or
- * the whole file.
+ * the whole file, and Edit: the file on the computer in the editor, with what
+ * differs from its staged copy marked (GitFileEditor).
  */
 export default function DiffScreen() {
-  const { projectId, folder, path, oldPath, side: sideParam, from, to } = useLocalSearchParams<{
-    projectId: string; folder: string; path: string; oldPath?: string; side?: string; from?: string; to?: string;
+  const { projectId, folder, path, oldPath, side: sideParam, from, to, code, status } = useLocalSearchParams<{
+    projectId: string; folder: string; path: string; oldPath?: string; side?: string; from?: string; to?: string; code?: string; status?: string;
   }>();
   const online = useConnection((s) => s.status.state === 'online');
+  const queryClient = useQueryClient();
   const canStage = useCanStage();
   const side: Side | null = !from && canStage && (sideParam === 'staged' || sideParam === 'unstaged') ? sideParam : null;
+  // The list says what the file is; without that (an older list) Edit stays out.
+  const change = code && status ? { path, code, status, indexStatus: code[0], worktreeStatus: code[1] } : null;
+  const editable = useCanEdit() && !!side && canEdit(change);
+  const [editing, setEditing] = useState(false);
   const result = useQuery({
     queryKey: ['diff', projectId, folder, path, from, to, side],
     queryFn: () => from
@@ -48,13 +59,30 @@ export default function DiffScreen() {
   }, [result.data, from, side]);
   const empty = !result.isLoading && !result.data?.error && !lines.length;
 
+  if (editing && change) {
+    return (
+      <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}>
+        <GitFileEditor
+          projectId={projectId}
+          folder={folder}
+          path={path}
+          note={editNote(change)}
+          onExit={() => {
+            setEditing(false);
+            refreshGit(queryClient, projectId).catch(() => {});
+          }}
+        />
+      </KeyboardAvoidingView>
+    );
+  }
+
   return (
     <View style={styles.screen}>
-      <Stack.Screen options={{ title: (path || '').split('/').pop() || 'Diff' }} />
+      <Stack.Screen options={{ title: (path || '').split('/').pop() || 'Diff', headerRight: undefined }} />
       {result.isLoading ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : null}
       {result.data?.error ? <Text style={styles.empty}>{result.data.error}</Text> : null}
       {side && !result.isLoading && !result.data?.error ? (
-        <StagingDiff projectId={projectId} folder={folder} path={path} oldPath={oldPath} side={side} data={result.data as SideDiff} />
+        <StagingDiff projectId={projectId} folder={folder} path={path} oldPath={oldPath} side={side} data={result.data as SideDiff} onEdit={editable ? () => setEditing(true) : undefined} />
       ) : (
         <>
           {empty ? <Text style={styles.empty}>No differences.</Text> : null}
@@ -71,9 +99,9 @@ export default function DiffScreen() {
   );
 }
 
-/** The diff of one side, by hunk and line, with the buttons that stage it. */
-function StagingDiff({ projectId, folder, path, oldPath, side, data }: {
-  projectId: string; folder: string; path: string; oldPath?: string; side: Side; data: SideDiff;
+/** The diff of one side, by hunk and line, with the buttons that stage it, and Edit with `onEdit`. */
+function StagingDiff({ projectId, folder, path, oldPath, side, data, onEdit }: {
+  projectId: string; folder: string; path: string; oldPath?: string; side: Side; data: SideDiff; onEdit?: () => void;
 }) {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -178,7 +206,14 @@ function StagingDiff({ projectId, folder, path, oldPath, side, data }: {
     ) : <View key={row.key} style={[styles.lineRow, style]}>{content}</View>;
   };
 
-  if (!rows.length) return <Text style={styles.empty}>{side === 'staged' ? 'Nothing is staged in this file.' : 'Nothing left to stage in this file.'}</Text>;
+  if (!rows.length) {
+    return (
+      <>
+        <Text style={styles.empty}>{side === 'staged' ? 'Nothing is staged in this file.' : 'Nothing left to stage in this file.'}</Text>
+        {onEdit ? <View style={[styles.bar, styles.barEnd, { paddingBottom: insets.bottom + spacing.md }]}><BarButton label="Edit" onPress={onEdit} /></View> : null}
+      </>
+    );
+  }
 
   return (
     <>
@@ -196,8 +231,104 @@ function StagingDiff({ projectId, folder, path, oldPath, side, data }: {
               <BarButton label="Clear" disabled={busy} onPress={() => setPicked(NO_PICKS)} />
             </>
           ) : null}
+          {onEdit ? <BarButton label="Edit" disabled={busy} onPress={onEdit} /> : null}
           <BarButton label={`${verb} file`} disabled={busy} onPress={applyFile} />
           {busy ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+        </View>
+      </View>
+    </>
+  );
+}
+
+const CLEAN: EditorState = { dirty: false, canUndo: false, canRedo: false, cursors: 1 };
+
+/**
+ * Edit mode: the file as it is on the computer, editable, with what differs
+ * from its staged copy marked as it is typed (`note` says what it is compared
+ * with). Save writes it and stays here; the edit becomes a change to stage.
+ * Exit Edit Mode goes back to the diff and drops what is not saved. A file
+ * changed on the computer since it was opened is overwritten only after asking.
+ */
+function GitFileEditor({ projectId, folder, path, note, onExit }: {
+  projectId: string; folder: string; path: string; note: string; onExit: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
+  const editor = useRef<CodeEditorHandle>(null);
+  const version = useRef('');
+  const [file, setFile] = useState<EditFile | null>(null);
+  const [error, setError] = useState('');
+  const [edit, setEdit] = useState<EditorState>(CLEAN);
+  const [saving, setSaving] = useState(false);
+  const name = path.split('/').pop() || path;
+
+  // Read once: reading again would put the computer's text over the edits.
+  useEffect(() => {
+    let cancelled = false;
+    readEditFile(projectId, folder, path)
+      .then((read) => {
+        if (cancelled) return;
+        version.current = read.version;
+        setFile(read);
+      })
+      .catch((err: any) => { if (!cancelled) setError(err?.message || String(err)); });
+    return () => { cancelled = true; };
+  }, [projectId, folder, path]);
+
+  const save = async (overwrite = false) => {
+    if (!editor.current || saving) return;
+    setSaving(true);
+    try {
+      const text = await editor.current.getText();
+      const outcome = await saveEditFile(projectId, folder, path, text, overwrite ? null : version.current);
+      if (outcome.ok) {
+        version.current = outcome.version;
+        editor.current?.saved(text);
+        // The lists, with the edit to stage.
+        await refreshGit(queryClient, projectId);
+      } else if (outcome.changed) {
+        Alert.alert(
+          `“${name}” changed on the computer`,
+          'It changed after you started editing it, perhaps by an agent. Saving puts your text in its place, and what changed there is lost.',
+          [{ text: 'Cancel', style: 'cancel' }, { text: 'Overwrite', style: 'destructive', onPress: () => { save(true).catch(() => {}); } }],
+        );
+      } else {
+        Alert.alert('Could not save', outcome.error);
+      }
+    } catch (err: any) {
+      Alert.alert('Could not save', err?.message || String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Stack.Screen
+        options={{
+          title: name,
+          headerRight: () => (
+            <View style={styles.headerButtons}>
+              <HeaderButton icon="arrow-undo-outline" accessibilityLabel="Undo" onPress={() => editor.current?.undo()} disabled={!edit.canUndo || saving} />
+              <HeaderButton icon="arrow-redo-outline" accessibilityLabel="Redo" onPress={() => editor.current?.redo()} disabled={!edit.canRedo || saving} />
+            </View>
+          ),
+        }}
+      />
+      {error ? <Text style={styles.empty}>{error}</Text> : null}
+      {!file && !error ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : null}
+      {file ? (
+        <>
+          <Text style={styles.editNote}>{note}</Text>
+          <CodeEditor ref={editor} text={file.content} base={file.base} filename={name} editable onState={setEdit} />
+          <CursorBar cursors={edit.cursors} onAction={(action) => editor.current?.cursors(action)} />
+        </>
+      ) : <View style={styles.body} />}
+      <View style={[styles.bar, { paddingBottom: insets.bottom + spacing.md }]}>
+        <View style={[styles.barButtons, styles.barEnd]}>
+          {saving ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+          <BarButton label="Exit Edit Mode" disabled={saving} onPress={onExit} />
+          {file ? <BarButton label={saving ? 'Saving…' : 'Save'} primary disabled={!edit.dirty || saving} onPress={() => { save().catch(() => {}); }} /> : null}
         </View>
       </View>
     </>
@@ -262,4 +393,7 @@ const styles = StyleSheet.create({
   barPrimary: { backgroundColor: 'rgba(128,136,255,0.22)' },
   barText: { color: colors.text, fontSize: 14.5, fontWeight: '600' },
   barTextPrimary: { color: '#e4e4fa' },
+  barEnd: { justifyContent: 'flex-end' },
+  headerButtons: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  editNote: { color: colors.textFaint, fontSize: 12, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
 });

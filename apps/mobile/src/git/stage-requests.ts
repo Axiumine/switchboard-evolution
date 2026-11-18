@@ -87,3 +87,32 @@ export async function ignorePaths(projectId: string, folder: string, paths: stri
   const result = await request<{ ok?: boolean; error?: string } | null>('ignore-project-git-paths', [projectId, folder, paths, untrack]);
   if (!result || result.error || result.ok === false) throw new Error(result?.error || 'Git could not add this to .gitignore');
 }
+
+/** Whether the computer can open a changed file for editing from its diff, and save it. */
+export function useCanEdit(): boolean {
+  const read = useCapability('read-project-git-edit-file');
+  const save = useCapability('save-project-git-edit-file');
+  return read && save;
+}
+
+/** A changed file to edit: its text on the computer, the version to save against, and the staged copy it is compared with. */
+export type EditFile = { content: string; base: string; version: string };
+
+export async function readEditFile(projectId: string, folder: string, path: string): Promise<EditFile> {
+  const result = await request<{ ok?: boolean; error?: string; content?: string; base?: string; version?: string } | null>('read-project-git-edit-file', [projectId, folder, path]);
+  if (!result || result.error || !result.ok || typeof result.content !== 'string' || typeof result.version !== 'string') {
+    throw new Error(result?.error || 'The computer could not open this file');
+  }
+  return { content: result.content, base: typeof result.base === 'string' ? result.base : result.content, version: result.version };
+}
+
+/** How a save went: the new version, or `changed` when the file changed on the computer since it was read. */
+export type EditSave = { ok: true; version: string } | { ok: false; changed: boolean; error: string };
+
+/** Save an edited file to the computer's working tree; `version` null overwrites whatever is there. */
+export async function saveEditFile(projectId: string, folder: string, path: string, text: string, version: string | null): Promise<EditSave> {
+  const result = await request<{ ok?: boolean; code?: string; error?: string; version?: string } | null>(
+    'save-project-git-edit-file', [projectId, folder, path, text, ...(version ? [version] : [])]);
+  if (result?.ok && typeof result.version === 'string') return { ok: true, version: result.version };
+  return { ok: false, changed: result?.code === 'CHANGED', error: result?.error || 'The computer could not save this file' };
+}

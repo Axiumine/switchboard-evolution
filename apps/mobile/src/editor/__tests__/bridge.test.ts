@@ -30,6 +30,8 @@ describe('a call to the editor page', () => {
     expect(runInPage(call('load', 'x', 'y', undefined)).calls).toEqual([{ fn: 'load', args: ['x', 'y', undefined] }]);
     expect(runInPage(call('setEditable', true)).calls).toEqual([{ fn: 'setEditable', args: [true] }]);
     expect(runInPage(call('cursors', 'next')).calls).toEqual([{ fn: 'cursors', args: ['next'] }]);
+    expect(runInPage(call('saved', 'a\nb')).calls).toEqual([{ fn: 'saved', args: ['a\nb'] }]);
+    expect(runInPage(call('load', 'x', 'a.js', { line: null, wrap: false, base: 'old' })).calls).toEqual([{ fn: 'load', args: ['x', 'a.js', { line: null, wrap: false, base: 'old' }] }]);
   });
 });
 

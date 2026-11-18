@@ -8,6 +8,9 @@
 //   state { dirty, canUndo, canRedo, cursors }
 //                                    after every change of these
 //   text { id, text }                the answer to getText(id)
+//
+// load(text, filename, { base }) marks, as the text is edited, what differs
+// from `base`: the Git tab edits a changed file against its staged copy.
 
 import { EditorView, keymap, lineNumbers, highlightSpecialChars, Decoration } from '@codemirror/view';
 import { EditorState, Compartment, StateEffect, StateField, Prec } from '@codemirror/state';
@@ -31,6 +34,7 @@ import { diff } from '@codemirror/legacy-modes/mode/diff';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
+import { unifiedMergeView } from '@codemirror/merge';
 
 import { CURSOR_ACTIONS, multipleCursors } from './cursors.js';
 
@@ -126,7 +130,12 @@ const wrapCompartment = new Compartment();
 
 let editable = false;
 let original = '';
-let shown = { filename: '', wrap: false };
+let shown = { filename: '', wrap: false, base: null };
+
+/** The changes from `base` in the text itself, as they are typed: added lines marked, removed ones shown between. */
+const compareWith = (base) => (typeof base === 'string'
+  ? unifiedMergeView({ original: base, mergeControls: false, gutter: true, highlightChanges: true, syntaxHighlightDeletions: true })
+  : []);
 let lastState = '';
 
 const editableExtension = (on) => [EditorView.editable.of(on), EditorState.readOnly.of(!on)];
@@ -145,7 +154,7 @@ function postState(state) {
   post(message);
 }
 
-function createState(text, filename, wrap) {
+function createState(text, filename, wrap, base) {
   return EditorState.create({
     doc: text,
     extensions: [
@@ -160,6 +169,7 @@ function createState(text, filename, wrap) {
       languageCompartment.of(languageFor(filename)),
       wrapCompartment.of(wrap ? EditorView.lineWrapping : []),
       editableCompartment.of(editableExtension(editable)),
+      compareWith(base),
       markField,
       dracula,
       appTheme,
@@ -175,10 +185,10 @@ const view = new EditorView({ state: createState('', '', false), parent: documen
 
 /** Shows a file: its text, highlighted by its name; `line` marks a line and scrolls it into view. */
 function load(text, filename, options) {
-  const { line = null, wrap = false } = options || {};
+  const { line = null, wrap = false, base = null } = options || {};
   original = text;
-  shown = { filename, wrap };
-  view.setState(createState(text, filename, wrap));
+  shown = { filename, wrap, base };
+  view.setState(createState(text, filename, wrap, base));
   lastState = '';
   postState(view.state);
   if (Number.isInteger(line) && line >= 1 && line <= view.state.doc.lines) {
@@ -209,7 +219,7 @@ function setEditable(on) {
 /** Back to the text as it was loaded, where the reader is now. */
 function revert() {
   const scrollTop = view.scrollDOM.scrollTop;
-  view.setState(createState(original, shown.filename, shown.wrap));
+  view.setState(createState(original, shown.filename, shown.wrap, shown.base));
   view.scrollDOM.scrollTop = scrollTop;
   lastState = '';
   postState(view.state);
@@ -228,10 +238,18 @@ function cursors(action) {
   view.focus();
 }
 
+/** `text` was saved: it is the new clean text (dirty again only if the editor has changed since), with the history kept. */
+function saved(text) {
+  original = typeof text === 'string' ? text : view.state.doc.toString();
+  lastState = '';
+  postState(view.state);
+}
+
 window.sb = {
   load,
   setEditable,
   revert,
+  saved,
   cursors,
   undo: () => undo(view),
   redo: () => redo(view),

@@ -16,7 +16,7 @@ export type EditorMessage =
   | ({ type: 'state' } & EditorState)
   | { type: 'text'; id: number; text: string };
 
-export type EditorCall = 'load' | 'setEditable' | 'revert' | 'undo' | 'redo' | 'getText' | 'cursors';
+export type EditorCall = 'load' | 'setEditable' | 'revert' | 'saved' | 'undo' | 'redo' | 'getText' | 'cursors';
 
 /**
  * The script that calls window.sb[fn](...args) in the page. Each argument

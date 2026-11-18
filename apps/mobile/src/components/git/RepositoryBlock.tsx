@@ -34,7 +34,11 @@ export function RepositoryBlock({ projectId, repo, tree, canStage, onOpenHistory
 
   const openDiff = (change: Change, side: Side | null) => router.push({
     pathname: '/diff',
-    params: { projectId, folder: repo.path, path: change.path, ...(side ? { side } : {}), ...(change.oldPath ? { oldPath: change.oldPath } : {}) },
+    params: {
+      projectId, folder: repo.path, path: change.path, ...(side ? { side } : {}), ...(change.oldPath ? { oldPath: change.oldPath } : {}),
+      // What Edit needs to know: whether the file is on disk, and what it is compared with.
+      ...(change.code ? { code: change.code } : {}), ...(change.status ? { status: change.status } : {}),
+    },
   });
 
   /** Stage or unstage files (null: every change), then read the changes again. */

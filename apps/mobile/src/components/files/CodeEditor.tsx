@@ -23,20 +23,24 @@ export type CodeEditorHandle = {
   revert(): void;
   /** A command of the cursor bar: next or all occurrences, a cursor above or below, back to one. */
   cursors(action: CursorAction): void;
+  /** `text` (from getText) was saved: the editor is clean unless it changed since, its history kept. */
+  saved(text: string): void;
 };
 
 /**
  * A file's text in CodeMirror (scripts/editor-page/page.js in a WebView):
  * highlighted by the file's name, with line numbers, read-only or editable.
  * `line` marks a line and opens the file scrolled to it. A new `text` (the
- * saved file read back) shows that text and starts its history again.
+ * saved file read back) shows that text and starts its history again. With
+ * `base`, what differs from it is marked in the text as it is edited.
  */
-export function CodeEditor({ text, filename, editable, line, wrap = false, onState, ref }: {
+export function CodeEditor({ text, filename, editable, line, wrap = false, base, onState, ref }: {
   text: string;
   filename: string;
   editable: boolean;
   line?: number;
   wrap?: boolean;
+  base?: string;
   onState?: (state: EditorState) => void;
   ref?: Ref<CodeEditorHandle>;
 }) {
@@ -58,9 +62,9 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, onSta
   }, []);
 
   useEffect(() => {
-    shown.current.load = call('load', text, filename, { line: line ?? null, wrap });
+    shown.current.load = call('load', text, filename, { line: line ?? null, wrap, base: base ?? null });
     run(shown.current.load);
-  }, [text, filename, line, wrap, run]);
+  }, [text, filename, line, wrap, base, run]);
   useEffect(() => {
     shown.current.editable = call('setEditable', editable);
     run(shown.current.editable);
@@ -80,6 +84,7 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, onSta
     redo: () => run(call('redo')),
     revert: () => run(call('revert')),
     cursors: (action) => run(call('cursors', action)),
+    saved: (text) => run(call('saved', text)),
   }), [run]);
 
   const onMessage = useCallback((event: WebViewMessageEvent) => {
