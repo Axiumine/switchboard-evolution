@@ -16,6 +16,8 @@ export type Session = {
   runtime?: string | null;
   type?: string;
   starred?: number;
+  /** A pinned session's star color, an index into STAR_TINTS (star-tints.js); none from an older desktop. */
+  starTint?: number | null;
   archived?: number;
   projectId?: string | null;
   trackId?: string | null;

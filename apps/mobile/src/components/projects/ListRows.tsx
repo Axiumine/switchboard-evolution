@@ -7,6 +7,7 @@ import { STATE_COLORS } from '@/components/SessionRow';
 import { markTint, projectInitials, trackTint, type DrawerGroup } from '@/projects/drawer';
 import type { Project, RowStat } from '@/projects/model';
 import { cliLabel, relativeTime, sessionTitle, shortProjectPath, type RowState, type Session } from '@/sessions/model';
+import { starTintColor } from '@/shared/vendor/star-tints';
 import { colors, spacing } from '@/theme';
 
 // The rows of the Projects tab, drawn as the desktop's sidebar draws them
@@ -232,20 +233,23 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
         style={({ pressed }) => [styles.session, archived && styles.dim, here && styles.here, pressed && styles.pressed]}
         accessibilityRole="button"
         accessibilityState={{ selected: !!here }}
-        accessibilityLabel={`${sessionTitle(session)}, ${words.filter(Boolean).join(', ')}`}
+        accessibilityLabel={`${sessionTitle(session)}, ${[...words, session.starred ? 'pinned' : null].filter(Boolean).join(', ')}`}
       >
-        <Text style={[styles.sessionTitle, state === 'unread' && styles.unread]} numberOfLines={1}>{sessionTitle(session)}</Text>
-        <View style={styles.sessionMeta}>
-          {lit ? <View style={[styles.smallDot, { backgroundColor: STATE_COLORS[state] }]} /> : null}
-          {showTrack && tint ? (
-            <Text style={[styles.tag, { color: tint.fg, backgroundColor: tint.bg }]} numberOfLines={1}>{track?.name ?? 'General'}</Text>
-          ) : null}
-          <Text style={[styles.sessionMetaText, (state === 'attention' || state === 'unread') && { color: STATE_COLORS[state] }]} numberOfLines={1}>
-            {[lit ? STATE_WORDS[state] : null, cliLabel(session), when].filter(Boolean).join(' · ')}
-            {session.messageCount ? ` · ${session.messageCount} msgs` : ''}
-          </Text>
-          {session.starred ? <Text style={styles.star}>★</Text> : null}
+        <View style={styles.sessionText}>
+          <Text style={[styles.sessionTitle, state === 'unread' && styles.unread]} numberOfLines={1}>{sessionTitle(session)}</Text>
+          <View style={styles.sessionMeta}>
+            {lit ? <View style={[styles.smallDot, { backgroundColor: STATE_COLORS[state] }]} /> : null}
+            {showTrack && tint ? (
+              <Text style={[styles.tag, { color: tint.fg, backgroundColor: tint.bg }]} numberOfLines={1}>{track?.name ?? 'General'}</Text>
+            ) : null}
+            <Text style={[styles.sessionMetaText, (state === 'attention' || state === 'unread') && { color: STATE_COLORS[state] }]} numberOfLines={1}>
+              {[lit ? STATE_WORDS[state] : null, cliLabel(session), when].filter(Boolean).join(' · ')}
+              {session.messageCount ? ` · ${session.messageCount} msgs` : ''}
+            </Text>
+          </View>
         </View>
+        {/* At the right of the row, as on the Sessions tab, in the session's own color. */}
+        {session.starred ? <Text style={[styles.star, { color: starTintColor(session.starTint, session.sessionId) }]}>★</Text> : null}
       </Pressable>
     </Card>
   );
@@ -301,7 +305,8 @@ const styles = StyleSheet.create({
   folder: { minHeight: 40, paddingTop: 6, paddingBottom: 6, borderRadius: 7 },
   folderTitle: { color: colors.textDim, fontSize: 12.5, fontWeight: '600', flexShrink: 1 },
 
-  session: { paddingHorizontal: spacing.sm + 2, paddingVertical: 8, gap: 3, borderRadius: 7, minHeight: 48, justifyContent: 'center' },
+  session: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm + 2, paddingVertical: 8, borderRadius: 7, minHeight: 48 },
+  sessionText: { flex: 1, minWidth: 0, gap: 3 },
   here: { backgroundColor: 'rgba(128,136,255,0.16)', borderLeftWidth: 2, borderLeftColor: colors.accent },
   sessionTitle: { color: '#c8c8dc', fontSize: 14.5 },
   unread: { color: colors.unread, fontWeight: '600' },
@@ -309,5 +314,5 @@ const styles = StyleSheet.create({
   smallDot: { width: 7, height: 7, borderRadius: 4 },
   tag: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, overflow: 'hidden', maxWidth: 120 },
   sessionMetaText: { color: '#7a7a90', fontSize: 11.5, flexShrink: 1 },
-  star: { color: colors.accent, fontSize: 12 },
+  star: { fontSize: 14, paddingStart: 2 },
 });

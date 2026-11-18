@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Alert } from 'react-native';
 
-import { queryClient } from '@/remote/query';
 import { cleanDisplayName, sessionState, sessionTitle, type Session } from '@/sessions/model';
+import { refreshSessionLists } from '@/sessions/refresh';
 import { request, useConnection } from '@/store/connection';
 import { Sheet, type SheetOption } from './Sheet';
 import { TextPrompt } from './TextPrompt';
@@ -18,7 +18,8 @@ async function run(action: Promise<unknown>) {
   } catch (err: any) {
     Alert.alert('That did not work', err?.message || String(err));
   } finally {
-    queryClient.invalidateQueries({ queryKey: ['projects'] });
+    // The Projects tab and the project pages too, not only the Sessions tab.
+    refreshSessionLists();
   }
 }
 

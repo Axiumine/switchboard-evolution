@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { cliLabel, relativeTime, sessionTitle, type RowState, type Session } from '@/sessions/model';
+import { starTintColor } from '@/shared/vendor/star-tints';
 import { LeaveOutButton } from './SearchStopBar';
 import { colors, spacing } from '@/theme';
 
@@ -38,7 +39,7 @@ export const SessionRow = memo(function SessionRow({ session, state, onPress, on
       onLongPress={() => onLongPress(session)}
       style={({ pressed }) => [styles.row, inset && styles.inset, pressed && styles.pressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${sessionTitle(session)}, ${meta.join(', ')}`}
+      accessibilityLabel={`${sessionTitle(session)}, ${meta.join(', ')}${session.starred ? ', pinned' : ''}`}
     >
       <View style={[styles.dot, { backgroundColor: STATE_COLORS[state], borderColor: state === 'idle' ? colors.border : STATE_COLORS[state] }]} />
       <View style={styles.text}>
@@ -49,7 +50,8 @@ export const SessionRow = memo(function SessionRow({ session, state, onPress, on
           {meta.join(' · ')}
         </Text>
       </View>
-      {session.starred ? <Text style={styles.star}>★</Text> : null}
+      {/* Each pinned session in its own color, so several tell apart. */}
+      {session.starred ? <Text style={[styles.star, { color: starTintColor(session.starTint, session.sessionId) }]}>★</Text> : null}
       {onLeaveOut ? <LeaveOutButton label={sessionTitle(session)} onPress={() => onLeaveOut(session)} /> : null}
     </Pressable>
   );
@@ -73,5 +75,5 @@ const styles = StyleSheet.create({
   // Finished while nobody was looking, as the desktop shows it.
   unread: { color: colors.unread, fontWeight: '600' },
   meta: { color: colors.textFaint, fontSize: 12 },
-  star: { color: colors.accent, fontSize: 14 },
+  star: { fontSize: 14 },
 });
