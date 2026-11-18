@@ -1,3 +1,6 @@
+// Copied from packages/shared/star-tints.js by scripts/sync-shared.mjs.
+// Do not edit: change it in packages/shared and run npm run sync-shared.
+
 // star-tints.js — the color of a pinned session's star. Each pin gets its own
 // tint, so several pinned sessions tell apart at a glance: db.js picks one
 // when a session is pinned (pickStarTint, among the colors the other pinned
