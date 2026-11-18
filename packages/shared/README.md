@@ -10,6 +10,7 @@ Modules both apps use, written once here:
 - `git-diff-model.js`, `text-search.js`, `file-icons.js`: staging part of a diff, find and replace, file icons.
 - `usage-chart.js`: the Task Manager's memory and disk rings and the status bar's RAM and disk line.
 - `file-selection.js`: ticking files in the Files tab and trashing them together.
+- `git-change-actions.js`: discarding changes and adding to `.gitignore` from the Git tab's Changes, with the dialog texts.
 
 Each one runs as a classic browser script, a CommonJS module and an ES import, so for now the apps keep a copy:
 the desktop in `public/` (and `remote-protocol.js` at its root), the mobile app in `src/shared/vendor/` with the

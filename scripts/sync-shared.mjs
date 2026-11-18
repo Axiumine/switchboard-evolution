@@ -27,6 +27,7 @@ const modules = {
   'file-icons.js': 'apps/desktop/public/file-icons.js',
   'usage-chart.js': 'apps/desktop/public/usage-chart.js',
   'file-selection.js': 'apps/desktop/public/file-selection.js',
+  'git-change-actions.js': 'apps/desktop/public/git-change-actions.js',
 };
 
 const header = (file) =>

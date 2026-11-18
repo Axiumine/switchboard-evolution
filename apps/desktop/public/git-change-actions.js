@@ -1,3 +1,6 @@
+// Copied from packages/shared/git-change-actions.js by scripts/sync-shared.mjs.
+// Do not edit: change it in packages/shared and run npm run sync-shared.
+
 // git-change-actions.js — what the Git tab's Changes list may do to a file or
 // a folder beyond staging: discard its working-tree changes (an untracked
 // file goes to the Trash), add it to .gitignore, or add it and stop tracking
