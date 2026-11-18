@@ -342,10 +342,17 @@ async function gitCommonDir(dir) {
   return path.resolve(dir, out);
 }
 
-/** Branch, whether anything is modified or untracked, and ahead/behind upstream. */
-async function status(dir) {
+/**
+ * Branch, whether anything is modified or untracked, and ahead/behind
+ * upstream. With `withPaths`, also `changed`: the changed paths, relative to
+ * the worktree's root (an untracked folder as one).
+ */
+async function status(dir, { withPaths = false } = {}) {
   const branch = await run(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
-  const porcelain = await run(['status', '--porcelain'], dir);
+  // -z keeps unusual names whole, and runRaw the leading space of the first record.
+  const porcelain = withPaths
+    ? await runRaw(['status', '--porcelain=v1', '-z'], dir)
+    : await run(['status', '--porcelain'], dir);
   let ahead = null;
   let behind = null;
   try {
@@ -353,7 +360,9 @@ async function status(dir) {
     const [b, a] = counts.split(/\s+/).map(Number);
     if (Number.isFinite(a) && Number.isFinite(b)) { ahead = a; behind = b; }
   } catch {}
-  return { branch, dirty: porcelain.length > 0, ahead, behind };
+  const result = { branch, dirty: porcelain.length > 0, ahead, behind };
+  if (withPaths) result.changed = parsePorcelain(porcelain).map(change => change.path);
+  return result;
 }
 
 const CONFLICT_CODES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);

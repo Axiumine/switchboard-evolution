@@ -141,6 +141,9 @@ test('the tab lists every repository of a workspace folder with its worktrees an
     const other = path.join(t.base, 'somewhere');
     gitIn(t.app, 'worktree', 'add', '-q', '-b', 'other', other);
     fs.writeFileSync(path.join(other, 'scratch.txt'), 'wip\n');
+    // Written "tomorrow": the last modification is the file's, not the commit's.
+    const later = new Date(Date.now() + 24 * 3600 * 1000);
+    fs.utimesSync(path.join(other, 'scratch.txt'), later, later);
 
     const result = await worktrees.listProjectWorktrees(t.projectId);
     assert.equal(result.ok, true);
@@ -163,6 +166,10 @@ test('the tab lists every repository of a workspace folder with its worktrees an
     assert.equal(otherRow.branch, 'other');
     assert.equal(otherRow.lastCommit.subject, 'init');
     assert.ok(otherRow.created > 0);
+    assert.equal(Math.round(otherRow.modified / 1000), Math.round(later.getTime() / 1000), 'the changed file is the latest change');
+    // A clean worktree: its last commit, or its creation when that is later.
+    const loginRow = app.worktrees.find(item => item.path === created.worktree.path);
+    assert.equal(loginRow.modified, Math.max(loginRow.lastCommit.time, loginRow.created));
     assert.equal(app.worktrees.find(item => item.path === codex).detached, true);
     assert.equal(repos.get('lib').worktrees.length, 1);
     assert.equal(result.settings.pathTemplate, worktrees.DEFAULT_PATH_TEMPLATE);

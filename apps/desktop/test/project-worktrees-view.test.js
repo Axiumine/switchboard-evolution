@@ -54,6 +54,63 @@ test('sorting keeps the main worktree first and puts unknown creation times last
   assert.deepEqual(order('createdAsc'), ['main', 'alpha', 'beta', 'fix']);
 });
 
+test('sorting by last modification and by uncommitted changes', () => {
+  const ctx = loadContext();
+  const a = wt('/w/a', { branch: 'a', modified: 300 });
+  const b = wt('/w/b', { branch: 'b', modified: 100, dirty: true });
+  const c = wt('/w/c', { branch: 'c', modified: null });
+  const d = wt('/w/d', { branch: 'd', modified: 200, dirty: true });
+  const list = [a, b, main, c, d];
+  const order = (o) => plain(ctx.wtSortWorktrees(list, o).map(item => item.branch));
+  assert.deepEqual(order('modifiedDesc'), ['main', 'a', 'd', 'b', 'c']);
+  assert.deepEqual(order('modifiedAsc'), ['main', 'b', 'd', 'a', 'c']);
+  // Those with changes first, each part newest first.
+  assert.deepEqual(order('changesFirst'), ['main', 'd', 'b', 'a', 'c']);
+  // Every order the combo offers is one the sort knows.
+  for (const [key] of vm.runInContext('WT_SORT_ORDERS', ctx)) assert.equal(ctx.wtSortWorktrees([a, b], key).length, 2);
+});
+
+test('the filter keeps the worktrees it names, the main one included, and hides repositories left empty', () => {
+  const ctx = loadContext();
+  const dirty = wt('/w/app.worktrees/dirty', { branch: 'dirty', dirty: true, ahead: 0 });
+  const ahead = wt('/w/app.worktrees/ahead', { branch: 'ahead', ahead: 2, attached: true });
+  const gone = wt('/w/app.worktrees/gone', { branch: 'gone', exists: false, locked: true });
+  const codex = wt('/w/codex/app', { branch: 'cx', kind: 'codex' });
+  const project = wt('/p/repos/app', { branch: 'pr', kind: 'switchboard', attached: true });
+  const repos = [
+    { id: 'a', name: 'app', mainPath: '/w/app', worktrees: [{ ...main, dirty: true }, dirty, ahead, gone, claude, codex, project] },
+    { id: 'b', name: 'lib', mainPath: '/w/lib', worktrees: [wt('/w/lib', { isMain: true, branch: 'main', kind: 'main' })] },
+  ];
+  const running = new Map([['/w/app.worktrees/ahead', [{ sessionId: 's' }]]]);
+  const shown = (filter) => plain(ctx.wtVisibleRepositories(repos, '', 'default', filter, running)
+    .map(g => [g.repo.name, g.worktrees.map(w => w.branch)]));
+  assert.deepEqual(shown('all'), [['app', ['main', 'dirty', 'ahead', 'gone', 'fix', 'cx', 'pr']], ['lib', ['main']]]);
+  assert.deepEqual(shown('changes'), [['app', ['main', 'dirty']]]);
+  assert.deepEqual(shown('unpushed'), [['app', ['ahead']]]);
+  assert.deepEqual(shown('running'), [['app', ['ahead']]]);
+  assert.deepEqual(shown('attached'), [['app', ['ahead', 'pr']]]);
+  assert.deepEqual(shown('unattached'), [['app', ['main', 'dirty', 'gone', 'fix', 'cx']], ['lib', ['main']]]);
+  assert.deepEqual(shown('locked'), [['app', ['gone']]]);
+  assert.deepEqual(shown('missing'), [['app', ['gone']]]);
+  assert.deepEqual(shown('claude'), [['app', ['fix']]]);
+  assert.deepEqual(shown('codex'), [['app', ['cx']]]);
+  assert.deepEqual(shown('switchboard'), [['app', ['pr']]]);
+  // The search narrows what the filter keeps.
+  assert.deepEqual(plain(ctx.wtVisibleRepositories(repos, 'pr', 'default', 'attached', running).map(g => g.worktrees.map(w => w.branch))), [['pr']]);
+  // Every filter the combo offers is one the list knows.
+  for (const [key] of vm.runInContext('WT_FILTERS', ctx)) assert.equal(typeof ctx.wtFilterMatches(dirty, key, running), 'boolean');
+});
+
+test('nothing left by the filter says which filter, with a way back to all', () => {
+  const ctx = loadContext();
+  const state = ctx.wtTabState('p1');
+  state.repositories = [{ id: 'a', name: 'app', mainPath: '/w/app', worktrees: [main, beta] }];
+  state.filter = 'locked';
+  const html = ctx.wtListHtml({ id: 'p1' }, state);
+  assert.match(html, /No worktree is locked/);
+  assert.match(html, /data-act="show-all"/);
+});
+
 test('filtering matches branch, folder, kind and state, and a repository name keeps all its rows', () => {
   const ctx = loadContext();
   const repos = [
@@ -112,6 +169,17 @@ test('a row shows the label, badges, state and the full path in its tooltip, esc
   const detached = ctx.wtRowHtml(wt('/w/d', { detached: true, head: '0123456789abcdef' }), 'w2', []);
   assert.match(detached, />01234567</);
   assert.match(detached, />Detached</);
+});
+
+test('a row shows when it was last modified, or created while sorted by that, with all three in its tooltip', () => {
+  const ctx = loadContext({ formatDate: (d) => `at ${d.getTime()}` });
+  const item = wt('/w/x', { branch: 'x', dirty: false, modified: 3000, created: 1000, lastCommit: { subject: 'Init', time: 2000 } });
+  const row = ctx.wtRowHtml(item, 'w0', []);
+  assert.match(row, /class="wt-last" title="Last modified [^"]*\nLast commit [^"]*: Init\nCreated /);
+  assert.match(row, />at 3000</);
+  assert.match(ctx.wtRowHtml(item, 'w0', [], null, 'createdDesc'), />created at 1000</);
+  // From an older main, with no last modification: the last commit.
+  assert.match(ctx.wtRowHtml({ ...item, modified: undefined }, 'w0', []), />at 2000</);
 });
 
 test('a row names its folder relative to the one that holds the repository', () => {

@@ -108,3 +108,15 @@ test('list-env-files from a phone needs a project and an absolute folder', async
   assert.match((await api.call('list-env-files', ['/code/app'])).error, /Wrong parameter/);
   assert.match((await api.call('list-env-files', ['p1', 'code/app'])).error, /Wrong parameter 2/);
 });
+
+test('a phone may choose every order the desktop knows', async () => {
+  // worktrees.js needs the database to load; its list is read from the source.
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../worktrees.js'), 'utf8');
+  const orders = [...source.match(/const SORT_ORDERS = new Set\(\[([^\]]*)\]\)/)[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+  assert.ok(orders.includes('modifiedDesc'));
+  const { api, calls } = setup();
+  for (const sortOrder of orders) {
+    assert.deepEqual(await api.call('set-worktree-settings', ['p1', { sortOrder }]), { result: { ok: true } }, sortOrder);
+  }
+  assert.equal(calls.length, orders.length);
+});

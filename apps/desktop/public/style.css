@@ -6226,7 +6226,11 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
   font: inherit;
   font-size: 12px;
 }
-.wt-sort { width: auto; height: 30px; }
+.wt-sort,
+.wt-filter { width: auto; height: 30px; }
+.wt-search { min-width: 140px; }
+/* A filter on: its combo says so, as some worktrees are out of sight. */
+.wt-filter.is-on { border-color: rgba(120,130,255,0.55); color: #c8ccff; }
 
 .wt-notice {
   display: flex;

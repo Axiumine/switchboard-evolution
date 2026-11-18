@@ -26,7 +26,9 @@ const { buildPtyEnv } = require('./pty-env');
 const SETTINGS_PREFIX = 'worktrees:';
 const DEFAULT_PATH_TEMPLATE = '$BASE_PATH.worktrees/$REF_NAME';
 const START_OPTIONS = new Set(['none', 'claude', 'codex', 'terminal']);
-const SORT_ORDERS = new Set(['default', 'nameAsc', 'nameDesc', 'createdDesc', 'createdAsc']);
+const SORT_ORDERS = new Set(['default', 'modifiedDesc', 'modifiedAsc', 'createdDesc', 'createdAsc', 'nameAsc', 'nameDesc', 'changesFirst']);
+// Changed files looked at for a worktree's last modification; past these, the rest are left out.
+const MODIFIED_STAT_LIMIT = 500;
 const CREATE_MODES = new Set(['new', 'existing', 'remote', 'detached']);
 const PATTERN_MAX = 50;
 const PATTERN_LENGTH_MAX = 200;
@@ -246,6 +248,21 @@ function createdAt(worktreePath) {
   }
 }
 
+/**
+ * When a worktree was last worked on: the latest of its last commit, a file
+ * changed since (from git status), and its creation. A deleted file leaves no
+ * time to read and is not counted.
+ */
+function lastModifiedAt(worktreePath, changed, last, created) {
+  let latest = Math.max(last?.time || 0, created || 0);
+  for (const relative of (changed || []).slice(0, MODIFIED_STAT_LIMIT)) {
+    try {
+      latest = Math.max(latest, fs.lstatSync(path.join(worktreePath, relative)).mtimeMs);
+    } catch {}
+  }
+  return latest || null;
+}
+
 async function describeWorktree(project, folders, mainPath, worktree) {
   const exists = isDirectory(worktree.path);
   const folder = folders.find(f => samePath(f.path, worktree.path)) || null;
@@ -264,9 +281,10 @@ async function describeWorktree(project, folders, mainPath, worktree) {
     behind: null,
     lastCommit: null,
     created: null,
+    modified: null,
   };
   if (!exists || worktree.bare) return info;
-  const [status, last] = await Promise.all([git.status(worktree.path).catch(() => null), git.lastCommit(worktree.path)]);
+  const [status, last] = await Promise.all([git.status(worktree.path, { withPaths: true }).catch(() => null), git.lastCommit(worktree.path)]);
   if (status) {
     info.dirty = status.dirty;
     info.ahead = status.ahead;
@@ -274,6 +292,7 @@ async function describeWorktree(project, folders, mainPath, worktree) {
   }
   info.lastCommit = last;
   info.created = createdAt(worktree.path);
+  info.modified = lastModifiedAt(worktree.path, status?.changed, last, info.created);
   return info;
 }
 

@@ -7,12 +7,32 @@
 
 const projectWorktreesTabState = new Map();
 
+// The main worktree stays first in every order. Last modified is the latest
+// of its last commit, a file changed since, and its creation (worktrees.js).
 const WT_SORT_ORDERS = [
   ['default', 'Git order'],
+  ['modifiedDesc', 'Last modified, newest first'],
+  ['modifiedAsc', 'Last modified, oldest first'],
+  ['createdDesc', 'Created, newest first'],
+  ['createdAsc', 'Created, oldest first'],
   ['nameAsc', 'Name, A to Z'],
   ['nameDesc', 'Name, Z to A'],
-  ['createdDesc', 'Newest first'],
-  ['createdAsc', 'Oldest first'],
+  ['changesFirst', 'Uncommitted changes first'],
+];
+
+// Which worktrees to show: [key, label in the combo, what an empty list says].
+const WT_FILTERS = [
+  ['all', 'All worktrees', 'No worktrees'],
+  ['changes', 'With uncommitted changes', 'No worktree has uncommitted changes'],
+  ['unpushed', 'With unpushed commits', 'No worktree has unpushed commits'],
+  ['running', 'With a running session', 'No session runs in a worktree'],
+  ['attached', 'Attached to the project', 'No worktree is attached to the project'],
+  ['unattached', 'Not attached', 'Every worktree is attached to the project'],
+  ['locked', 'Locked', 'No worktree is locked'],
+  ['missing', 'Folder missing', 'No worktree folder is missing'],
+  ['claude', 'Made by Claude', 'No worktree was made by Claude'],
+  ['codex', 'Made by Codex', 'No worktree was made by Codex'],
+  ['switchboard', 'Made by this project', 'No worktree was made by this project'],
 ];
 
 const WT_START_OPTIONS = [
@@ -58,6 +78,8 @@ function wtTabState(projectId) {
       repositories: null,
       settings: null,
       query: '',
+      // The filter combo's choice, kept while the app runs (not saved).
+      filter: 'all',
       notice: null,
       rows: new Map(),  // row key → { repo, wt }, rebuilt on every paint
       request: 0,
@@ -113,17 +135,37 @@ function wtSortWorktrees(worktrees, order) {
   const main = worktrees.filter(wt => wt.isMain);
   const rest = worktrees.filter(wt => !wt.isMain);
   const byName = (a, b) => wtLabel(a).localeCompare(wtLabel(b), undefined, { numeric: true, sensitivity: 'base' });
-  const byCreated = (direction) => (a, b) => {
-    if (a.created == null && b.created == null) return 0;
-    if (a.created == null) return 1;
-    if (b.created == null) return -1;
-    return direction * (a.created - b.created);
+  const byTime = (field, direction) => (a, b) => {
+    if (a[field] == null && b[field] == null) return 0;
+    if (a[field] == null) return 1;
+    if (b[field] == null) return -1;
+    return direction * (a[field] - b[field]);
   };
   if (order === 'nameAsc') rest.sort(byName);
   else if (order === 'nameDesc') rest.sort((a, b) => byName(b, a));
-  else if (order === 'createdDesc') rest.sort(byCreated(-1));
-  else if (order === 'createdAsc') rest.sort(byCreated(1));
+  else if (order === 'createdDesc') rest.sort(byTime('created', -1));
+  else if (order === 'createdAsc') rest.sort(byTime('created', 1));
+  else if (order === 'modifiedDesc') rest.sort(byTime('modified', -1));
+  else if (order === 'modifiedAsc') rest.sort(byTime('modified', 1));
+  else if (order === 'changesFirst') rest.sort((a, b) => (!!b.dirty - !!a.dirty) || byTime('modified', -1)(a, b));
   return [...main, ...rest];
+}
+
+/** Whether the filter combo's choice keeps `wt`. `running` maps a worktree's path to its running sessions. */
+function wtFilterMatches(wt, filter, running = null) {
+  switch (filter) {
+    case 'changes': return !!wt.dirty;
+    case 'unpushed': return (wt.ahead || 0) > 0;
+    case 'running': return (running?.get(wt.path) || []).length > 0;
+    case 'attached': return !!wt.attached;
+    case 'unattached': return !wt.attached;
+    case 'locked': return !!wt.locked;
+    case 'missing': return !wt.exists;
+    case 'claude':
+    case 'codex':
+    case 'switchboard': return wt.kind === filter;
+    default: return true;
+  }
 }
 
 function wtMatches(wt, query) {
@@ -135,16 +177,19 @@ function wtMatches(wt, query) {
 
 /**
  * The repositories to paint, each with its worktrees filtered and sorted. A
- * query that names a repository keeps all its worktrees; a repository with
- * nothing left is hidden while filtering.
+ * query that names a repository keeps all its worktrees the filter combo
+ * keeps; a repository with nothing left is hidden while filtering.
  */
-function wtVisibleRepositories(repositories, query, order) {
+function wtVisibleRepositories(repositories, query, order, filter = 'all', running = null) {
   const q = String(query || '').trim().toLowerCase();
+  const filtering = !!filter && filter !== 'all';
   return (repositories || []).map((repo) => {
     const repoMatches = q && (repo.name.toLowerCase().includes(q) || repo.mainPath.toLowerCase().includes(q));
-    const worktrees = (repo.worktrees || []).filter(wt => !q || repoMatches || wtMatches(wt, q));
+    const worktrees = (repo.worktrees || [])
+      .filter(wt => !q || repoMatches || wtMatches(wt, q))
+      .filter(wt => !filtering || wtFilterMatches(wt, filter, running));
     return { repo, worktrees: wtSortWorktrees(worktrees, order) };
-  }).filter(group => !q || group.worktrees.length || group.repo.name.toLowerCase().includes(q));
+  }).filter(group => group.worktrees.length || (!filtering && (!q || group.repo.name.toLowerCase().includes(q))));
 }
 
 /**
@@ -189,17 +234,32 @@ function wtBadgesHtml(wt) {
   return badges.join('');
 }
 
-function wtStatusHtml(wt, live) {
+/**
+ * The time a row shows: when it was created while the list is sorted by
+ * that, else when it was last modified (its last commit for a worktree read
+ * by an older main). The tooltip has all three.
+ */
+function wtTimeHtml(wt, order) {
+  const byCreated = order === 'createdDesc' || order === 'createdAsc';
+  const modified = wt.modified || wt.lastCommit?.time || null;
+  const shown = byCreated ? wt.created : modified;
+  if (!shown) return '';
+  const lines = [];
+  if (modified) lines.push(`Last modified ${new Date(modified).toLocaleString()}`);
+  if (wt.lastCommit?.time) lines.push(`Last commit ${new Date(wt.lastCommit.time).toLocaleString()}: ${wt.lastCommit.subject}`);
+  if (wt.created) lines.push(`Created ${new Date(wt.created).toLocaleString()}`);
+  const text = formatDate(new Date(shown));
+  return `<span class="wt-last" title="${wtAttr(lines.join('\n'))}">${escapeHtml(byCreated ? `created ${text}` : text)}</span>`;
+}
+
+function wtStatusHtml(wt, live, order = 'default') {
   const parts = [];
   if (wt.exists && !wt.bare) {
     if (wt.dirty === true) parts.push('<span class="wt-state changed" title="Uncommitted changes">Changes</span>');
     else if (wt.dirty === false) parts.push('<span class="wt-state clean" title="Nothing to commit">Clean</span>');
     if (wt.ahead) parts.push(`<span class="wt-sync" title="${wtAttr(`${wtPlural(wt.ahead, 'commit')} ahead of its upstream`)}">↑${wt.ahead}</span>`);
     if (wt.behind) parts.push(`<span class="wt-sync" title="${wtAttr(`${wtPlural(wt.behind, 'commit')} behind its upstream`)}">↓${wt.behind}</span>`);
-    if (wt.lastCommit?.time) {
-      const when = new Date(wt.lastCommit.time);
-      parts.push(`<span class="wt-last" title="${wtAttr(`${wt.lastCommit.subject}\n${when.toLocaleString()}`)}">${escapeHtml(formatDate(when))}</span>`);
-    }
+    parts.push(wtTimeHtml(wt, order));
   }
   if (live?.length) {
     parts.push(`<span class="ws-badge wt-live" title="${wtAttr(live.map(s => s.name || s.summary || s.sessionId).join('\n'))}">${live.length} running</span>`);
@@ -218,7 +278,7 @@ function wtRowPath(wt, repo) {
   return wtShortPath(wt.path);
 }
 
-function wtRowHtml(wt, key, live, repo = null) {
+function wtRowHtml(wt, key, live, repo = null, order = 'default') {
   const title = `${wt.path}${wt.locked && wt.lockReason ? `\nLocked: ${wt.lockReason}` : ''}`;
   return `
     <div class="wt-row${wt.exists ? '' : ' missing'}${wt.isMain ? ' main' : ''}" data-wt="${wtAttr(key)}" title="${wtAttr(title)}">
@@ -227,7 +287,7 @@ function wtRowHtml(wt, key, live, repo = null) {
         <div class="wt-row-line"><span class="wt-row-label${wt.detached ? ' mono' : ''}">${escapeHtml(wtLabel(wt))}</span>${wtBadgesHtml(wt)}</div>
         <div class="wt-row-path mono">${escapeHtml(wtRowPath(wt, repo))}</div>
       </div>
-      <div class="wt-row-status">${wtStatusHtml(wt, live)}</div>
+      <div class="wt-row-status">${wtStatusHtml(wt, live, order)}</div>
       <div class="wt-row-actions">
         ${wt.exists ? `<button type="button" class="ws-btn ws-btn--sm" data-act="session" title="Start a session or a terminal in this worktree">${PICONS.plus(11)}<span>Session</span>${PICONS.chevronDown(10)}</button>
         <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="open" title="${wtAttr(wtOpenLabel())}">${PICONS.folder(13)}</button>` : ''}
@@ -276,18 +336,26 @@ function wtListHtml(project, state) {
   }
   const settings = state.settings || {};
   const collapsed = new Set(settings.collapsedGroups || []);
-  const groups = wtVisibleRepositories(repositories, state.query, settings.sortOrder || 'default');
-  if (!groups.length) return `<div class="git-empty-state"><div class="git-empty-title">Nothing matches “${escapeHtml(state.query)}”</div></div>`;
   const live = wtSessionsByWorktree(repositories);
+  const groups = wtVisibleRepositories(repositories, state.query, settings.sortOrder || 'default', state.filter, live);
+  if (!groups.length) {
+    const filter = WT_FILTERS.find(([key]) => key === state.filter && key !== 'all');
+    if (!filter) return `<div class="git-empty-state"><div class="git-empty-title">Nothing matches “${escapeHtml(state.query)}”</div></div>`;
+    return `
+      <div class="git-empty-state">
+        <div class="git-empty-title">${escapeHtml(filter[2])}${state.query ? ` matching “${escapeHtml(state.query)}”` : ''}</div>
+        <button type="button" class="ws-btn ws-btn--sm" data-act="show-all">Show all worktrees</button>
+      </div>`;
+  }
   let index = 0;
   return groups.map(({ repo, worktrees }, groupIndex) => {
-    const closed = collapsed.has(repo.id) && !state.query;
+    const closed = collapsed.has(repo.id) && !state.query && (state.filter || 'all') === 'all';
     const rows = repo.error
       ? `<div class="git-empty-row">${escapeHtml(repo.error)}</div>`
       : worktrees.map((wt) => {
         const key = `w${index++}`;
         state.rows.set(key, { repo, wt });
-        return wtRowHtml(wt, key, live.get(wt.path) || [], repo);
+        return wtRowHtml(wt, key, live.get(wt.path) || [], repo, settings.sortOrder || 'default');
       }).join('');
     return `
       <section class="git-section wt-repo" data-repo="${groupIndex}">
@@ -307,7 +375,8 @@ function wtListHtml(project, state) {
 
 function wtGroups(state) {
   const settings = state.settings || {};
-  return wtVisibleRepositories(state.repositories || [], state.query, settings.sortOrder || 'default');
+  const repositories = state.repositories || [];
+  return wtVisibleRepositories(repositories, state.query, settings.sortOrder || 'default', state.filter, wtSessionsByWorktree(repositories));
 }
 
 function paintWorktreeList(project, state, body) {
@@ -320,6 +389,12 @@ function paintWorktreeList(project, state, body) {
 
   list.querySelector('[data-act="attach-folder"]')?.addEventListener('click', () => {
     if (typeof attachFolderAsk === 'function') attachFolderAsk(project);
+  });
+  list.querySelector('[data-act="show-all"]')?.addEventListener('click', () => {
+    state.filter = 'all';
+    const select = body.querySelector('#wt-filter');
+    if (select) { select.value = 'all'; select.classList.remove('is-on'); }
+    paintWorktreeList(project, state, body);
   });
   list.querySelectorAll('.wt-repo').forEach((section) => {
     const repo = groups[Number(section.dataset.repo)]?.repo;
@@ -364,8 +439,11 @@ function paintWorktreesTab(project, state, body) {
       </div>
       <div class="wt-toolbar">
         <label class="wt-search">${PICONS.search(12)}<input type="search" id="wt-search" placeholder="Filter by branch, folder or kind" autocomplete="off" spellcheck="false" value="${wtAttr(state.query)}"></label>
-        <select class="ws-select wt-sort" id="wt-sort" title="Sort worktrees">
+        <select class="ws-select wt-sort" id="wt-sort" title="Sort worktrees" aria-label="Sort worktrees">
           ${WT_SORT_ORDERS.map(([value, label]) => `<option value="${value}" ${value === (settings.sortOrder || 'default') ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+        </select>
+        <select class="ws-select wt-filter${(state.filter || 'all') !== 'all' ? ' is-on' : ''}" id="wt-filter" title="Show worktrees" aria-label="Show worktrees">
+          ${WT_FILTERS.map(([value, label]) => `<option value="${value}" ${value === (state.filter || 'all') ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
         </select>
       </div>
       <div id="wt-notice">${wtNoticeHtml(state.notice)}</div>
@@ -382,6 +460,11 @@ function paintWorktreesTab(project, state, body) {
   const search = body.querySelector('#wt-search');
   search.oninput = () => {
     state.query = search.value;
+    paintWorktreeList(project, state, body);
+  };
+  body.querySelector('#wt-filter').onchange = (e) => {
+    state.filter = e.target.value;
+    e.target.classList.toggle('is-on', state.filter !== 'all');
     paintWorktreeList(project, state, body);
   };
   body.querySelector('#wt-sort').onchange = (e) => {
