@@ -2,9 +2,9 @@ import { expect, test } from '@jest/globals';
 
 import type { LiveState, Session } from '@/sessions/model';
 import {
-  baseChoices, createSpec, createdText, existingChoices, findWorktree, folderFor, formRef, mergedChoices, parentFolder, patternsList, patternsText,
+  baseChoices, createSpec, createdText, existingChoices, FILTERS, filterMatches, findWorktree, folderFor, formRef, mergedChoices, parentFolder, patternsList, patternsText,
   previewTemplate, prunedText, refFolderName, remoteLocalName, removeReady, rowPath, sessionsByWorktree, shortPath, sortWorktrees, startPointChoices,
-  summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches,
+  SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches, worktreeTime,
   type Branches, type CreateForm, type Worktree, type WorktreeRepository,
 } from '../model';
 
@@ -14,7 +14,7 @@ function wt(p: string, extra: Partial<Worktree> = {}): Worktree {
     path: p, head: 'abcdef1234567890', branch: '', detached: false, bare: false,
     locked: false, lockReason: '', prunable: false, prunableReason: '', isMain: false,
     exists: true, kind: 'classic', attached: false, attachedMode: null, attachedPath: null,
-    dirty: false, ahead: null, behind: null, lastCommit: null, created: null, ...extra,
+    dirty: false, ahead: null, behind: null, lastCommit: null, created: null, modified: null, ...extra,
   };
 }
 
@@ -53,6 +53,57 @@ test('sorting keeps the main worktree first and puts unknown creation times last
   expect(order('nameDesc')).toEqual(['main', 'fix', 'beta', 'alpha']);
   expect(order('createdDesc')).toEqual(['main', 'beta', 'alpha', 'fix']);
   expect(order('createdAsc')).toEqual(['main', 'alpha', 'beta', 'fix']);
+});
+
+test('sorting by last modification and by uncommitted changes', () => {
+  const a = wt('/w/a', { branch: 'a', modified: 300 });
+  const b = wt('/w/b', { branch: 'b', modified: 100, dirty: true });
+  const c = wt('/w/c', { branch: 'c', modified: null });
+  const d = wt('/w/d', { branch: 'd', modified: 200, dirty: true });
+  const order = (o: Parameters<typeof sortWorktrees>[1]) => sortWorktrees([a, b, main, c, d], o).map((item) => item.branch);
+  expect(order('modifiedDesc')).toEqual(['main', 'a', 'd', 'b', 'c']);
+  expect(order('modifiedAsc')).toEqual(['main', 'b', 'd', 'a', 'c']);
+  expect(order('changesFirst')).toEqual(['main', 'd', 'b', 'a', 'c']);
+  // The same orders as the desktop's combo, in its order.
+  expect(SORT_ORDERS.map((o) => o.key)).toEqual(['default', 'modifiedDesc', 'modifiedAsc', 'createdDesc', 'createdAsc', 'nameAsc', 'nameDesc', 'changesFirst']);
+});
+
+test('the filter keeps the worktrees it names, the main one included, and hides repositories left empty', () => {
+  const dirty = wt('/w/app.worktrees/dirty', { branch: 'dirty', dirty: true, ahead: 0 });
+  const ahead = wt('/w/app.worktrees/ahead', { branch: 'ahead', ahead: 2, attached: true });
+  const gone = wt('/w/app.worktrees/gone', { branch: 'gone', exists: false, locked: true });
+  const codex = wt('/w/codex/app', { branch: 'cx', kind: 'codex' });
+  const project = wt('/p/repos/app', { branch: 'pr', kind: 'switchboard', attached: true });
+  const repos = [
+    repository('app', '/w/app', [{ ...main, dirty: true }, dirty, ahead, gone, claude, codex, project]),
+    repository('lib', '/w/lib', [wt('/w/lib', { isMain: true, branch: 'main', kind: 'main' })]),
+  ];
+  const live = new Map([['/w/app.worktrees/ahead', [session('s', '/w/app.worktrees/ahead')]]]);
+  const shown = (filter: Parameters<typeof filterMatches>[1]) => visibleRepositories(repos, '', 'default', filter, live).map((g) => [g.repo.name, g.worktrees.map((w) => w.branch)]);
+  expect(shown('all')).toEqual([['app', ['main', 'dirty', 'ahead', 'gone', 'fix', 'cx', 'pr']], ['lib', ['main']]]);
+  expect(shown('changes')).toEqual([['app', ['main', 'dirty']]]);
+  expect(shown('unpushed')).toEqual([['app', ['ahead']]]);
+  expect(shown('running')).toEqual([['app', ['ahead']]]);
+  expect(shown('attached')).toEqual([['app', ['ahead', 'pr']]]);
+  expect(shown('unattached')).toEqual([['app', ['main', 'dirty', 'gone', 'fix', 'cx']], ['lib', ['main']]]);
+  expect(shown('locked')).toEqual([['app', ['gone']]]);
+  expect(shown('missing')).toEqual([['app', ['gone']]]);
+  expect(shown('claude')).toEqual([['app', ['fix']]]);
+  expect(shown('codex')).toEqual([['app', ['cx']]]);
+  expect(shown('switchboard')).toEqual([['app', ['pr']]]);
+  expect(visibleRepositories(repos, 'pr', 'default', 'attached', live).map((g) => g.worktrees.map((w) => w.branch))).toEqual([['pr']]);
+  // The desktop's filters, in its order, each with what an empty list says.
+  expect(FILTERS.map((f) => f.key)).toEqual(['all', 'changes', 'unpushed', 'running', 'attached', 'unattached', 'locked', 'missing', 'claude', 'codex', 'switchboard']);
+  for (const filter of FILTERS) expect(filter.empty).toBeTruthy();
+});
+
+test('a row shows when it was last modified, or created while sorted by that', () => {
+  const item = wt('/w/x', { modified: 3000, created: 1000, lastCommit: { hash: 'h', time: 2000, subject: 'Init' } });
+  expect(worktreeTime(item, 'default')).toEqual({ time: 3000, created: false });
+  expect(worktreeTime(item, 'createdAsc')).toEqual({ time: 1000, created: true });
+  // From an older desktop, with no last modification: the last commit.
+  expect(worktreeTime({ ...item, modified: undefined as unknown as null }, 'nameAsc')).toEqual({ time: 2000, created: false });
+  expect(worktreeTime(wt('/w/y'), 'default')).toBeNull();
 });
 
 test('filtering matches branch, folder, kind and state, and a repository name keeps all its rows', () => {

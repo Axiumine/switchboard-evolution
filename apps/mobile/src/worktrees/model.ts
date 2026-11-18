@@ -32,6 +32,8 @@ export type Worktree = {
   behind: number | null;
   lastCommit: { hash: string; time: number; subject: string } | null;
   created: number | null;
+  /** The latest of its last commit, a file changed since and its creation; missing from an older desktop. */
+  modified?: number | null;
 };
 
 export type WorktreeRepository = {
@@ -47,7 +49,9 @@ export type WorktreeRepository = {
   worktrees: Worktree[];
 };
 
-export type SortOrder = 'default' | 'nameAsc' | 'nameDesc' | 'createdDesc' | 'createdAsc';
+export type SortOrder = 'default' | 'modifiedDesc' | 'modifiedAsc' | 'createdDesc' | 'createdAsc' | 'nameAsc' | 'nameDesc' | 'changesFirst';
+export type WorktreeFilter =
+  | 'all' | 'changes' | 'unpushed' | 'running' | 'attached' | 'unattached' | 'locked' | 'missing' | 'claude' | 'codex' | 'switchboard';
 export type StartAfter = 'none' | 'claude' | 'codex' | 'terminal';
 
 export type WorktreeSettings = {
@@ -120,12 +124,31 @@ export type PrunePreview = {
   staleFolders: { path: string; branch: string }[];
 };
 
-export const SORT_ORDERS: readonly { key: SortOrder; label: string }[] = [
-  { key: 'default', label: 'Git order' },
-  { key: 'nameAsc', label: 'Name, A to Z' },
-  { key: 'nameDesc', label: 'Name, Z to A' },
-  { key: 'createdDesc', label: 'Newest first' },
-  { key: 'createdAsc', label: 'Oldest first' },
+/** The order combo, as the desktop's. The main worktree stays first in every order. */
+export const SORT_ORDERS: readonly { key: SortOrder; label: string; short: string }[] = [
+  { key: 'default', label: 'Git order', short: 'Git order' },
+  { key: 'modifiedDesc', label: 'Last modified, newest first', short: 'Modified ↓' },
+  { key: 'modifiedAsc', label: 'Last modified, oldest first', short: 'Modified ↑' },
+  { key: 'createdDesc', label: 'Created, newest first', short: 'Created ↓' },
+  { key: 'createdAsc', label: 'Created, oldest first', short: 'Created ↑' },
+  { key: 'nameAsc', label: 'Name, A to Z', short: 'A to Z' },
+  { key: 'nameDesc', label: 'Name, Z to A', short: 'Z to A' },
+  { key: 'changesFirst', label: 'Uncommitted changes first', short: 'Changes first' },
+];
+
+/** Which worktrees to show, as the desktop's second combo; not saved. `empty` is what a list with none says. */
+export const FILTERS: readonly { key: WorktreeFilter; label: string; short: string; empty: string }[] = [
+  { key: 'all', label: 'All worktrees', short: 'All', empty: 'No worktrees' },
+  { key: 'changes', label: 'With uncommitted changes', short: 'Changes', empty: 'No worktree has uncommitted changes' },
+  { key: 'unpushed', label: 'With unpushed commits', short: 'Unpushed', empty: 'No worktree has unpushed commits' },
+  { key: 'running', label: 'With a running session', short: 'Running', empty: 'No session runs in a worktree' },
+  { key: 'attached', label: 'Attached to the project', short: 'Attached', empty: 'No worktree is attached to the project' },
+  { key: 'unattached', label: 'Not attached', short: 'Not attached', empty: 'Every worktree is attached to the project' },
+  { key: 'locked', label: 'Locked', short: 'Locked', empty: 'No worktree is locked' },
+  { key: 'missing', label: 'Folder missing', short: 'Missing', empty: 'No worktree folder is missing' },
+  { key: 'claude', label: 'Made by Claude', short: 'Claude', empty: 'No worktree was made by Claude' },
+  { key: 'codex', label: 'Made by Codex', short: 'Codex', empty: 'No worktree was made by Codex' },
+  { key: 'switchboard', label: 'Made by this project', short: 'Project', empty: 'No worktree was made by this project' },
 ];
 
 export const START_OPTIONS: readonly { key: StartAfter; label: string }[] = [
@@ -202,17 +225,49 @@ export function sortWorktrees(worktrees: Worktree[], order: SortOrder): Worktree
   const main = worktrees.filter((wt) => wt.isMain);
   const rest = worktrees.filter((wt) => !wt.isMain);
   const byName = (a: Worktree, b: Worktree) => worktreeLabel(a).localeCompare(worktreeLabel(b), undefined, { numeric: true, sensitivity: 'base' });
-  const byCreated = (direction: number) => (a: Worktree, b: Worktree) => {
-    if (a.created == null && b.created == null) return 0;
-    if (a.created == null) return 1;
-    if (b.created == null) return -1;
-    return direction * (a.created - b.created);
+  const byTime = (field: 'created' | 'modified', direction: number) => (a: Worktree, b: Worktree) => {
+    const x = a[field];
+    const y = b[field];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return direction * (x - y);
   };
   if (order === 'nameAsc') rest.sort(byName);
   else if (order === 'nameDesc') rest.sort((a, b) => byName(b, a));
-  else if (order === 'createdDesc') rest.sort(byCreated(-1));
-  else if (order === 'createdAsc') rest.sort(byCreated(1));
+  else if (order === 'createdDesc') rest.sort(byTime('created', -1));
+  else if (order === 'createdAsc') rest.sort(byTime('created', 1));
+  else if (order === 'modifiedDesc') rest.sort(byTime('modified', -1));
+  else if (order === 'modifiedAsc') rest.sort(byTime('modified', 1));
+  else if (order === 'changesFirst') rest.sort((a, b) => (Number(!!b.dirty) - Number(!!a.dirty)) || byTime('modified', -1)(a, b));
   return [...main, ...rest];
+}
+
+/** Whether the filter keeps `wt`. `running` maps a worktree's path to the sessions running in it. */
+export function filterMatches(wt: Worktree, filter: WorktreeFilter, running?: Map<string, Session[]> | null): boolean {
+  switch (filter) {
+    case 'changes': return !!wt.dirty;
+    case 'unpushed': return (wt.ahead || 0) > 0;
+    case 'running': return (running?.get(wt.path) || []).length > 0;
+    case 'attached': return !!wt.attached;
+    case 'unattached': return !wt.attached;
+    case 'locked': return !!wt.locked;
+    case 'missing': return !wt.exists;
+    case 'claude':
+    case 'codex':
+    case 'switchboard': return wt.kind === filter;
+    default: return true;
+  }
+}
+
+/**
+ * The time a row shows: when it was created while sorted by that, else when
+ * it was last modified (its last commit from an older desktop).
+ */
+export function worktreeTime(wt: Worktree, order: SortOrder): { time: number; created: boolean } | null {
+  if (order === 'createdDesc' || order === 'createdAsc') return wt.created ? { time: wt.created, created: true } : null;
+  const time = wt.modified || wt.lastCommit?.time || null;
+  return time ? { time, created: false } : null;
 }
 
 export function worktreeMatches(wt: Worktree, query: string): boolean {
@@ -224,16 +279,22 @@ export function worktreeMatches(wt: Worktree, query: string): boolean {
 
 /**
  * The repositories to show, each with its worktrees filtered and sorted. A
- * query that names a repository keeps all its worktrees; a repository with
- * nothing left is hidden while filtering.
+ * query that names a repository keeps all its worktrees the filter keeps; a
+ * repository with nothing left is hidden while filtering.
  */
-export function visibleRepositories(repositories: WorktreeRepository[], query: string, order: SortOrder): { repo: WorktreeRepository; worktrees: Worktree[] }[] {
+export function visibleRepositories(
+  repositories: WorktreeRepository[], query: string, order: SortOrder,
+  filter: WorktreeFilter = 'all', running: Map<string, Session[]> | null = null,
+): { repo: WorktreeRepository; worktrees: Worktree[] }[] {
   const q = String(query || '').trim().toLowerCase();
+  const filtering = filter !== 'all';
   return (repositories || []).map((repo) => {
     const repoMatches = !!q && (repo.name.toLowerCase().includes(q) || repo.mainPath.toLowerCase().includes(q));
-    const worktrees = (repo.worktrees || []).filter((wt) => !q || repoMatches || worktreeMatches(wt, q));
+    const worktrees = (repo.worktrees || [])
+      .filter((wt) => !q || repoMatches || worktreeMatches(wt, q))
+      .filter((wt) => !filtering || filterMatches(wt, filter, running));
     return { repo, worktrees: sortWorktrees(worktrees, order) };
-  }).filter((group) => !q || group.worktrees.length || group.repo.name.toLowerCase().includes(q));
+  }).filter((group) => group.worktrees.length > 0 || (!filtering && (!q || group.repo.name.toLowerCase().includes(q))));
 }
 
 /** "2 repositories · 5 worktrees". */

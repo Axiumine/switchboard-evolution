@@ -14,8 +14,8 @@ import { relativeTime, sessionTitle, type Session } from '@/sessions/model';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import {
-  folderFor, plural, prunedText, rowPath, shortPath, SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel,
-  type Badge, type PrunePreview, type SortOrder, type Worktree, type WorktreeRepository,
+  FILTERS, folderFor, plural, prunedText, rowPath, shortPath, SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeTime,
+  type Badge, type PrunePreview, type SortOrder, type Worktree, type WorktreeFilter, type WorktreeRepository,
 } from '@/worktrees/model';
 import {
   ask, patchCachedSettings, runAction, setNotice, SLOW_TIMEOUT_MS, startInWorktree, useNotice, useProjectWorktrees, useRunningByWorktree, type Notice,
@@ -24,13 +24,14 @@ import { useTabScroll } from '../useTabScroll';
 
 type Harness = { id: string; label: string; enabled: boolean };
 
-/** Which sheet is open: a worktree's, its sessions', a repository's, which repository, or the order. */
+/** Which sheet is open: a worktree's, its sessions', a repository's, which repository, the order or the filter. */
 type Menu =
   | { kind: 'row'; repo: WorktreeRepository; wt: Worktree }
   | { kind: 'session'; wt: Worktree }
   | { kind: 'repo'; repo: WorktreeRepository }
   | { kind: 'pick'; then: 'merged' | 'prune' }
-  | { kind: 'sort' };
+  | { kind: 'sort' }
+  | { kind: 'filter' };
 
 const MONO = 'Menlo';
 
@@ -58,6 +59,8 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   const listing = useProjectWorktrees(supported ? pid : undefined);
   const notice = useNotice(pid);
   const [query, setQuery] = useState('');
+  // Which worktrees to show, as the desktop's second combo: not saved.
+  const [filter, setFilter] = useState<WorktreeFilter>('all');
   const [menu, setMenu] = useState<Menu | null>(null);
   const [locking, setLocking] = useState<Worktree | null>(null);
   const harnesses = useQuery({ queryKey: ['harnesses'], queryFn: () => request<Harness[]>('get-harnesses'), enabled: online });
@@ -75,7 +78,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   const order: SortOrder = settings?.sortOrder || 'default';
   const collapsed = settings?.collapsedGroups || [];
   const running = useRunningByWorktree(repositories);
-  const groups = useMemo(() => visibleRepositories(repositories || [], query, order), [repositories, query, order]);
+  const groups = useMemo(() => visibleRepositories(repositories || [], query, order, filter, running), [repositories, query, order, filter, running]);
   const usable = (repositories || []).filter((repo) => !repo.error);
   const clis = (harnesses.data || []).filter((h) => h.enabled);
 
@@ -223,6 +226,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
     : menu.kind === 'session' ? `New session in ${worktreeLabel(menu.wt)}`
     : menu.kind === 'repo' ? menu.repo.name
     : menu.kind === 'pick' ? 'Repository'
+    : menu.kind === 'filter' ? 'Show worktrees'
     : 'Sort worktrees';
   const menuOptions = (): SheetOption[] => {
     if (!menu) return [];
@@ -233,8 +237,11 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
       const then = menu.then;
       return usable.map((repo) => ({ label: repo.name, hint: shortPath(repo.mainPath, homeDir), onPress: () => doForRepository(then, repo) }));
     }
+    if (menu.kind === 'filter') return FILTERS.map((item) => ({ label: item.label, hint: item.key === filter ? 'chosen' : undefined, onPress: () => setFilter(item.key) }));
     return SORT_ORDERS.map((item) => ({ label: item.label, hint: item.key === order ? 'chosen' : undefined, onPress: () => saveSettings({ sortOrder: item.key }) }));
   };
+  const sortChoice = SORT_ORDERS.find((s) => s.key === order) ?? SORT_ORDERS[0];
+  const filterChoice = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
 
   // --- Drawing ---
 
@@ -273,9 +280,18 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
             style={styles.searchInput}
           />
         </View>
-        <Pressable onPress={() => setMenu({ kind: 'sort' })} style={({ pressed }) => [styles.sort, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_ORDERS.find((s) => s.key === order)?.label}`}>
+        <Pressable onPress={() => setMenu({ kind: 'sort' })} style={({ pressed }) => [styles.sort, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Sort: ${sortChoice.label}`}>
           <Ionicons name="swap-vertical" size={15} color={colors.textDim} />
-          <Text style={styles.sortText} numberOfLines={1}>{SORT_ORDERS.find((s) => s.key === order)?.label}</Text>
+          <Text style={styles.sortText} numberOfLines={1}>{sortChoice.short}</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setMenu({ kind: 'filter' })}
+          style={({ pressed }) => [styles.sort, filter !== 'all' && styles.filterOn, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`Show: ${filterChoice.label}`}
+        >
+          <Ionicons name={filter === 'all' ? 'funnel-outline' : 'funnel'} size={14} color={filter === 'all' ? colors.textDim : colors.accent} />
+          <Text style={[styles.sortText, filter !== 'all' && styles.filterOnText]} numberOfLines={1}>{filterChoice.short}</Text>
         </Pressable>
       </View>
       {notice ? <NoticeBar key={`${notice.kind}:${notice.text}`} notice={notice} onClose={() => setNotice(pid, null)} /> : null}
@@ -303,10 +319,19 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
       </View>
     );
   } else if (!groups.length) {
-    body = <View style={styles.emptyBox}><Text style={styles.emptyTitle}>Nothing matches “{query}”</Text></View>;
+    body = filter === 'all'
+      ? <View style={styles.emptyBox}><Text style={styles.emptyTitle}>Nothing matches “{query}”</Text></View>
+      : (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyTitle}>{filterChoice.empty}{query ? ` matching “${query}”` : ''}</Text>
+          <Pressable onPress={() => setFilter('all')} accessibilityRole="button">
+            <Text style={styles.link}>Show all worktrees</Text>
+          </Pressable>
+        </View>
+      );
   } else {
     body = groups.map(({ repo, worktrees }) => {
-      const closed = collapsed.includes(repo.id) && !query;
+      const closed = collapsed.includes(repo.id) && !query && filter === 'all';
       return (
         <View key={repo.id} style={styles.repo}>
           <View style={styles.repoHead}>
@@ -330,6 +355,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
             <WorktreeRow
               key={wt.path}
               wt={wt}
+              order={order}
               path={rowPath(wt, repo, homeDir)}
               live={running.get(wt.path) || []}
               onPress={() => setMenu({ kind: 'row', repo, wt })}
@@ -367,7 +393,9 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   );
 }
 
-function WorktreeRow({ wt, path, live, onPress, onSession }: { wt: Worktree; path: string; live: Session[]; onPress: () => void; onSession: () => void }) {
+function WorktreeRow({ wt, order, path, live, onPress, onSession }: {
+  wt: Worktree; order: SortOrder; path: string; live: Session[]; onPress: () => void; onSession: () => void;
+}) {
   const badges = worktreeBadges(wt);
   const status: { text: string; color: string }[] = [];
   if (wt.exists && !wt.bare) {
@@ -375,7 +403,12 @@ function WorktreeRow({ wt, path, live, onPress, onSession }: { wt: Worktree; pat
     else if (wt.dirty === false) status.push({ text: 'Clean', color: colors.running });
     if (wt.ahead) status.push({ text: `↑${wt.ahead}`, color: colors.textDim });
     if (wt.behind) status.push({ text: `↓${wt.behind}`, color: colors.textDim });
-    if (wt.lastCommit?.time) status.push({ text: relativeTime(new Date(wt.lastCommit.time).toISOString()), color: colors.textFaint });
+    // Last modified, or created while sorted by that.
+    const when = worktreeTime(wt, order);
+    if (when) {
+      const ago = relativeTime(new Date(when.time).toISOString());
+      status.push({ text: when.created ? `created ${ago}` : ago, color: colors.textFaint });
+    }
   }
   const label = worktreeLabel(wt);
   return (
@@ -470,8 +503,11 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg },
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: spacing.md, height: 38 },
   searchInput: { flex: 1, color: colors.text, fontSize: 14, paddingVertical: 0 },
-  sort: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 38, paddingHorizontal: spacing.sm, borderRadius: 8, borderWidth: 1, borderColor: colors.border, maxWidth: 140 },
+  sort: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 38, paddingHorizontal: spacing.sm, borderRadius: 8, borderWidth: 1, borderColor: colors.border, maxWidth: 124 },
   sortText: { color: colors.textDim, fontSize: 12.5, flexShrink: 1 },
+  // A filter on: some worktrees are out of sight.
+  filterOn: { borderColor: colors.accent, backgroundColor: 'rgba(128,136,255,0.12)' },
+  filterOnText: { color: colors.accent },
   notice: { marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, paddingLeft: spacing.md, borderRadius: 8, backgroundColor: colors.surface, borderLeftWidth: 3, gap: 4 },
   noticeLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   noticeText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
