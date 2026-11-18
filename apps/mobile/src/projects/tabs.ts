@@ -13,6 +13,31 @@ export const PROJECT_TABS: readonly { key: ProjectTab; label: string }[] = [
   { key: 'settings', label: 'Settings' },
 ];
 
+/** How far a sideways swipe on the project page must go to change tab, in dp; or how far at least, when fast. */
+export const SWIPE_DISTANCE = 64;
+export const SWIPE_MIN_DISTANCE = 28;
+/** Fast enough (dp/s) for a short swipe to count. */
+export const SWIPE_VELOCITY = 600;
+
+/**
+ * The tab a sideways swipe on the project page goes to: the next one for a
+ * swipe to the left, the one before for a swipe to the right, as the tabs sit
+ * in the bar. Null when it was short and slow, more up or down than sideways,
+ * or there is no tab that way (no wrapping around).
+ */
+export function swipeTab(
+  tabs: readonly { key: ProjectTab }[],
+  active: ProjectTab,
+  { dx, dy, vx }: { dx: number; dy: number; vx: number },
+): ProjectTab | null {
+  const distance = Math.abs(dx);
+  const far = distance >= SWIPE_DISTANCE || (distance >= SWIPE_MIN_DISTANCE && Math.abs(vx) >= SWIPE_VELOCITY);
+  if (!far || distance < Math.abs(dy) * 1.5) return null;
+  const index = tabs.findIndex((tab) => tab.key === active);
+  if (index < 0) return null;
+  return tabs[index + (dx < 0 ? 1 : -1)]?.key ?? null;
+}
+
 /** The Git tab's views, as on the desktop: Changes | History | Worktrees. */
 export type GitView = 'changes' | 'history' | 'worktrees';
 

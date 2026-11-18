@@ -8,7 +8,6 @@ import { fileLinkPress, markdownParser, pathCodeRule, taskItemRule } from '@/com
 import { openPath } from '@/components/chat/OpenFile';
 import { markdownStyles } from '@/components/ChatView';
 import { CodeEditor, type CodeEditorHandle } from '@/components/files/CodeEditor';
-import { DownloadBar } from '@/components/files/DownloadBar';
 import { HeaderButton } from '@/components/HeaderButton';
 import type { EditorState } from '@/editor/bridge';
 import { downloadSupported, shareProjectFile, type KnownContent } from '@/files/download';
@@ -170,8 +169,6 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
         <Stack.Screen options={{ title: name, headerRight: buttons }} />
       )}
       {body}
-      {/* The Files tab shows the bar of its own downloads under its tree. */}
-      {inline ? null : <DownloadBar />}
     </KeyboardAvoidingView>
   );
 }

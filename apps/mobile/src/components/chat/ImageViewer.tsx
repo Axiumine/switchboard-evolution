@@ -14,9 +14,9 @@ import {
   useTapGesture,
 } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { create } from 'zustand';
 
+import { useWindowInsets } from '@/layout/bottomInset';
 import type { ChatImage } from '@/sessions/transcript';
 import { colors, spacing } from '@/theme';
 
@@ -106,7 +106,7 @@ function ZoomableImage({ image }: { image: ChatImage }) {
 /** The full-screen image viewer of the chat: close and share at the top, the image, and a way between several. */
 export function ImageViewer() {
   const { images, index } = useViewer();
-  const insets = useSafeAreaInsets();
+  const insets = useWindowInsets();
   const [canShare, setCanShare] = useState(false);
   useEffect(() => { Sharing.isAvailableAsync().then(setCanShare, () => setCanShare(false)); }, []);
   const image = images[index];

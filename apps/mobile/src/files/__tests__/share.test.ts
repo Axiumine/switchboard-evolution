@@ -64,12 +64,14 @@ describe('shareProjectFile', () => {
   });
 
   it('refuses a second share while the share sheet is still open, then takes the next one', async () => {
-    let close!: () => void;
+    let close: (() => void) | undefined;
     mockShareSheet = () => new Promise<void>((resolve) => { close = resolve; });
     const first = shareProjectFile('/code/web', 'a.md', 'a.md', { text: 'a' });
-    await Promise.resolve();
+    // Until the share sheet is open.
+    for (let i = 0; i < 50 && !close; i++) await new Promise<void>((resolve) => setImmediate(() => resolve()));
+    expect(close).toBeDefined();
     await expect(shareProjectFile('/code/web', 'b.md', 'b.md', { text: 'b' })).rejects.toThrow('Another download is still running.');
-    close();
+    close!();
     await expect(first).resolves.toBe('shared');
     mockShareSheet = async () => {};
     await expect(shareProjectFile('/code/web', 'b.md', 'b.md', { text: 'b' })).resolves.toBe('shared');

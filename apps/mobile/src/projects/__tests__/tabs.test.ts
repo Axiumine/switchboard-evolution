@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { GIT_VIEWS, PROJECT_TABS, parseGitView, parseSessionView, parseTab } from '../tabs';
+import { GIT_VIEWS, PROJECT_TABS, parseGitView, parseSessionView, parseTab, swipeTab } from '../tabs';
 
 describe('parseTab', () => {
   it('returns a known key as it is', () => {
@@ -49,5 +49,39 @@ describe('parseSessionView', () => {
     expect(parseSessionView('chat')).toBe('chat');
     expect(parseSessionView('x')).toBeUndefined();
     expect(parseSessionView(undefined)).toBeUndefined();
+  });
+});
+
+describe('swipeTab', () => {
+  // The bar without Session: no session opened in the project yet.
+  const tabs = PROJECT_TABS.filter(({ key }) => key !== 'session');
+  const swipe = (dx: number, { dy = 0, vx = 0 } = {}) => ({ dx, dy, vx });
+
+  it('goes to the next tab for a swipe to the left and to the one before for a swipe to the right', () => {
+    expect(swipeTab(tabs, 'plan', swipe(-80))).toBe('files');
+    expect(swipeTab(tabs, 'plan', swipe(80))).toBe('overview');
+    // Session is skipped when it is not in the bar, and taken when it is.
+    expect(swipeTab(tabs, 'overview', swipe(-80))).toBe('plan');
+    expect(swipeTab(PROJECT_TABS, 'overview', swipe(-80))).toBe('session');
+  });
+
+  it('stops at the first and the last tab', () => {
+    expect(swipeTab(tabs, 'overview', swipe(80))).toBeNull();
+    expect(swipeTab(tabs, 'settings', swipe(-80))).toBeNull();
+  });
+
+  it('takes a short swipe only when it is fast', () => {
+    expect(swipeTab(tabs, 'plan', swipe(-40))).toBeNull();
+    expect(swipeTab(tabs, 'plan', swipe(-40, { vx: -900 }))).toBe('files');
+    expect(swipeTab(tabs, 'plan', swipe(-20, { vx: -2000 }))).toBeNull();
+  });
+
+  it('leaves a move that went more up or down than sideways', () => {
+    expect(swipeTab(tabs, 'plan', swipe(-80, { dy: 70 }))).toBeNull();
+    expect(swipeTab(tabs, 'plan', swipe(-80, { dy: 40 }))).toBe('files');
+  });
+
+  it('does nothing for a tab that is not in the bar', () => {
+    expect(swipeTab(tabs, 'session', swipe(-80))).toBeNull();
   });
 });

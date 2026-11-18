@@ -1,14 +1,14 @@
 import type { ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useWindowInsets } from '@/layout/bottomInset';
 import { colors, spacing } from '@/theme';
 
 export type SheetOption = { label: string; onPress: () => void; destructive?: boolean; hint?: string };
 
 /** A bottom sheet of options, the same on iOS and Android. `footer` is a line under the options. */
 export function Sheet({ visible, title, options, onClose, children, footer }: { visible: boolean; title?: string; options?: SheetOption[]; onClose: () => void; children?: ReactNode; footer?: string }) {
-  const insets = useSafeAreaInsets();
+  const insets = useWindowInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />

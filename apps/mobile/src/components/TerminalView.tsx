@@ -242,6 +242,9 @@ export function TerminalView({ sessionId, onInput, visible = true }: { sessionId
             containerStyle={styles.web}
             bounces={false}
             scrollEnabled={false}
+            // Android: a touch on the terminal stays the terminal's, so a sideways
+            // drag in it does not move the project page to another tab.
+            nestedScrollEnabled
             keyboardDisplayRequiresUserAction={false}
             hideKeyboardAccessoryView
             allowsLinkPreview={false}

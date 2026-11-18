@@ -6,7 +6,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native';
 import { create } from 'zustand';
 
-import { DownloadBar } from '@/components/files/DownloadBar';
 import { FileIcon } from '@/components/files/FileIcon';
 import { SearchPanel } from '@/components/files/SearchPanel';
 import { FileView } from '@/components/files/FileView';
@@ -474,7 +473,6 @@ export function FilesTab({ project }: { project: Project }) {
         // Search needs more room than the tree.
         listWidth={(width) => (searchOn ? Math.min(Math.round(width * 0.5), 440) : width >= 840 ? 290 : 250)}
       />
-      <DownloadBar />
 
       <Sheet
         visible={!!menu}

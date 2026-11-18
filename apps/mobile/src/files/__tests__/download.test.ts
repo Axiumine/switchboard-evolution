@@ -1,6 +1,9 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { CHANGED, DownloadCancelled, freeName, localFileName, readFileChunks } from '../download';
+import { ConnectionError } from '@/remote/client';
+import { useConnection } from '@/store/connection';
+
+import { CHANGED, DownloadCancelled, freeName, localFileName, readFileChunks, useDownload, waitForComputer } from '../download';
 
 const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
 const decode = (pieces: string[]) => pieces.flatMap((piece) => [...atob(piece)].map((c) => c.charCodeAt(0)));
@@ -69,6 +72,101 @@ describe('readFileChunks', () => {
     await expect(reading).rejects.toBeInstanceOf(DownloadCancelled);
     expect(desktop.calls).toHaveLength(2);
     expect(written).toHaveLength(1);
+  });
+
+  it('asks again for the piece that got no answer, from the same place, once the computer is back', async () => {
+    const bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const desktop = fakeDesktop(bytes);
+    let dropped = false;
+    // The phone slept while the second piece came over.
+    const request = <T,>(method: string, params?: unknown[]) => {
+      if (desktop.calls.length === 1 && !dropped) {
+        dropped = true;
+        return Promise.reject(new ConnectionError('The connection was lost'));
+      }
+      return desktop.request<T>(method, params);
+    };
+    const written: string[] = [];
+    const waiting: boolean[] = [];
+    let waits = 0;
+    const size = await readFileChunks('/r', 'a.bin', async (piece) => { written.push(piece); }, {
+      request, waitForConnection: async () => { waits += 1; }, onWaiting: (on) => waiting.push(on),
+    });
+    expect(size).toBe(10);
+    expect(waits).toBe(1);
+    expect(waiting).toEqual([true, false]);
+    expect(desktop.calls.map((params) => params[2])).toEqual([0, 4, 8]);
+    expect(decode(written)).toEqual(bytes);
+  });
+
+  it('stops on a dropped connection when it cannot wait, and on an error the computer sent back', async () => {
+    const dropped = async <T,>(): Promise<T> => { throw new ConnectionError('Not connected to the computer'); };
+    await expect(readFileChunks('/r', 'a.bin', async () => {}, { request: dropped })).rejects.toBeInstanceOf(ConnectionError);
+    let waits = 0;
+    const refused = async <T,>(): Promise<T> => { throw new Error('read-project-file-chunk is not allowed'); };
+    await expect(readFileChunks('/r', 'a.bin', async () => {}, { request: refused, waitForConnection: async () => { waits += 1; } }))
+      .rejects.toThrow('read-project-file-chunk is not allowed');
+    expect(waits).toBe(0);
+  });
+
+  it('stops when cancelled while it waits for the computer', async () => {
+    let cancel = false;
+    const dropped = async <T,>(): Promise<T> => { throw new ConnectionError('The connection was lost'); };
+    const reading = readFileChunks('/r', 'a.bin', async () => {}, {
+      request: dropped, cancelled: () => cancel, waitForConnection: async () => { cancel = true; },
+    });
+    await expect(reading).rejects.toBeInstanceOf(DownloadCancelled);
+  });
+});
+
+describe('waitForComputer', () => {
+  const download = { name: 'a.bin', received: 4, size: 10, cancelled: false, waiting: true };
+  const hello = { methods: [] } as any;
+
+  afterEach(() => {
+    jest.useRealTimers();
+    useDownload.setState({ current: null });
+    useConnection.setState({ status: { state: 'closed' } });
+  });
+
+  it('resolves once the computer is back, not before a moment has passed', async () => {
+    jest.useFakeTimers();
+    useDownload.setState({ current: download });
+    useConnection.setState({ status: { state: 'offline', retryInMs: 1000, error: 'The connection was lost' } });
+    let done = false;
+    const waiting = waitForComputer().then(() => { done = true; });
+    jest.advanceTimersByTime(5000);
+    await Promise.resolve();
+    expect(done).toBe(false);
+    useConnection.setState({ status: { state: 'online', address: '192.0.2.1', hello } });
+    await waiting;
+    expect(done).toBe(true);
+  });
+
+  it('waits a moment even when still connected, so a slow piece is not asked for in a tight loop', async () => {
+    jest.useFakeTimers();
+    useDownload.setState({ current: download });
+    useConnection.setState({ status: { state: 'online', address: '192.0.2.1', hello } });
+    let done = false;
+    const waiting = waitForComputer().then(() => { done = true; });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    jest.advanceTimersByTime(1000);
+    await waiting;
+    expect(done).toBe(true);
+  });
+
+  it('resolves at once when the download is cancelled, and rejects when the computer is gone for good', async () => {
+    useDownload.setState({ current: download });
+    useConnection.setState({ status: { state: 'offline', retryInMs: 1000, error: 'x' } });
+    const cancelled = waitForComputer();
+    useDownload.setState({ current: { ...download, cancelled: true } });
+    await expect(cancelled).resolves.toBeUndefined();
+
+    useDownload.setState({ current: download });
+    const revoked = waitForComputer();
+    useConnection.setState({ status: { state: 'rejected', reason: 'revoked', message: 'This phone was removed on the computer.' } });
+    await expect(revoked).rejects.toThrow('This phone was removed on the computer.');
   });
 });
 

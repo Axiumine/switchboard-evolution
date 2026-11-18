@@ -50,6 +50,13 @@ export type ConnectionStatus =
 // Close codes from remote-server.js.
 const REJECTIONS: Record<number, RejectReason> = { 4002: 'protocol', 4003: 'unknown-device', 4004: 'revoked', 4005: 'pairing-failed' };
 
+/**
+ * A call that got no answer: there was no connection, it dropped on the way,
+ * or the answer took too long. Calling again once connected may work, unlike
+ * an error the computer sent back.
+ */
+export class ConnectionError extends Error {}
+
 export class RejectedError extends Error {
   constructor(readonly reason: RejectReason, message: string) {
     super(message);
@@ -309,7 +316,7 @@ export class RemoteClient {
 
   private handleClose(code: number, reason: string) {
     this.connection = null;
-    for (const [, waiting] of this.pending) { clearTimeout(waiting.timer); waiting.reject(new Error('The connection was lost')); }
+    for (const [, waiting] of this.pending) { clearTimeout(waiting.timer); waiting.reject(new ConnectionError('The connection was lost')); }
     this.pending.clear();
     if (this.stopped) return;
     const rejection = REJECTIONS[code];
@@ -323,12 +330,12 @@ export class RemoteClient {
   /** Call a method on the computer. Rejects when offline, on an error reply, or after the timeout (timeoutMs for a call known to be slow). */
   request<T = any>(method: string, params: unknown[] = [], { timeoutMs }: { timeoutMs?: number } = {}): Promise<T> {
     const connection = this.connection;
-    if (!connection) return Promise.reject(new Error('Not connected to the computer'));
+    if (!connection) return Promise.reject(new ConnectionError('Not connected to the computer'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`${method} took too long`));
+        reject(new ConnectionError(`${method} took too long`));
       }, timeoutMs ?? this.options.requestTimeoutMs ?? 20000);
       this.pending.set(id, { resolve, reject, timer });
       connection.ws.send(connection.channel.seal({ id, method, params }));

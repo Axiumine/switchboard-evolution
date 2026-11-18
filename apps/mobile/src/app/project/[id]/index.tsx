@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { HeaderButton } from '@/components/HeaderButton';
 import type { Rename } from '@/components/project/actions';
 import { ProjectTabBar } from '@/components/project/ProjectTabBar';
+import { SwipeTabs } from '@/components/project/SwipeTabs';
 import { FilesTab } from '@/components/project/tabs/FilesTab';
 import { GitTab } from '@/components/project/tabs/GitTab';
 import { OverviewTab } from '@/components/project/tabs/OverviewTab';
@@ -27,7 +28,8 @@ import { colors } from '@/theme';
 /**
  * One project, on the desktop's tabs: Overview, Session, Plan, Files, Git
  * (Changes, History, Worktrees) and Settings. A session opened in the project
- * shows on the Session tab, under the project's header and tabs.
+ * shows on the Session tab, under the project's header and tabs. A sideways
+ * swipe goes to the tab next to the open one (SwipeTabs).
  */
 export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -106,11 +108,11 @@ export default function ProjectScreen() {
       />
       <ProjectTabBar tabs={tabs} active={tab} onChange={selectTab} meta={meta} dots={sessionState === 'idle' ? undefined : { session: STATE_COLORS[sessionState] }} />
       <ProjectSessionContext.Provider value={nav.openSession}>
-        <View style={styles.body}>
+        <SwipeTabs tabs={tabs} active={tab} onChange={selectTab}>
           {tabs.filter(({ key }) => key === tab || visited.includes(key)).map(({ key }) => (
             <View key={key} style={[styles.pane, key !== tab && styles.hidden]}>{bodies[key]}</View>
           ))}
-        </View>
+        </SwipeTabs>
       </ProjectSessionContext.Provider>
 
       <Sheet visible={actions} title={project.name} options={projectOptions} onClose={() => setActions(false)} />
@@ -140,7 +142,6 @@ export default function ProjectScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
-  body: { flex: 1 },
   pane: { flex: 1 },
   hidden: { display: 'none' },
   empty: { color: colors.textFaint, fontSize: 13, paddingVertical: 8 },

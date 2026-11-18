@@ -108,6 +108,9 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, onSta
         containerStyle={styles.web}
         // The page scrolls inside itself (CodeMirror's scroller), not the WebView.
         scrollEnabled={false}
+        // Android: a touch on the code stays the code's (long lines scroll
+        // sideways), so it does not move the project page to another tab.
+        nestedScrollEnabled
         bounces={false}
         overScrollMode="never"
         automaticallyAdjustContentInsets={false}
