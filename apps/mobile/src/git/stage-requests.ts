@@ -49,3 +49,41 @@ export function refreshGit(queryClient: QueryClient, projectId: string): Promise
     queryClient.invalidateQueries({ queryKey: ['diff'] }),
   ]);
 }
+
+// --- Discard and .gitignore (the row menu of the Changes list) ---
+
+/** Whether the computer can discard changes; an older one only stages. */
+export function useCanDiscard(): boolean {
+  return useCapability('discard-project-git-files');
+}
+
+/** Whether the computer can add paths to .gitignore (and take them out of Git). */
+export function useCanIgnore(): boolean {
+  return useCapability('ignore-project-git-paths');
+}
+
+/** A file the computer could not move to the Trash, and why. */
+export type DiscardFailure = { path: string; error: string };
+
+/**
+ * Discard the working-tree changes of these files (null: all of them); the
+ * untracked ones go to the Trash on the computer. Resolves what could not go
+ * there; throws with the computer's message when it says no.
+ */
+export async function discardFiles(projectId: string, folder: string, paths: string[] | null): Promise<DiscardFailure[]> {
+  const batches: (string[] | null)[] = paths === null ? [null] : [];
+  if (paths) for (let i = 0; i < paths.length; i += MAX_PATHS) batches.push(paths.slice(i, i + MAX_PATHS));
+  const failed: DiscardFailure[] = [];
+  for (const batch of batches) {
+    const result = await request<{ ok?: boolean; error?: string; failed?: DiscardFailure[] } | null>('discard-project-git-files', [projectId, folder, batch]);
+    if (!result || result.error || result.ok === false) throw new Error(result?.error || 'Git could not discard these changes');
+    failed.push(...(result.failed ?? []));
+  }
+  return failed;
+}
+
+/** Add files or folders to the repository's .gitignore; with `untrack`, take them out of Git too. */
+export async function ignorePaths(projectId: string, folder: string, paths: string[], untrack: boolean): Promise<void> {
+  const result = await request<{ ok?: boolean; error?: string } | null>('ignore-project-git-paths', [projectId, folder, paths, untrack]);
+  if (!result || result.error || result.ok === false) throw new Error(result?.error || 'Git could not add this to .gitignore');
+}

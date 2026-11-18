@@ -5,9 +5,12 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FileIcon } from '@/components/files/FileIcon';
+import { Sheet } from '@/components/Sheet';
+import { changeMenu, sectionChangesIn, type ChangeMenuAction } from '@/git/change-menu';
 import { STATUS_COLORS, statusLetter, treeRows, type Change, type Repository, type TreeRow } from '@/git/model';
-import { refreshGit, stageFiles } from '@/git/stage-requests';
+import { discardFiles, ignorePaths, refreshGit, stageFiles, useCanDiscard, useCanIgnore } from '@/git/stage-requests';
 import { letterColor, sectionPaths, sideLetter, stagingSections, pathsToStage, type Section, type Side } from '@/git/staging';
+import { discardQuestion, discardTargets, untrackQuestion, type ChangeTarget } from '@/shared/vendor/git-change-actions';
 import { relativeTime, shortProjectPath } from '@/sessions/model';
 import { colors, spacing } from '@/theme';
 
@@ -21,6 +24,10 @@ export function RepositoryBlock({ projectId, repo, tree, canStage, onOpenHistory
 }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  // The row a long press opened the menu of.
+  const [menu, setMenu] = useState<{ section: Section; target: ChangeTarget } | null>(null);
+  const canDiscard = useCanDiscard();
+  const canIgnore = useCanIgnore();
   const changes = repo.changes || [];
   const sync = [repo.ahead ? `↑${repo.ahead}` : null, repo.behind ? `↓${repo.behind}` : null].filter(Boolean).join(' ');
   const sections = canStage ? stagingSections(changes) : [];
@@ -43,15 +50,79 @@ export function RepositoryBlock({ projectId, repo, tree, canStage, onOpenHistory
     }
   };
 
+  /** Run one call of the row menu with the list busy, then read the changes again. */
+  const act = async (key: string, call: () => Promise<void>, failure: string) => {
+    setBusy(key);
+    try {
+      await call();
+    } catch (err: any) {
+      Alert.alert(failure, err?.message || String(err));
+    } finally {
+      await refreshGit(queryClient, projectId);
+      setBusy(null);
+    }
+  };
+
+  /** Discard the "Changes" side of a file or folder (null: all of it), after asking. */
+  const discard = (target: ChangeTarget | null, key: string) => {
+    const targets = discardTargets(changes, target);
+    if (!targets.length) return;
+    const question = discardQuestion(targets, target?.dir ? target.path.split('/').pop() : null);
+    // The files the question counted, not whatever the folder holds by the time the computer runs it.
+    const paths = targets.map((change) => change.path);
+    setTimeout(() => Alert.alert(question.title, question.detail, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: question.confirm, style: 'destructive', onPress: () => act(key, async () => {
+          const failed = await discardFiles(projectId, repo.path, paths);
+          if (failed.length) Alert.alert('Some files were not moved to the Trash', failed.map((item) => `${item.path}: ${item.error}`).join('\n'));
+        }, 'Could not discard'),
+      },
+    ]));
+  };
+
+  /** Add a file or folder to .gitignore; taking it out of Git too asks first. */
+  const ignore = (target: ChangeTarget, untrack: boolean, key: string) => {
+    const run = () => act(key, () => ignorePaths(projectId, repo.path, [target.path], untrack), 'Could not add to .gitignore');
+    if (!untrack) { run(); return; }
+    const question = untrackQuestion(target.path.split('/').pop() || target.path, target.dir);
+    setTimeout(() => Alert.alert(question.title, question.detail, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: question.confirm, style: 'destructive', onPress: run },
+    ]));
+  };
+
+  const runMenu = (section: Section, target: ChangeTarget, action: ChangeMenuAction) => {
+    const key = `${section.key}:${target.path}`;
+    if (action === 'stage' || action === 'unstage') run(key, pathsToStage(sectionChangesIn(section, target), section.stage), section.stage);
+    else if (action === 'discard') discard(target, key);
+    else ignore(target, action === 'untrack', key);
+  };
+
   const rowsOf = (items: Change[]): TreeRow<Change>[] => tree ? treeRows(items) : items.map((change) => ({ kind: 'file', key: change.path, depth: 0, name: change.path, item: change }));
 
   const renderRows = (items: Change[], section: Section | null) => rowsOf(items).map((row) => {
     if (row.kind === 'folder') {
-      return (
-        <View key={`${section?.key ?? ''}:${row.key}`} style={[styles.folderRow, { paddingLeft: row.depth * 16 }]}>
+      const folder = (
+        <>
           <FileIcon name={row.name.split(' / ').pop() || row.name} dir size={18} />
           <Text style={styles.folder} numberOfLines={1}>{row.name}</Text>
-        </View>
+        </>
+      );
+      if (!section) {
+        return <View key={row.key} style={[styles.folderRow, { paddingLeft: row.depth * 16 }]}>{folder}</View>;
+      }
+      return (
+        <Pressable
+          key={`${section.key}:${row.key}`}
+          onLongPress={() => setMenu({ section, target: { path: row.key, dir: true } })}
+          style={({ pressed }) => [styles.folderRow, { paddingLeft: row.depth * 16 }, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`${row.name}, ${section.title}`}
+          accessibilityHint="Long press for actions"
+        >
+          {folder}
+        </Pressable>
       );
     }
     const change = row.item;
@@ -62,6 +133,7 @@ export function RepositoryBlock({ projectId, repo, tree, canStage, onOpenHistory
       <View key={rowKey} style={styles.changeLine}>
         <Pressable
           onPress={() => openDiff(change, section?.side ?? null)}
+          onLongPress={section ? () => setMenu({ section, target: { path: change.path, dir: false } }) : undefined}
           style={({ pressed }) => [styles.change, { paddingLeft: row.depth * 16 }, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={`${change.path}${section ? `, ${section.title}` : ''}`}
@@ -108,6 +180,19 @@ export function RepositoryBlock({ projectId, repo, tree, canStage, onOpenHistory
                   <View key={section.key}>
                     <View style={styles.sectionHead}>
                       <Text style={[styles.heading, styles.sectionTitle]}>{section.title} ({section.changes.length})</Text>
+                      {section.key === 'changes' && canDiscard ? (
+                        <Pressable
+                          onPress={() => discard(null, `discard:${section.key}`)}
+                          disabled={busy !== null}
+                          hitSlop={8}
+                          style={({ pressed }) => [styles.sectionButton, busy !== null && styles.disabled, pressed && styles.pressed]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Discard all in Changes"
+                        >
+                          {busy === `discard:${section.key}` ? <ActivityIndicator size="small" color={colors.danger} /> : null}
+                          <Text style={[styles.link, styles.danger]}>Discard All</Text>
+                        </Pressable>
+                      ) : null}
                       <Pressable
                         onPress={() => run(key, sectionPaths(section, changes), section.stage)}
                         disabled={busy !== null}
@@ -131,6 +216,16 @@ export function RepositoryBlock({ projectId, repo, tree, canStage, onOpenHistory
               {renderRows(changes, null)}
             </>
           )}
+          <Sheet
+            visible={!!menu}
+            title={menu?.target.path}
+            options={menu ? changeMenu(menu.section, menu.target, changes, { stage: canStage, discard: canDiscard, ignore: canIgnore }).map((entry) => ({
+              label: entry.label,
+              destructive: entry.destructive,
+              onPress: () => runMenu(menu.section, menu.target, entry.action),
+            })) : []}
+            onClose={() => setMenu(null)}
+          />
           {repo.commits?.length ? <Text style={styles.heading}>Latest commits</Text> : null}
           {repo.commits?.slice(0, 10).map((commit) => (
             <View key={commit.hash} style={styles.commit}>
@@ -150,6 +245,7 @@ const styles = StyleSheet.create({
   meta: { color: colors.textFaint, fontSize: 12 },
   graphLink: { paddingVertical: spacing.sm, alignSelf: 'flex-start' },
   link: { color: colors.accent, fontSize: 15 },
+  danger: { color: colors.danger },
   heading: { color: colors.textDim, fontSize: 13, fontWeight: '600', marginTop: spacing.md, marginBottom: 2 },
   changeLine: { flexDirection: 'row', alignItems: 'center' },
   change: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 7 },
