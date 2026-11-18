@@ -298,3 +298,53 @@ test('ignorePaths with untrack takes tracked files out of the index and leaves t
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('readEditableFile gives the text on disk, its version and the staged copy as the base', { skip }, async () => {
+  const repo = await makeRepo({ 'f.txt': 'one\ntwo\n', 'bin.dat': 'x' });
+  fs.writeFileSync(path.join(repo, 'f.txt'), 'one\nTWO\n');
+  await git.run(['add', 'f.txt'], repo);
+  fs.writeFileSync(path.join(repo, 'f.txt'), 'one\nTWO\nthree\n');
+  const read = await git.readEditableFile(repo, 'f.txt');
+  assert.equal(read.content, 'one\nTWO\nthree\n');
+  assert.equal(read.base, 'one\nTWO\n');
+  assert.match(read.version, /^[0-9a-f]{40}$/);
+
+  fs.writeFileSync(path.join(repo, 'new.txt'), 'fresh\n');
+  assert.equal((await git.readEditableFile(repo, 'new.txt')).base, '');
+
+  fs.writeFileSync(path.join(repo, 'bin.dat'), Buffer.from([1, 0, 2]));
+  await assert.rejects(git.readEditableFile(repo, 'bin.dat'), (err) => err.code === 'BINARY');
+  fs.rmSync(path.join(repo, 'f.txt'));
+  await assert.rejects(git.readEditableFile(repo, 'f.txt'), (err) => err.code === 'MISSING');
+  await assert.rejects(git.readEditableFile(repo, '../outside.txt'), /outside the repository/);
+});
+
+test('saveEditedFile writes the working tree only, and not over a newer file', { skip }, async () => {
+  const repo = await makeRepo({ 'f.txt': 'one\n' });
+  fs.writeFileSync(path.join(repo, 'f.txt'), 'one\nstaged\n');
+  await git.run(['add', 'f.txt'], repo);
+  const { version } = await git.readEditableFile(repo, 'f.txt');
+  const saved = await git.saveEditedFile(repo, 'f.txt', 'one\nstaged\nedited\n', version);
+  assert.equal(saved.ok, true);
+  assert.equal(fs.readFileSync(path.join(repo, 'f.txt'), 'utf8'), 'one\nstaged\nedited\n');
+  // The staged part stays staged; the edit is left to stage.
+  assert.equal(await indexed(repo, 'f.txt'), 'one\nstaged\n');
+  assert.equal((await git.runRaw(['status', '--porcelain', 'f.txt'], repo)).slice(0, 2), 'MM');
+
+  // Saved again from the old version: the file on disk is newer.
+  const stale = await git.saveEditedFile(repo, 'f.txt', 'lost\n', version);
+  assert.equal(stale.ok, false);
+  assert.equal(stale.code, 'CHANGED');
+  assert.equal(stale.version, saved.version);
+  assert.equal(fs.readFileSync(path.join(repo, 'f.txt'), 'utf8'), 'one\nstaged\nedited\n');
+  assert.equal((await git.saveEditedFile(repo, 'f.txt', 'two\n', saved.version)).ok, true);
+});
+
+test('saveEditedFile does not write through a link', { skip: skip || (process.platform === 'win32' && 'links need rights on Windows') }, async () => {
+  const repo = await makeRepo({ 'f.txt': 'one\n' });
+  const outside = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-out-')), 'target.txt');
+  fs.writeFileSync(outside, 'keep\n');
+  fs.symlinkSync(outside, path.join(repo, 'link.txt'));
+  await assert.rejects(git.saveEditedFile(repo, 'link.txt', 'changed\n'), (err) => err.code === 'LINK');
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'keep\n');
+});

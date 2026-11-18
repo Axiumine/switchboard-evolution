@@ -5,9 +5,10 @@
 // a folder beyond staging: discard its working-tree changes (an untracked
 // file goes to the Trash), add it to .gitignore, or add it and stop tracking
 // it. Which changes an action reaches, which actions a row offers, the line
-// written to .gitignore, and the question asked before anything is lost.
+// written to .gitignore, and the question asked before anything is lost. Also
+// which changed files can be edited in place from the diff (canEdit).
 //
-// A change is one entry of git.js parsePorcelain(): { path, status,
+// A change is one entry of git.js parsePorcelain(): { path, status, code,
 // indexStatus, worktreeStatus }, paths relative to the repository's root.
 // A target is { path, dir } for a file or a folder row, or null for every change.
 //
@@ -120,7 +121,26 @@
     };
   }
 
-  const api = { discardTargets, ignoreOptions, ignorePattern, discardQuestion, untrackQuestion, inTarget };
+  /**
+   * Whether the diff of `change` offers Edit: the file has to be on disk. A
+   * deletion has nothing to edit; a file in conflict does, unless both sides
+   * deleted it (in a conflict, D names a side, not the working tree).
+   */
+  function canEdit(change) {
+    if (!change) return false;
+    if (isConflicted(change)) return change.code !== 'DD';
+    if (change.worktreeStatus === 'D') return false;
+    return !(change.indexStatus === 'D' && (!change.worktreeStatus || change.worktreeStatus === ' '));
+  }
+
+  /** What the editor of `change` compares its text with, in words, shown above it in edit mode. */
+  function editNote(change) {
+    if (change && isUntracked(change)) return 'Not tracked yet: all of it is new. Saved edits stay unstaged.';
+    if (change && isConflicted(change)) return 'In conflict: marked is what you change from here. Saved edits stay unstaged.';
+    return 'Marked is what differs from the staged copy. Saved edits are left to stage.';
+  }
+
+  const api = { discardTargets, ignoreOptions, ignorePattern, discardQuestion, untrackQuestion, inTarget, canEdit, editNote };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.GitChangeActions = api;
 })(typeof window !== 'undefined' ? window : globalThis);

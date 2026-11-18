@@ -99,6 +99,8 @@ contextBridge.exposeInMainWorld('api', {
   stageProjectGitLines: (id, folderPath, filePath, side, diffId, lines) => ipcRenderer.invoke('stage-project-git-lines', id, folderPath, filePath, side, diffId, lines),
   discardProjectGitFiles: (id, folderPath, paths) => ipcRenderer.invoke('discard-project-git-files', id, folderPath, paths),
   ignoreProjectGitPaths: (id, folderPath, paths, untrack) => ipcRenderer.invoke('ignore-project-git-paths', id, folderPath, paths, untrack),
+  readProjectGitEditFile: (id, folderPath, filePath) => ipcRenderer.invoke('read-project-git-edit-file', id, folderPath, filePath),
+  saveProjectGitEditFile: (id, folderPath, filePath, content, version) => ipcRenderer.invoke('save-project-git-edit-file', id, folderPath, filePath, content, version),
   getFolderGitStatus: (folderPath) => ipcRenderer.invoke('get-folder-git-status', folderPath),
 
   // Git Graph tab

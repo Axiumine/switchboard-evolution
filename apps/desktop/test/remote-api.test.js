@@ -301,3 +301,16 @@ test('a phone can discard changes and add paths to .gitignore, with or without l
   assert.match((await api.call('ignore-project-git-paths', ['p1', '/r', ['dist'], 'yes'])).error, /Wrong parameter 4/);
   assert.equal(calls.length, 3);
 });
+
+test('a phone can read a changed file to edit and save it, against its version', async () => {
+  const { api, calls } = setup({
+    'read-project-git-edit-file': () => ({ ok: true, content: 'a', base: '', version: 'f'.repeat(40) }),
+    'save-project-git-edit-file': () => ({ ok: true, version: 'e'.repeat(40) }),
+  });
+  assert.ok((await api.call('read-project-git-edit-file', ['p1', '/r', 'src/a.js'])).result.ok);
+  assert.ok((await api.call('save-project-git-edit-file', ['p1', '/r', 'src/a.js', 'text', 'f'.repeat(40)])).result.ok);
+  assert.ok((await api.call('save-project-git-edit-file', ['p1', '/r', 'src/a.js', 'text'])).result.ok);
+  assert.match((await api.call('save-project-git-edit-file', ['p1', '/r', 'src/a.js', 'text', 'v1'])).error, /Wrong parameter 5/);
+  assert.match((await api.call('save-project-git-edit-file', ['p1', '/r', 'src/a.js', 42])).error, /Wrong parameter 4/);
+  assert.equal(calls.length, 3);
+});

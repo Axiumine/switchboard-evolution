@@ -6107,7 +6107,12 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .git-diff-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
 .git-diff-actions .ws-ghost { border-color: rgba(255,255,255,0.1); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .git-diff-actions .ws-ghost[hidden] { display: none; }
-.git-pick-act:not([disabled]) { color: #e4e4fa; background: rgba(128,136,255,0.2); border-color: rgba(128,136,255,0.5); }
+.git-pick-act:not([disabled]),
+.git-edit-save:not([disabled]) { color: #e4e4fa; background: rgba(128,136,255,0.2); border-color: rgba(128,136,255,0.5); }
+.git-diff-side.editing { background: rgba(128,136,255,0.18); color: #b8bdff; }
+/* Edit mode: the editor fills the pane's height under its header. */
+.git-edit-editor { height: max(320px, calc(100vh - 260px)); border-top: 1px solid rgba(255,255,255,0.055); }
+.git-file-editing { display: inline-flex; flex-shrink: 0; color: #9aa0ff; }
 .git-pick-act[disabled] { opacity: 0.45; cursor: default; }
 .git-diff-note { padding: 6px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); color: #8a8aa0; font-size: 10.5px; }
 .git-diff-note.is-warning { color: #e6c07a; background: rgba(230,192,122,0.08); }

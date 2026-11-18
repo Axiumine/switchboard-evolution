@@ -16,6 +16,8 @@ function loadContext(localStorageImpl) {
       classList: { add() {}, remove() {}, toggle() {} },
       setAttribute() {},
       appendChild() {},
+      addEventListener() {},
+      remove() {},
       querySelectorAll: () => [],
     }) },
     window: { api: {} },
@@ -501,4 +503,129 @@ test('Add to .gitignore runs at once; Remove from Git asks first', async () => {
   await ctx.gitIgnore({ id: 'p' }, ctx.gitTabState('p'), repo, body, { path: 'dist', dir: true }, true);
   assert.equal(asked, 1);
   assert.deepEqual(plain(calls), [['ignore', 'p', '/repo', ['dist'], false]]);
+});
+
+/** A CodeMirror view as createUnifiedMergeViewer gives it, with a text that can be changed. */
+function fakeEditorView(text) {
+  const view = {
+    text,
+    destroyed: false,
+    get state() { return { doc: { length: view.text.length, toString: () => view.text } }; },
+    destroy() { view.destroyed = true; },
+    focus() {},
+    requestMeasure() {},
+  };
+  return view;
+}
+
+function editingContext(calls, saveResults = []) {
+  const ctx = loadContext();
+  ctx.window.api = Object.assign(stagingApi(calls), {
+    readProjectGitEditFile: async (...args) => { calls.push(['read', ...args]); return { ok: true, content: 'a\nb\n', base: 'a\n', version: 'v1' }; },
+    saveProjectGitEditFile: async (...args) => { calls.push(['save', ...args]); return saveResults.shift() || { ok: true, version: 'v2' }; },
+  });
+  const views = [];
+  ctx.window.createUnifiedMergeViewer = (host, base, content, filename, options) => {
+    const view = fakeEditorView(content);
+    views.push({ base, content, filename, options: plain(options), view });
+    return view;
+  };
+  ctx.paintGitChanges = () => {};
+  ctx.paintGitDiff = () => {};
+  ctx.refreshGitRepositories = async () => { calls.push(['refresh']); };
+  return { ctx, views };
+}
+
+test('the diff offers Edit for a file on disk, and Exit Edit Mode and Save while editing', () => {
+  const { ctx } = editingContext([]);
+  const head = (c, side, edit) => ctx.gitDiffHeadHtml({ side, change: c }, null, edit);
+  assert.match(head(porcelain('src/a.js', ' M'), 'unstaged'), /git-edit-act/);
+  assert.match(head(porcelain('src/a.js', 'M '), 'staged'), /git-edit-act/);
+  assert.doesNotMatch(head(porcelain('src/a.js', ' D'), 'unstaged'), /git-edit-act/);
+  const editing = head(porcelain('src/a.js', ' M'), 'unstaged', { busy: false });
+  assert.match(editing, /Exit Edit Mode/);
+  assert.match(editing, /git-edit-save/);
+  assert.match(editing, />Editing</);
+  assert.doesNotMatch(editing, /git-file-act|git-edit-act/);
+  // An older main process: no Edit.
+  delete ctx.window.api.readProjectGitEditFile;
+  assert.doesNotMatch(head(porcelain('src/a.js', ' M'), 'unstaged'), /git-edit-act/);
+});
+
+test('Edit opens the file on disk against its staged copy, with every line shown and no merge buttons', async () => {
+  const calls = [];
+  const { ctx, views } = editingContext(calls);
+  const state = ctx.gitTabState('p');
+  const repo = { path: '/repo', changes: [porcelain('src/a.js', 'MM')] };
+  const item = { side: 'staged', change: repo.changes[0] };
+  await ctx.gitStartEdit({ id: 'p' }, state, repo, fakeBody(fakeList()), item);
+  assert.deepEqual(plain(calls), [['read', 'p', '/repo', 'src/a.js']]);
+  assert.equal(views.length, 1);
+  assert.deepEqual([views[0].base, views[0].content, views[0].filename], ['a\n', 'a\nb\n', 'src/a.js']);
+  assert.deepEqual(views[0].options, { readOnly: false, mergeControls: false, collapse: false });
+  assert.ok(state.editors.has('/repo\0src/a.js'));
+  // Opened again from the other side: the same file, the same editor.
+  await ctx.gitStartEdit({ id: 'p' }, state, repo, fakeBody(fakeList()), { side: 'unstaged', change: repo.changes[0] });
+  assert.equal(views.length, 1);
+});
+
+test('Save writes against the version read, stays in edit mode and reads the lists again', async () => {
+  const calls = [];
+  const { ctx, views } = editingContext(calls);
+  const state = ctx.gitTabState('p');
+  const repo = { path: '/repo', changes: [porcelain('src/a.js', ' M')] };
+  const item = { side: 'unstaged', change: repo.changes[0] };
+  const body = fakeBody(fakeList());
+  await ctx.gitStartEdit({ id: 'p' }, state, repo, body, item);
+  const session = state.editors.get('/repo\0src/a.js');
+  // Nothing typed: nothing to save.
+  await ctx.gitSaveEdit({ id: 'p' }, state, repo, body, item, session);
+  assert.equal(calls.filter(c => c[0] === 'save').length, 0);
+  views[0].view.text = 'a\nb\nc\n';
+  await ctx.gitSaveEdit({ id: 'p' }, state, repo, body, item, session);
+  assert.deepEqual(plain(calls.slice(1)), [['save', 'p', '/repo', 'src/a.js', 'a\nb\nc\n', 'v1'], ['refresh']]);
+  assert.equal(session.version, 'v2');
+  assert.equal(ctx.gitEditDirty(session), false);
+  assert.ok(state.editors.has('/repo\0src/a.js'));
+});
+
+test('a file changed on disk is overwritten only after asking', async () => {
+  const calls = [];
+  const changed = { ok: false, code: 'CHANGED', error: 'The file changed on disk after it was opened', version: 'v9' };
+  const { ctx, views } = editingContext(calls, [changed, changed]);
+  const state = ctx.gitTabState('p');
+  const repo = { path: '/repo', changes: [porcelain('a.txt', ' M')] };
+  const item = { side: 'unstaged', change: repo.changes[0] };
+  const body = fakeBody(fakeList());
+  await ctx.gitStartEdit({ id: 'p' }, state, repo, body, item);
+  const session = state.editors.get('/repo\0a.txt');
+  views[0].view.text = 'mine\n';
+  const questions = [];
+  ctx.gitChangesConfirm = async (q) => { questions.push(plain(q)); return false; };
+  await ctx.gitSaveEdit({ id: 'p' }, state, repo, body, item, session);
+  assert.equal(questions[0].title, '“a.txt” changed on disk');
+  assert.equal(questions[0].confirm, 'Overwrite');
+  assert.equal(calls.filter(c => c[0] === 'save').length, 1);
+
+  ctx.gitChangesConfirm = async () => true;
+  await ctx.gitSaveEdit({ id: 'p' }, state, repo, body, item, session);
+  // The second save of this round goes without a version: it overwrites.
+  assert.deepEqual(plain(calls.filter(c => c[0] === 'save').map(c => c[5])), ['v1', 'v1', null]);
+});
+
+test('Exit Edit Mode drops the editor and what was not saved, and reads the diff again', async () => {
+  const calls = [];
+  const { ctx, views } = editingContext(calls);
+  const state = ctx.gitTabState('p');
+  const repo = { path: '/repo', changes: [porcelain('a.txt', ' M')] };
+  const item = { side: 'unstaged', change: repo.changes[0] };
+  await ctx.gitStartEdit({ id: 'p' }, state, repo, fakeBody(fakeList()), item);
+  state.diffs.set(ctx.gitDiffKey(repo, 'unstaged', 'a.txt'), { diff: 'old' });
+  views[0].view.text = 'unsaved\n';
+  await ctx.gitExitEdit({ id: 'p' }, state, repo, fakeBody(fakeList()), item);
+  assert.equal(views[0].view.destroyed, true);
+  assert.equal(state.editors.size, 0);
+  assert.equal(state.diffs.has(ctx.gitDiffKey(repo, 'unstaged', 'a.txt')), false);
+  assert.equal(calls.filter(c => c[0] === 'save').length, 0);
+  assert.deepEqual(plain(calls.at(-1)), ['refresh']);
 });

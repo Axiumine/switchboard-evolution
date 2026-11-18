@@ -81,3 +81,27 @@ test('untrackQuestion says the file stays on disk and the removal is staged', ()
   assert.match(folder.title, /“dist”/);
   assert.match(folder.detail, /files in it stay on disk/);
 });
+
+test('Edit is offered for a file on disk: not for a deletion', () => {
+  const { canEdit } = actions;
+  const c = (code, status) => ({ path: 'a.txt', code, status, indexStatus: code[0], worktreeStatus: code[1] });
+  assert.equal(canEdit(c(' M', 'modified')), true);
+  assert.equal(canEdit(c('M ', 'modified')), true);
+  assert.equal(canEdit(c('MM', 'modified')), true);
+  assert.equal(canEdit(c('A ', 'added')), true);
+  assert.equal(canEdit(c('??', 'untracked')), true);
+  assert.equal(canEdit(c('R ', 'renamed')), true);
+  assert.equal(canEdit(c('UU', 'conflicted')), true);
+  assert.equal(canEdit(c('UD', 'conflicted')), true);
+  assert.equal(canEdit(c('DD', 'conflicted')), false);
+  assert.equal(canEdit(c(' D', 'deleted')), false);
+  assert.equal(canEdit(c('D ', 'deleted')), false);
+  assert.equal(canEdit(c('AD', 'deleted')), false);
+  assert.equal(canEdit(null), false);
+});
+
+test('the note above the editor says what the text is compared with', () => {
+  assert.match(actions.editNote({ path: 'a', status: 'modified' }), /staged copy/);
+  assert.match(actions.editNote({ path: 'a', status: 'untracked' }), /all of it is new/);
+  assert.match(actions.editNote({ path: 'a', status: 'conflicted' }), /In conflict/);
+});

@@ -32,6 +32,7 @@ function gitTabState(projectId) {
       selectionHint: new Map(), // repo path -> { side, path, index }, to land near it after a change
       diffs: new Map(), // `${repo}\0${side}\0${path}` -> { diff, truncated, diffId, parsed } | { error }
       picked: new Map(), // same key -> Set of picked line indices
+      editors: new Map(), // `${repo}\0${path}` -> a file in edit mode (gitStartEdit)
       busy: false,
       collapsedFolders: new Map(), // repo path -> Set of collapsed tree folder keys
       request: 0,
@@ -146,6 +147,7 @@ const GICONS = {
   plus: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
   minus: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>`,
   check: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>`,
+  edit: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
   discard: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>`,
 };
 
@@ -167,6 +169,17 @@ function gitCanDiscard() {
 
 function gitCanIgnore() {
   return typeof window !== 'undefined' && typeof window.api?.ignoreProjectGitPaths === 'function';
+}
+
+/** Whether the diff of `change` can turn into an editor: a newer main process, and a file on disk. */
+function gitCanEdit(change) {
+  return typeof window !== 'undefined' && typeof window.api?.readProjectGitEditFile === 'function'
+    && typeof window.createUnifiedMergeViewer === 'function' && !!GitChangeActionsLib()?.canEdit(change);
+}
+
+/** The key of a file in edit mode: the file, whichever side of the list it was opened from. */
+function gitEditKey(repo, path) {
+  return `${repo.path}\0${path}`;
 }
 
 /** git-change-actions.js, shared with main and the phone. */
@@ -328,21 +341,28 @@ function gitDiffSideLabel(side, change) {
   return change.status === 'untracked' ? 'Untracked' : 'Unstaged';
 }
 
-/** The header of the diff: the file, which side, and the staging buttons. */
-function gitDiffHeadHtml(item, cached) {
+/** The header of the diff: the file, which side, and the staging buttons; in edit mode, Exit and Save. */
+function gitDiffHeadHtml(item, cached, edit = null) {
   const { side, change } = item;
   const renamed = change.oldPath ? `${change.oldPath} → ${change.path}` : change.path;
   let actions = '';
-  if (gitCanStage()) {
+  if (edit) {
+    actions = `<span class="git-diff-actions">
+      <button type="button" class="ws-ghost ws-ghost--sm git-edit-exit" title="Back to the diff; what is not saved is dropped">Exit Edit Mode</button>
+      <button type="button" class="ws-ghost ws-ghost--sm git-edit-save" title="Save to disk (⌘S)" disabled>Save</button>
+    </span>`;
+  } else if (gitCanStage()) {
     const pickable = cached && !cached.error && cached.parsed && GitDiffModelLib().canPickLines(cached.parsed) && !cached.truncated;
     const verb = side === 'staged' ? 'Unstage' : 'Stage';
     const fileLabel = side === 'merge' ? 'Mark as Resolved' : `${verb} File`;
     actions = `<span class="git-diff-actions">
       ${pickable ? `<button type="button" class="ws-ghost ws-ghost--sm git-pick-clear" hidden>Clear</button><button type="button" class="ws-ghost ws-ghost--sm git-pick-act" disabled>${verb} Selected Lines</button>` : ''}
+      ${gitCanEdit(change) ? `<button type="button" class="ws-ghost ws-ghost--sm git-edit-act" title="Edit the file here, with what differs from its staged copy marked">${GICONS.edit(12)}<span>Edit</span></button>` : ''}
       <button type="button" class="ws-ghost ws-ghost--sm git-file-act">${side === 'staged' ? GICONS.minus(12) : side === 'merge' ? GICONS.check(12) : GICONS.plus(12)}<span>${fileLabel}</span></button>
     </span>`;
   }
-  return `<div class="git-diff-title"><span class="git-diff-file mono" title="${escapeHtml(renamed)}">${escapeHtml(renamed)}</span><span class="git-diff-side ${side}">${escapeHtml(gitDiffSideLabel(side, change))}</span>${actions}</div>`;
+  const label = edit ? 'Editing' : gitDiffSideLabel(side, change);
+  return `<div class="git-diff-title"><span class="git-diff-file mono" title="${escapeHtml(renamed)}">${escapeHtml(renamed)}</span><span class="git-diff-side ${edit ? 'editing' : side}">${escapeHtml(label)}</span>${actions}</div>`;
 }
 
 /** git-diff-model.js, as a global in the window. */
@@ -360,6 +380,11 @@ function paintGitDiff(project, state, repo, body, item) {
   // An item from an older caller is a bare change.
   if (!item.change) item = { side: 'unstaged', change: item };
   const { side, change } = item;
+  const editing = state.editors && state.editors.get(gitEditKey(repo, change.path));
+  if (editing) {
+    paintGitEditor(project, state, repo, body, item, editing);
+    return;
+  }
   const staging = gitCanStage() && !!GitDiffModelLib();
   const key = staging ? gitDiffKey(repo, side, change.path) : `${repo.path}\0${change.path}`;
   const cached = state.diffs.get(key);
@@ -435,6 +460,8 @@ function bindGitDiffPane(project, state, repo, body, item, { key, cached, pickab
   if (fileButton) {
     fileButton.onclick = () => gitStageFiles(project, state, repo, body, [change], side !== 'staged', item);
   }
+  const editButton = pane.querySelector('.git-edit-act');
+  if (editButton) editButton.onclick = () => gitStartEdit(project, state, repo, body, item);
   if (!pickable) return;
   const model = GitDiffModelLib();
   const pickButton = pane.querySelector('.git-pick-act');
@@ -490,6 +517,110 @@ function bindGitDiffPane(project, state, repo, body, item, { key, cached, pickab
     for (const i of range) { if (drag.on) picked.add(i); else picked.delete(i); }
     refresh();
   };
+}
+
+// ── Edit mode ────────────────────────────────────────────────────────
+// Edit turns the diff into an editor of the file on disk, with what differs
+// from the staged copy marked as it is typed. Save writes the file and stays
+// in edit mode: the edit becomes a change to stage in the list. Exit Edit
+// Mode goes back to the diff and drops what is not saved. A file stays in
+// edit mode while another file is looked at, and its rows show a pencil.
+
+/** Whether a file in edit mode has text that is not saved. */
+function gitEditDirty(session) {
+  const doc = session.view.state.doc;
+  return doc.length !== session.saved.length || doc.toString() !== session.saved;
+}
+
+/** Save is on with unsaved text, and says so while it saves. */
+function gitEditButtons(body, session) {
+  const pane = body.querySelector && body.querySelector('#git-diff-pane');
+  if (!pane || !session.host.isConnected || !pane.contains(session.host)) return;
+  const save = pane.querySelector('.git-edit-save');
+  if (!save) return;
+  save.disabled = session.busy || !gitEditDirty(session);
+  save.textContent = session.busy ? 'Saving…' : 'Save';
+}
+
+function paintGitEditor(project, state, repo, body, item, session) {
+  const pane = body.querySelector('#git-diff-pane');
+  if (!pane) return;
+  pane.dataset.path = item.change.path;
+  pane.innerHTML = `${gitDiffHeadHtml(item, null, session)}<div class="git-diff-note">${escapeHtml(GitChangeActionsLib().editNote(item.change))}</div><div class="git-edit-slot"></div>`;
+  pane.querySelector('.git-edit-slot').appendChild(session.host);
+  session.view.requestMeasure();
+  pane.querySelector('.git-edit-exit').onclick = () => gitExitEdit(project, state, repo, body, item);
+  pane.querySelector('.git-edit-save').onclick = () => gitSaveEdit(project, state, repo, body, item, session);
+  gitEditButtons(body, session);
+}
+
+async function gitStartEdit(project, state, repo, body, item) {
+  const key = gitEditKey(repo, item.change.path);
+  if (state.editors.has(key)) return;
+  let result;
+  try { result = await window.api.readProjectGitEditFile(project.id, repo.path, item.change.path); } catch (err) { result = { ok: false, error: err.message }; }
+  if (!result || !result.ok) {
+    alert(result?.error || 'Could not open this file.');
+    return;
+  }
+  if (state.editors.has(key)) return;
+  const host = document.createElement('div');
+  host.className = 'git-edit-editor';
+  const session = { host, view: null, version: result.version, saved: result.content, busy: false };
+  session.view = window.createUnifiedMergeViewer(host, result.base, result.content, item.change.path, {
+    readOnly: false, mergeControls: false, collapse: false, onDocChange: () => gitEditButtons(body, session),
+  });
+  // ⌘S in the editor.
+  host.addEventListener('cm-save', (event) => {
+    event.stopPropagation();
+    gitSaveEdit(project, state, repo, body, item, session);
+  });
+  state.editors.set(key, session);
+  paintGitChanges(project, state, repo, body, { repaintDiff: false });
+  paintGitDiff(project, state, repo, body, item);
+  session.view.focus();
+}
+
+async function gitSaveEdit(project, state, repo, body, item, session, { force = false } = {}) {
+  if (session.busy || (!force && !gitEditDirty(session))) return;
+  const text = session.view.state.doc.toString();
+  session.busy = true;
+  gitEditButtons(body, session);
+  let result;
+  try { result = await window.api.saveProjectGitEditFile(project.id, repo.path, item.change.path, text, force ? null : session.version); } catch (err) { result = { ok: false, error: err.message }; }
+  session.busy = false;
+  if (result && result.ok) {
+    session.version = result.version;
+    session.saved = text;
+    gitEditButtons(body, session);
+    // The lists, with the edit to stage.
+    await refreshGitRepositories(project, state, body);
+    return;
+  }
+  gitEditButtons(body, session);
+  if (result && result.code === 'CHANGED') {
+    const name = pathBasename(item.change.path) || item.change.path;
+    const overwrite = await gitChangesConfirm({
+      title: `“${name}” changed on disk`,
+      detail: 'It changed after you started editing it, perhaps by an agent. Saving puts your text in its place, and what changed on disk is lost.',
+      confirm: 'Overwrite',
+    });
+    if (overwrite) await gitSaveEdit(project, state, repo, body, item, session, { force: true });
+    return;
+  }
+  alert(result?.error || 'Could not save the file.');
+}
+
+/** Back to the diff, read again; what is not saved is dropped. */
+async function gitExitEdit(project, state, repo, body, item) {
+  const key = gitEditKey(repo, item.change.path);
+  const session = state.editors.get(key);
+  if (!session) return;
+  state.editors.delete(key);
+  session.view.destroy();
+  session.host.remove();
+  for (const side of ['unstaged', 'staged', 'merge']) state.diffs.delete(gitDiffKey(repo, side, item.change.path));
+  await refreshGitRepositories(project, state, body);
 }
 
 /** The scroll of the tab, to put back after the lists are drawn again. */
@@ -752,6 +883,9 @@ function createGitFileRow(project, state, repo, body, list, change, isSelected, 
   const name = (opts && opts.name) || pathBasename(change.path) || change.path;
   const dir = change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : '';
   const icon = typeof fileIconHtml === 'function' ? fileIconHtml(name) : '';
+  const editing = !!(state.editors && state.editors.has(gitEditKey(repo, change.path)));
+  const pencil = editing ? `<span class="git-file-editing" title="In edit mode">${GICONS.edit(11)}</span>` : '';
+  if (editing) row.classList.add('is-editing');
   let action = '';
   if (staging) {
     action = side === 'staged'
@@ -763,9 +897,9 @@ function createGitFileRow(project, state, repo, body, list, change, isSelected, 
   const marker = !staging && tree && change.status !== 'untracked' && change.status !== 'conflicted'
     ? `<span class="git-file-meta">${escapeHtml(meta)}</span>` : '';
   if (tree) {
-    row.innerHTML = `<span class="git-file-code ${escapeHtml(codeClass)}">${escapeHtml(code)}</span>${icon}<span class="git-file-path mono">${escapeHtml(opts.name || change.path)}</span>${marker}<span class="git-row-acts">${action}</span>`;
+    row.innerHTML = `<span class="git-file-code ${escapeHtml(codeClass)}">${escapeHtml(code)}</span>${icon}<span class="git-file-path mono">${escapeHtml(opts.name || change.path)}</span>${pencil}${marker}<span class="git-row-acts">${action}</span>`;
   } else if (staging) {
-    row.innerHTML = `<span class="git-file-code ${escapeHtml(codeClass)}">${escapeHtml(code)}</span>${icon}<span class="git-file-path mono">${escapeHtml(name)}</span><span class="git-file-dir">${escapeHtml(dir)}</span><span class="git-row-acts">${action}</span>`;
+    row.innerHTML = `<span class="git-file-code ${escapeHtml(codeClass)}">${escapeHtml(code)}</span>${icon}<span class="git-file-path mono">${escapeHtml(name)}</span>${pencil}<span class="git-file-dir">${escapeHtml(dir)}</span><span class="git-row-acts">${action}</span>`;
   } else {
     row.innerHTML = `<span class="git-file-code ${escapeHtml(change.status)}">${gitChangeCode(change)}</span>
         <span class="git-file-text"><span class="git-file-path mono">${escapeHtml(change.path)}</span><span class="git-file-meta">${escapeHtml(meta)}</span></span>`;
@@ -876,6 +1010,16 @@ function createGitGroupRow(project, state, repo, body, side, label, changes) {
 function paintGitChanges(project, state, repo, body, { repaintDiff = true } = {}) {
   const list = body.querySelector('#git-file-list');
   if (!list) return;
+  // A file in edit mode that is no longer changed (saved back as it was
+  // staged, say) leaves edit mode, unless it has text that is not saved.
+  if (state.editors) {
+    for (const [key, session] of state.editors) {
+      if (!key.startsWith(`${repo.path}\0`) || repo.changes.some(c => gitEditKey(repo, c.path) === key) || gitEditDirty(session)) continue;
+      state.editors.delete(key);
+      session.view.destroy();
+      session.host.remove();
+    }
+  }
   const tree = gitChangesViewMode() === 'tree';
   const collapsedSet = gitCollapsedSet(state, repo.path);
   list.replaceChildren();

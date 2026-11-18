@@ -721,7 +721,14 @@ function createMergeViewer(parent, originalContent, modifiedContent, filename) {
   });
 }
 
-function createUnifiedMergeViewer(parent, originalContent, modifiedContent, filename, { readOnly = false } = {}) {
+/**
+ * The changes from `originalContent` to `modifiedContent` in one column. With
+ * `readOnly` false the text can be edited: with history and the editing keys,
+ * the chunks drawn again as it changes; `mergeControls` (on by default when
+ * editable) puts accept and reject buttons on each chunk, and `onDocChange`
+ * hears every edit. `collapse` false shows the unchanged lines too.
+ */
+function createUnifiedMergeViewer(parent, originalContent, modifiedContent, filename, { readOnly = false, mergeControls = !readOnly, onDocChange = null, collapse = true } = {}) {
   const langExt = getLanguageExt(filename);
   const state = EditorState.create({
     doc: modifiedContent,
@@ -745,14 +752,15 @@ function createUnifiedMergeViewer(parent, originalContent, modifiedContent, file
       appThemePatch,
       readOnly ? EditorView.editable.of(false) : [],
       readOnly ? EditorState.readOnly.of(true) : [],
-      readOnly ? focusableText : [],
+      readOnly ? focusableText : [history(), keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap])],
+      onDocChange ? EditorView.updateListener.of((update) => { if (update.docChanged) onDocChange(update); }) : [],
       unifiedMergeView({
         original: originalContent,
         gutter: true,
         highlightChanges: true,
         syntaxHighlightDeletions: true,
-        collapseUnchanged: { margin: 3, minSize: 4 },
-        mergeControls: !readOnly,
+        collapseUnchanged: collapse ? { margin: 3, minSize: 4 } : undefined,
+        mergeControls: !!mergeControls,
       }),
     ],
   });

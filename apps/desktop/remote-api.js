@@ -201,6 +201,8 @@ allow('stage-project-git-lines', [isId, isPath, isString(4096), oneOf('unstaged'
 // the Trash on the computer, after the phone asked), add paths to .gitignore, optionally leaving Git too.
 allow('discard-project-git-files', [isId, isPath, v => v === null || arrayOf(isString(4096), 5000)(v)]);
 allow('ignore-project-git-paths', [isId, isPath, arrayOf(isString(4096), 5000), isBool]);
+allow('read-project-git-edit-file', [isId, isPath, isString(4096)]);
+allow('save-project-git-edit-file', [isId, isPath, isString(4096), isString(2_000_000), optional(isVersion)]);
 
 // Usage and app
 allow('get-usage');

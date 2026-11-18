@@ -717,6 +717,67 @@ async function discardFiles(dir, paths, { trash } = {}) {
   return { restored: tracked.length, trashed, failed };
 }
 
+// ── Editing a changed file from the diff ─────────────────────────────
+
+const MAX_EDIT_BYTES = 2_000_000;
+const fileVersion = (buffer) => crypto.createHash('sha1').update(buffer).digest('hex');
+const codedError = (message, code) => Object.assign(new Error(message), { code });
+
+/** A file of the checkout that may be written: on disk, a plain file, not a link out of it. */
+async function editablePath(dir, filePath) {
+  const { top, relative } = await stagingTarget(dir, filePath);
+  const abs = path.join(top, ...relative.split('/'));
+  let stat;
+  try { stat = await fs.promises.lstat(abs); } catch (err) {
+    if (err.code === 'ENOENT') throw codedError('The file is not on disk', 'MISSING');
+    throw err;
+  }
+  if (stat.isSymbolicLink()) throw codedError('A link cannot be edited here', 'LINK');
+  if (!stat.isFile()) throw codedError('Only a file can be edited', 'NOT_FILE');
+  return { top, relative, abs };
+}
+
+/**
+ * A changed file to edit in the Git tab: its text on disk, the version to save
+ * it against, and `base`, what its unstaged changes are measured from while it
+ * is edited: the staged copy (as checkout would write it, line endings
+ * included), nothing for an untracked file, the text itself for a file in
+ * conflict, which has no staged copy.
+ */
+async function readEditableFile(dir, filePath) {
+  const { top, relative, abs } = await editablePath(dir, filePath);
+  const buffer = await fs.promises.readFile(abs);
+  if (buffer.length > MAX_EDIT_BYTES) throw codedError('The file is too big to edit here', 'TOO_BIG');
+  if (buffer.subarray(0, 8000).includes(0)) throw codedError('A binary file cannot be edited', 'BINARY');
+  const content = buffer.toString('utf8');
+  const change = (await workingChanges(top)).find(item => item.path === relative);
+  let base;
+  if (change?.status === 'untracked') base = '';
+  else if (change?.status === 'conflicted') base = content;
+  else {
+    try { base = await runRaw(['cat-file', '--filters', `:${relative}`], top); } catch { base = ''; }
+  }
+  return { content, version: fileVersion(buffer), base };
+}
+
+/**
+ * Write an edited file to the working tree; the index is left as it is, so
+ * the edit shows as a change to stage. With `expectedVersion` (from
+ * readEditableFile) a file changed on disk since is not overwritten: the
+ * answer says CHANGED, with the version now on disk.
+ */
+async function saveEditedFile(dir, filePath, content, expectedVersion) {
+  if (typeof content !== 'string') throw new Error('No text to save');
+  const { abs } = await editablePath(dir, filePath);
+  if (expectedVersion) {
+    const current = fileVersion(await fs.promises.readFile(abs));
+    if (current !== expectedVersion) return { ok: false, code: 'CHANGED', error: 'The file changed on disk after it was opened', version: current };
+  }
+  const buffer = Buffer.from(content, 'utf8');
+  await fs.promises.writeFile(abs, buffer);
+  return { ok: true, version: fileVersion(buffer) };
+}
+
 /**
  * Add files and folders to the .gitignore at the top of the checkout, one
  * anchored line each (git-change-actions.js ignorePattern), never twice. With
@@ -993,7 +1054,7 @@ module.exports = {
   parseWorktreeList, worktreeList, worktreeLock, worktreeUnlock, worktreeMove, worktreePrune, worktreeRepair,
   deleteBranch, isUnmergedBranchError, isValidBranchName, listBranches, mergedBranches, defaultBranch, lastCommit,
   worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status,
-  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths,
+  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths, readEditableFile, saveEditedFile,
   tagExists, toGitPath, safeRelativePath,
   logWithParents, forEachRef, stashList, remoteList, configListIncludes,
   blobAtRevision, isShallowRepo, rootCommitHashes, userDetails,

@@ -1919,6 +1919,18 @@ async function ignoreProjectGitPaths(projectId, folderPath, paths, untrack) {
   return { ok: true, ...(await git.ignorePaths(folder.path, paths, { untrack: !!untrack })) };
 }
 
+/** A changed file's text to edit from the Git tab, with its version and the staged copy it is compared with. */
+async function readProjectGitEditFile(projectId, folderPath, filePath) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return { ok: true, ...(await git.readEditableFile(folder.path, filePath)) };
+}
+
+/** Save a file edited from the Git tab to the working tree; CHANGED when it changed on disk since `version`. */
+async function saveProjectGitEditFile(projectId, folderPath, filePath, content, version) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return git.saveEditedFile(folder.path, filePath, content, version || null);
+}
+
 // --- Git Graph tab: mutating + extended read operations ---
 // Every function below re-checks the exact same attached-folder boundary as
 // projectGitDiff above before doing anything with folderPath — a folderPath
@@ -2027,7 +2039,7 @@ module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief,
   createProject, updateProject, deleteProject, attachFolder, detachFolder,
-  folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths,
+  folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths, readProjectGitEditFile, saveProjectGitEditFile,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
   projectGitGraphFileAtRevision, projectGitGraphFileDiffBetween,
   projectGitGraphRepoConfig, setProjectGitGraphRepoConfig, trustProjectGitGraphRepoConfig,
