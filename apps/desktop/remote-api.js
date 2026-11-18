@@ -197,6 +197,10 @@ allow('get-project-git-diff', [isId, isPath, isString(4096), optional(oneOf('uns
 // Staging, as the Git tab does it: whole files, or the picked lines of one side's diff.
 allow('stage-project-git-files', [isId, isPath, v => v === null || arrayOf(isString(4096), 5000)(v), isBool]);
 allow('stage-project-git-lines', [isId, isPath, isString(4096), oneOf('unstaged', 'staged'), isVersion, arrayOf(isInt(0, 10_000_000), 200_000)]);
+// The Changes list's row menu: discard working-tree changes (null: all of them; untracked files go to
+// the Trash on the computer, after the phone asked), add paths to .gitignore, optionally leaving Git too.
+allow('discard-project-git-files', [isId, isPath, v => v === null || arrayOf(isString(4096), 5000)(v)]);
+allow('ignore-project-git-paths', [isId, isPath, arrayOf(isString(4096), 5000), isBool]);
 
 // Usage and app
 allow('get-usage');

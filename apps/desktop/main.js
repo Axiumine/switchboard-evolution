@@ -658,6 +658,9 @@ ipcMain.handle('get-project-git-info', guarded((id) => projects.projectGitInfo(i
 ipcMain.handle('get-project-git-diff', guarded((id, folderPath, filePath, side) => projects.projectGitDiff(id, folderPath, filePath, side)));
 ipcMain.handle('stage-project-git-files', guarded((id, folderPath, paths, stage) => projects.stageProjectGitFiles(id, String(folderPath || ''), paths ?? null, !!stage)));
 ipcMain.handle('stage-project-git-lines', guarded((id, folderPath, filePath, side, diffId, lines) => projects.stageProjectGitLines(id, String(folderPath || ''), filePath, side, String(diffId || ''), Array.isArray(lines) ? lines : [])));
+// Untracked files go to the Trash; the window and the phone ask before calling.
+ipcMain.handle('discard-project-git-files', guarded((id, folderPath, paths) => projects.discardProjectGitFiles(id, String(folderPath || ''), paths ?? null, { trash: (filePath) => shell.trashItem(filePath) })));
+ipcMain.handle('ignore-project-git-paths', guarded((id, folderPath, paths, untrack) => projects.ignoreProjectGitPaths(id, String(folderPath || ''), Array.isArray(paths) ? paths : [], !!untrack)));
 ipcMain.handle('get-folder-git-status', guarded((folderPath) => projects.folderGitInfo(String(folderPath || ''))));
 
 // --- IPC: Git Graph tab ---

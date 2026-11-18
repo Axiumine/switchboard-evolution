@@ -525,6 +525,7 @@ async function fileDiff(dir, filePath) {
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const diffModel = require('./public/git-diff-model');
+const changeActions = require('./public/git-change-actions');
 
 /** Run git with `input` on its standard input. */
 function runWithInput(args, cwd, input) {
@@ -653,6 +654,103 @@ async function stageLines(dir, filePath, side, expectedDiffId, lines) {
     throw new Error(`Could not ${reverse ? 'unstage' : 'stage'} these lines: ${err.message}`);
   }
   return { whole: false };
+}
+
+// --- Discard and .gitignore (the Changes list's row menu) ------------------
+// Paths are pathspecs read literally (--literal-pathspecs), so a file named
+// "a*.txt" never takes "ab.txt" with it.
+
+async function workingChanges(top) {
+  return parsePorcelain(await runRaw(['status', '--porcelain=v1', '-z', '--untracked-files=all'], top));
+}
+
+/** Remove the folders between `abs` and `top` that are now empty, nearest first. */
+async function pruneEmptyFolders(abs, top) {
+  let dir = path.dirname(abs);
+  while (dir !== top && dir.startsWith(top + path.sep)) {
+    try { await fs.promises.rmdir(dir); } catch { return; }
+    dir = path.dirname(dir);
+  }
+}
+
+/**
+ * Discard the working-tree changes ("Changes" in the list) of files and
+ * folders, `paths` null for every one: a tracked file goes back to its index
+ * version (HEAD's when nothing is staged), an untracked file goes to `trash`
+ * (shell.trashItem in main) and the folders it leaves empty go too. What is
+ * staged stays staged; conflicts are left alone.
+ */
+async function discardFiles(dir, paths, { trash } = {}) {
+  const { top } = await stagingTarget(dir);
+  const changes = await workingChanges(top);
+  let targets;
+  if (paths === null) {
+    targets = changeActions.discardTargets(changes, null);
+  } else {
+    if (!Array.isArray(paths) || !paths.length) throw new Error('No files to discard');
+    const picked = new Map();
+    for (const p of paths) {
+      const { relative } = await stagingTarget(top, p);
+      for (const change of changeActions.discardTargets(changes, { path: relative, dir: true })) picked.set(change.path, change);
+    }
+    targets = [...picked.values()];
+  }
+  if (!targets.length) throw new Error('There are no changes to discard here');
+  const tracked = targets.filter(change => change.status !== 'untracked').map(change => change.path);
+  const untracked = targets.filter(change => change.status === 'untracked').map(change => change.path);
+  if (untracked.length && typeof trash !== 'function') throw new Error('Untracked files cannot be moved to the Trash here');
+  if (tracked.length) {
+    await runWithInput(['--literal-pathspecs', 'restore', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'], top, tracked.join('\0'));
+  }
+  const failed = [];
+  let trashed = 0;
+  for (const rel of untracked) {
+    const abs = path.join(top, ...rel.split('/'));
+    try {
+      await trash(abs);
+      trashed += 1;
+      await pruneEmptyFolders(abs, top);
+    } catch (err) {
+      failed.push({ path: rel, error: err?.message || String(err) });
+    }
+  }
+  return { restored: tracked.length, trashed, failed };
+}
+
+/**
+ * Add files and folders to the .gitignore at the top of the checkout, one
+ * anchored line each (git-change-actions.js ignorePattern), never twice. With
+ * `untrack`, what Git tracks under them first leaves the index (git rm
+ * --cached): the files stay on disk and the removal is staged.
+ */
+async function ignorePaths(dir, paths, { untrack = false } = {}) {
+  const { top } = await stagingTarget(dir);
+  if (!Array.isArray(paths) || !paths.length) throw new Error('No files to add to .gitignore');
+  const relatives = [];
+  for (const p of paths) relatives.push((await stagingTarget(top, p)).relative);
+  const changes = await workingChanges(top);
+  const wanted = [];
+  for (const rel of relatives) {
+    let isDir;
+    try { isDir = (await fs.promises.stat(path.join(top, ...rel.split('/')))).isDirectory(); } catch { isDir = changes.some(change => change.path.startsWith(`${rel}/`)); }
+    wanted.push(changeActions.ignorePattern(rel, isDir));
+  }
+  let untracked = 0;
+  if (untrack) {
+    const listed = await runRaw(['--literal-pathspecs', 'ls-files', '-z', '--', ...relatives], top);
+    untracked = listed.split('\0').filter(Boolean).length;
+    if (untracked) await run(['--literal-pathspecs', 'rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...relatives], top);
+  }
+  const file = path.join(top, '.gitignore');
+  let text = '';
+  try { text = await fs.promises.readFile(file, 'utf8'); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  const present = new Set(text.split('\n').map(line => line.replace(/\r$/, '')));
+  const patterns = [...new Set(wanted)].filter(line => !present.has(line));
+  if (patterns.length) {
+    const lead = text && !text.endsWith('\n') ? '\n' : '';
+    await fs.promises.writeFile(file, `${text}${lead}${patterns.join('\n')}\n`);
+  }
+  return { patterns, untracked };
 }
 
 // --- Git Graph read functions ---------------------------------------------
@@ -895,7 +993,7 @@ module.exports = {
   parseWorktreeList, worktreeList, worktreeLock, worktreeUnlock, worktreeMove, worktreePrune, worktreeRepair,
   deleteBranch, isUnmergedBranchError, isValidBranchName, listBranches, mergedBranches, defaultBranch, lastCommit,
   worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status,
-  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines,
+  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths,
   tagExists, toGitPath, safeRelativePath,
   logWithParents, forEachRef, stashList, remoteList, configListIncludes,
   blobAtRevision, isShallowRepo, rootCommitHashes, userDetails,

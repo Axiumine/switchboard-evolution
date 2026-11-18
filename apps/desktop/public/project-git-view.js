@@ -146,6 +146,7 @@ const GICONS = {
   plus: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
   minus: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>`,
   check: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>`,
+  discard: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>`,
 };
 
 const GIT_SIDES = [
@@ -157,6 +158,25 @@ const GIT_SIDES = [
 /** Whether this desktop can stage (it always can; the guard keeps the tests' fake api read-only). */
 function gitCanStage() {
   return typeof window !== 'undefined' && typeof window.api?.stageProjectGitFiles === 'function';
+}
+
+/** Whether this desktop can discard changes and edit .gitignore from the list (an older main process cannot). */
+function gitCanDiscard() {
+  return typeof window !== 'undefined' && typeof window.api?.discardProjectGitFiles === 'function';
+}
+
+function gitCanIgnore() {
+  return typeof window !== 'undefined' && typeof window.api?.ignoreProjectGitPaths === 'function';
+}
+
+/** git-change-actions.js, shared with main and the phone. */
+function GitChangeActionsLib() {
+  return typeof GitChangeActions !== 'undefined' ? GitChangeActions : globalThis.GitChangeActions;
+}
+
+/** "Trash", or what Windows calls it. */
+function gitTrashName() {
+  return typeof window !== 'undefined' && window.api?.platform === 'win32' ? 'Recycle Bin' : 'Trash';
 }
 
 /** { merge, staged, unstaged }: a file staged and changed again is in both of the last two. */
@@ -519,6 +539,119 @@ async function gitStageLines(project, state, repo, body, item, cached, lines) {
   await gitAfterStaging(project, state, repo, body, item, result);
 }
 
+// --- Discard and .gitignore (row buttons and the right-click menu) ---
+
+/**
+ * A question before something is lost: { title, detail, confirm } from
+ * git-change-actions.js. Resolves true on the red button, false on Cancel or
+ * Escape. The same look as the Git Graph's own confirmation.
+ */
+function gitChangesConfirm({ title, detail, confirm }) {
+  if (typeof document === 'undefined' || !document.body) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'add-project-overlay gg-dialog-overlay gg-confirm-overlay';
+    const dialog = document.createElement('div');
+    dialog.className = 'add-project-dialog gg-dialog gg-confirm-dialog';
+    dialog.setAttribute('role', 'alertdialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.innerHTML = `
+      <h3>${escapeHtml(title)}</h3>
+      <div class="add-project-hint">${escapeHtml(detail)}</div>
+      <div class="add-project-actions">
+        <button type="button" class="add-project-cancel-btn">Cancel</button>
+        <button type="button" class="add-project-add-btn gg-dialog-primary gg-dialog-primary-danger">${escapeHtml(confirm)}</button>
+      </div>`;
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    let closed = false;
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } };
+    function finish(value) {
+      if (closed) return;
+      closed = true;
+      overlay.remove();
+      document.removeEventListener('keydown', onKey, true);
+      resolve(value);
+    }
+    document.addEventListener('keydown', onKey, true);
+    const cancel = dialog.querySelector('.add-project-cancel-btn');
+    cancel.onclick = () => finish(false);
+    dialog.querySelector('.add-project-add-btn').onclick = () => finish(true);
+    cancel.focus();
+  });
+}
+
+/** Run one call of the list's row menu with the list held busy, then read the repositories again. */
+async function gitRunRowAction(project, state, body, call, failure) {
+  if (state.busy) return;
+  state.busy = true;
+  body.classList.add('is-busy');
+  let result;
+  try { result = await call(); } catch (err) { result = { error: err.message }; }
+  state.busy = false;
+  body.classList.remove('is-busy');
+  if (!result || result.error || result.ok === false) alert(result?.error || failure);
+  else if (result.failed?.length) alert(`These could not be moved to the ${gitTrashName()}:\n${result.failed.map(item => `${item.path}: ${item.error}`).join('\n')}`);
+  await refreshGitRepositories(project, state, body);
+}
+
+/** Discard the "Changes" side of a file or folder row (target null: all of it), after asking. */
+async function gitDiscard(project, state, repo, body, target) {
+  const lib = GitChangeActionsLib();
+  const targets = lib.discardTargets(repo.changes, target);
+  if (!targets.length || state.busy) return;
+  const name = target?.dir ? target.path.split('/').pop() : null;
+  if (!(await gitChangesConfirm(lib.discardQuestion(targets, name, { trash: gitTrashName() })))) return;
+  // The files the question counted, not whatever the folder holds by the time main runs.
+  const paths = targets.map(change => change.path);
+  await gitRunRowAction(project, state, body, () => window.api.discardProjectGitFiles(project.id, repo.path, paths), 'Git could not discard these changes.');
+}
+
+/** Add a file or folder to .gitignore; with `untrack`, ask first and take it out of Git too. */
+async function gitIgnore(project, state, repo, body, target, untrack) {
+  if (state.busy) return;
+  if (untrack && !(await gitChangesConfirm(GitChangeActionsLib().untrackQuestion(target.path.split('/').pop(), target.dir)))) return;
+  await gitRunRowAction(project, state, body, () => window.api.ignoreProjectGitPaths(project.id, repo.path, [target.path], untrack), 'Git could not add this to .gitignore.');
+}
+
+/**
+ * The right-click menu of a file or folder row on one side of the list:
+ * stage or unstage, Discard Changes… (in "Changes" only), and the .gitignore
+ * entries git-change-actions.js offers for it.
+ */
+function gitRowMenuItems(project, state, repo, body, side, target) {
+  const lib = GitChangeActionsLib();
+  const lists = gitSideLists(repo.changes);
+  const inside = (lists[side] || []).filter(change => lib.inTarget(change.path, target));
+  const items = [];
+  if (gitCanStage() && inside.length) {
+    const stage = side !== 'staged';
+    items.push({
+      label: side === 'staged' ? 'Unstage Changes' : side === 'merge' ? 'Stage (Mark as Resolved)' : 'Stage Changes',
+      icon: stage ? GICONS.plus(14) : GICONS.minus(14),
+      onClick: () => gitStageFiles(project, state, repo, body, inside, stage),
+    });
+  }
+  if (side === 'unstaged' && gitCanDiscard() && lib.discardTargets(repo.changes, target).length) {
+    items.push({ label: 'Discard Changes…', icon: GICONS.discard(14), danger: true, onClick: () => gitDiscard(project, state, repo, body, target) });
+  }
+  const options = gitCanIgnore() && side !== 'merge' ? lib.ignoreOptions(repo.changes, target) : { ignore: false, untrack: false };
+  if ((options.ignore || options.untrack) && items.length) items.push({ sep: true });
+  if (options.ignore) items.push({ label: 'Add to .gitignore', onClick: () => gitIgnore(project, state, repo, body, target, false) });
+  if (options.untrack) items.push({ label: 'Add to .gitignore and Remove from Git…', danger: true, onClick: () => gitIgnore(project, state, repo, body, target, true) });
+  return items;
+}
+
+/** Open a row's menu where it was right-clicked. */
+function gitOpenRowMenu(event, project, state, repo, body, side, target) {
+  if (typeof showContextMenu !== 'function') return;
+  const items = gitRowMenuItems(project, state, repo, body, side, target);
+  if (!items.length) return;
+  event.preventDefault();
+  event.stopPropagation();
+  showContextMenu(items, { x: event.clientX, y: event.clientY });
+}
+
 /** Read the repositories again and redraw, keeping the selection and the scroll. */
 async function refreshGitRepositories(project, state, body) {
   const scroll = gitScrollOf(body);
@@ -624,6 +757,7 @@ function createGitFileRow(project, state, repo, body, list, change, isSelected, 
     action = side === 'staged'
       ? `<button type="button" class="git-row-act" data-act="unstage" title="Unstage Changes" aria-label="Unstage ${escapeHtml(name)}">${GICONS.minus(13)}</button>`
       : `<button type="button" class="git-row-act" data-act="stage" title="${side === 'merge' ? 'Stage (Mark as Resolved)' : 'Stage Changes'}" aria-label="Stage ${escapeHtml(name)}">${GICONS.plus(13)}</button>`;
+    if (side === 'unstaged' && gitCanDiscard()) action = `<button type="button" class="git-row-act" data-act="discard" title="Discard Changes" aria-label="Discard changes in ${escapeHtml(name)}">${GICONS.discard(13)}</button>${action}`;
   }
   // Without staging (an old main process), the row still says which state the file is in.
   const marker = !staging && tree && change.status !== 'untracked' && change.status !== 'conflicted'
@@ -645,11 +779,13 @@ function createGitFileRow(project, state, repo, body, list, change, isSelected, 
     const act = event && event.target && event.target.closest ? event.target.closest('.git-row-act') : null;
     if (act) {
       event.stopPropagation();
-      gitStageFiles(project, state, repo, body, [change], act.dataset.act === 'stage', { side, change });
+      if (act.dataset.act === 'discard') gitDiscard(project, state, repo, body, { path: change.path, dir: false });
+      else gitStageFiles(project, state, repo, body, [change], act.dataset.act === 'stage', { side, change });
       return;
     }
     select();
   };
+  if (staging) row.oncontextmenu = (event) => gitOpenRowMenu(event, project, state, repo, body, side, { path: change.path, dir: false });
   row.onkeydown = (event) => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); return; }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -662,27 +798,60 @@ function createGitFileRow(project, state, repo, body, list, change, isSelected, 
   return row;
 }
 
-function createGitFolderRow(project, state, repo, body, collapsedSet, row, holdsSelected) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'git-folder-row' + (holdsSelected ? ' selected' : '');
-  button.dataset.key = row.key;
-  button.style.setProperty('--depth', String(row.depth));
-  button.setAttribute('aria-expanded', row.collapsed ? 'false' : 'true');
+/**
+ * A folder of the tree. In a list that stages (`opts.side`), it also has the
+ * buttons and the right-click menu of the files inside it: Discard and Stage
+ * in "Changes", Unstage in "Staged Changes".
+ */
+function createGitFolderRow(project, state, repo, body, collapsedSet, row, holdsSelected, opts) {
+  const side = opts && opts.side;
+  const folderPath = opts && opts.folderPath;
+  const el = document.createElement('div');
+  el.className = 'git-folder-row' + (holdsSelected ? ' selected' : '');
+  el.tabIndex = 0;
+  el.setAttribute('role', 'treeitem');
+  el.dataset.key = row.key;
+  el.style.setProperty('--depth', String(row.depth));
+  el.setAttribute('aria-expanded', row.collapsed ? 'false' : 'true');
   const name = row.name.split('/').pop();
   const icon = typeof fileIconHtml === 'function' ? fileIconHtml(name, { dir: true, open: !row.collapsed }) : `<span class="git-folder-icon">${PICONS.folder(13)}</span>`;
-  button.innerHTML = `
+  let actions = '';
+  if (side && gitCanStage()) {
+    const label = escapeHtml(row.name);
+    if (side === 'unstaged' && gitCanDiscard()) actions += `<button type="button" class="git-row-act" data-act="discard" title="Discard Changes" aria-label="Discard changes in ${label}">${GICONS.discard(13)}</button>`;
+    actions += side === 'staged'
+      ? `<button type="button" class="git-row-act" data-act="unstage" title="Unstage Changes" aria-label="Unstage ${label}">${GICONS.minus(13)}</button>`
+      : `<button type="button" class="git-row-act" data-act="stage" title="${side === 'merge' ? 'Stage (Mark as Resolved)' : 'Stage Changes'}" aria-label="Stage ${label}">${GICONS.plus(13)}</button>`;
+  }
+  el.innerHTML = `
     <span class="git-folder-chevron">${row.collapsed ? PICONS.chevronRight(11) : PICONS.chevronDown(11)}</span>
     ${icon}
     <span class="git-folder-name mono">${escapeHtml(row.name)}</span>
-    ${row.count ? `<span class="git-folder-count">${row.count}</span>` : ''}`;
-  button.onclick = () => {
+    ${row.count ? `<span class="git-folder-count">${row.count}</span>` : ''}${actions ? `<span class="git-row-acts">${actions}</span>` : ''}`;
+  const target = folderPath ? { path: folderPath, dir: true } : null;
+  const toggle = () => {
     if (collapsedSet.has(row.key)) collapsedSet.delete(row.key); else collapsedSet.add(row.key);
     paintGitChanges(project, state, repo, body, { repaintDiff: false });
     // The list was rebuilt, so put keyboard focus back on the new copy of this row.
-    [...body.querySelectorAll('.git-folder-row')].find(el => el.dataset.key === row.key)?.focus();
+    [...body.querySelectorAll('.git-folder-row')].find(item => item.dataset.key === row.key)?.focus();
   };
-  return button;
+  el.onclick = (event) => {
+    const act = event && event.target && event.target.closest ? event.target.closest('.git-row-act') : null;
+    if (act && target) {
+      event.stopPropagation();
+      if (act.dataset.act === 'discard') { gitDiscard(project, state, repo, body, target); return; }
+      const inside = (gitSideLists(repo.changes)[side] || []).filter(change => GitChangeActionsLib().inTarget(change.path, target));
+      gitStageFiles(project, state, repo, body, inside, act.dataset.act === 'stage');
+      return;
+    }
+    toggle();
+  };
+  el.onkeydown = (event) => {
+    if (event.target !== el) return;
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
+  };
+  if (side && target) el.oncontextmenu = (event) => gitOpenRowMenu(event, project, state, repo, body, side, target);
+  return el;
 }
 
 /** A list's heading: its name, how many files, and Stage All / Unstage All. */
@@ -693,10 +862,12 @@ function createGitGroupRow(project, state, repo, body, side, label, changes) {
   let action = '';
   if (staging && side === 'staged') action = `<button type="button" class="git-row-act" data-act="unstage-all" title="Unstage All Changes" aria-label="Unstage All Changes">${GICONS.minus(13)}</button>`;
   else if (staging) action = `<button type="button" class="git-row-act" data-act="stage-all" title="${side === 'merge' ? 'Stage All Merge Changes' : 'Stage All Changes'}" aria-label="Stage All">${GICONS.plus(13)}</button>`;
+  if (staging && side === 'unstaged' && gitCanDiscard()) action = `<button type="button" class="git-row-act" data-act="discard-all" title="Discard All Changes" aria-label="Discard All Changes">${GICONS.discard(13)}</button>${action}`;
   head.innerHTML = `<span class="git-file-group-label">${escapeHtml(label)}</span><span class="git-file-group-count">${changes.length}</span><span class="git-row-acts">${action}</span>`;
   head.onclick = (event) => {
     const act = event && event.target && event.target.closest ? event.target.closest('.git-row-act') : null;
     if (!act) return;
+    if (act.dataset.act === 'discard-all') { gitDiscard(project, state, repo, body, null); return; }
     gitStageFiles(project, state, repo, body, changes, act.dataset.act === 'stage-all');
   };
   return head;
@@ -760,7 +931,7 @@ function paintGitChanges(project, state, repo, body, { repaintDiff = true } = {}
         // A collapsed folder hiding the selected file stands in for it.
         const folderPath = row.key.slice(side.length + 1);
         const holdsSelected = row.collapsed && selected?.side === side && selected.change.path.startsWith(`${folderPath}/`);
-        list.appendChild(createGitFolderRow(project, state, repo, body, collapsedSet, row, holdsSelected));
+        list.appendChild(createGitFolderRow(project, state, repo, body, collapsedSet, row, holdsSelected, { side, folderPath }));
       } else {
         list.appendChild(createGitFileRow(project, state, repo, body, list, row.change, isSelected(side, row.change), { tree: true, depth: row.depth, name: row.name, side }));
       }

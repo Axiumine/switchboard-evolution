@@ -1907,6 +1907,18 @@ async function stageProjectGitLines(projectId, folderPath, filePath, side, diffI
   }
 }
 
+/** Discard the working-tree changes of files and folders (paths null: all); untracked files go to `trash`. */
+async function discardProjectGitFiles(projectId, folderPath, paths, { trash } = {}) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return { ok: true, ...(await git.discardFiles(folder.path, paths, { trash })) };
+}
+
+/** Add files and folders to the repository's .gitignore; with `untrack`, take what is tracked out of Git too. */
+async function ignoreProjectGitPaths(projectId, folderPath, paths, untrack) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return { ok: true, ...(await git.ignorePaths(folder.path, paths, { untrack: !!untrack })) };
+}
+
 // --- Git Graph tab: mutating + extended read operations ---
 // Every function below re-checks the exact same attached-folder boundary as
 // projectGitDiff above before doing anything with folderPath — a folderPath
@@ -2015,7 +2027,7 @@ module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief,
   createProject, updateProject, deleteProject, attachFolder, detachFolder,
-  folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines,
+  folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
   projectGitGraphFileAtRevision, projectGitGraphFileDiffBetween,
   projectGitGraphRepoConfig, setProjectGitGraphRepoConfig, trustProjectGitGraphRepoConfig,

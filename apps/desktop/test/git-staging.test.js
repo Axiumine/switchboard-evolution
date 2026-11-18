@@ -180,3 +180,121 @@ test('an attached folder below the top of the checkout stages by repository path
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// --- Discard and .gitignore (the Changes list's row menu) ---
+
+/** A stand-in for shell.trashItem that deletes and remembers what it was given. */
+function fakeTrash() {
+  const calls = [];
+  const trash = async (abs) => { calls.push(abs); fs.rmSync(abs, { recursive: true, force: true }); };
+  return { calls, trash };
+}
+
+const statusOf = async (repo) => Object.fromEntries((await git.snapshot(repo)).changes.map(c => [c.path, c.code]));
+
+test('discardFiles puts tracked files back and keeps what is staged', { skip }, async () => {
+  const repo = await makeRepo({ 'a.txt': 'a\n', 'b.txt': 'b\n', 'c.txt': 'c\n' });
+  try {
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'changed\n');
+    fs.rmSync(path.join(repo, 'b.txt'));
+    fs.writeFileSync(path.join(repo, 'c.txt'), 'staged\n');
+    await git.stageFiles(repo, ['c.txt'], true);
+    fs.writeFileSync(path.join(repo, 'c.txt'), 'staged then changed\n');
+    const { trash, calls } = fakeTrash();
+    const result = await git.discardFiles(repo, ['a.txt', 'b.txt', 'c.txt'], { trash });
+    assert.deepEqual({ ...result, failed: [...result.failed] }, { restored: 3, trashed: 0, failed: [] });
+    assert.equal(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8'), 'a\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'b.txt'), 'utf8'), 'b\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'c.txt'), 'utf8'), 'staged\n');
+    assert.deepEqual(await statusOf(repo), { 'c.txt': 'M ' });
+    assert.equal(calls.length, 0);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('discardFiles of a folder trashes its untracked files and the folders they leave empty', { skip }, async () => {
+  const repo = await makeRepo({ 'src/a.txt': 'a\n', 'srcx/b.txt': 'b\n' });
+  try {
+    fs.writeFileSync(path.join(repo, 'src/a.txt'), 'changed\n');
+    fs.mkdirSync(path.join(repo, 'src/new/deep'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'src/new/deep/n.txt'), 'n\n');
+    fs.writeFileSync(path.join(repo, 'srcx/b.txt'), 'changed\n');
+    const { trash, calls } = fakeTrash();
+    const result = await git.discardFiles(repo, ['src'], { trash });
+    assert.equal(result.restored, 1);
+    assert.equal(result.trashed, 1);
+    assert.deepEqual(calls, [path.join(fs.realpathSync(repo), 'src/new/deep/n.txt')]);
+    assert.equal(fs.existsSync(path.join(repo, 'src/new')), false);
+    assert.equal(fs.existsSync(path.join(repo, 'src')), true);
+    assert.deepEqual(await statusOf(repo), { 'srcx/b.txt': ' M' });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('discardFiles with no paths empties Changes and leaves Staged Changes alone', { skip }, async () => {
+  const repo = await makeRepo({ 'a.txt': 'a\n', 'b.txt': 'b\n' });
+  try {
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'changed\n');
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'staged\n');
+    await git.stageFiles(repo, ['b.txt'], true);
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'n\n');
+    const { trash } = fakeTrash();
+    await git.discardFiles(repo, null, { trash });
+    assert.deepEqual(await statusOf(repo), { 'b.txt': 'M ' });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('discardFiles reads a name with "*" literally and refuses what it cannot reach', { skip: skip || (process.platform === 'win32' && 'no * in Windows names') }, async () => {
+  const repo = await makeRepo({ 'a*.txt': 'star\n', 'ab.txt': 'ab\n', 'staged.txt': 's\n' });
+  try {
+    fs.writeFileSync(path.join(repo, 'a*.txt'), 'changed\n');
+    fs.writeFileSync(path.join(repo, 'ab.txt'), 'changed\n');
+    const { trash } = fakeTrash();
+    await git.discardFiles(repo, ['a*.txt'], { trash });
+    assert.deepEqual(await statusOf(repo), { 'ab.txt': ' M' });
+    await assert.rejects(git.discardFiles(repo, ['../outside.txt'], { trash }), /outside the repository/);
+    fs.writeFileSync(path.join(repo, 'staged.txt'), 'only staged\n');
+    await git.stageFiles(repo, ['staged.txt'], true);
+    await assert.rejects(git.discardFiles(repo, ['staged.txt'], { trash }), /no changes to discard/i);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('ignorePaths writes anchored lines to the root .gitignore once, and creates it', { skip }, async () => {
+  const repo = await makeRepo({ 'keep.txt': 'k\n' });
+  try {
+    fs.mkdirSync(path.join(repo, 'out'));
+    fs.writeFileSync(path.join(repo, 'out/x.log'), 'x\n');
+    fs.writeFileSync(path.join(repo, 'notes.md'), 'n\n');
+    let result = await git.ignorePaths(repo, ['out', 'notes.md'], { untrack: false });
+    assert.deepEqual([...result.patterns], ['/out/', '/notes.md']);
+    assert.equal(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'), '/out/\n/notes.md\n');
+    assert.deepEqual(await statusOf(repo), { '.gitignore': '??' });
+
+    fs.writeFileSync(path.join(repo, '.gitignore'), '/out/\nnode_modules');
+    result = await git.ignorePaths(repo, ['out', 'notes.md'], { untrack: false });
+    assert.deepEqual([...result.patterns], ['/notes.md']);
+    assert.equal(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'), '/out/\nnode_modules\n/notes.md\n');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('ignorePaths with untrack takes tracked files out of the index and leaves them on disk', { skip }, async () => {
+  const repo = await makeRepo({ 'secret.env': 'k=v\n', 'dist/a.js': 'a\n', 'dist/b.js': 'b\n' });
+  try {
+    fs.writeFileSync(path.join(repo, 'secret.env'), 'k=changed\n');
+    const result = await git.ignorePaths(repo, ['secret.env', 'dist'], { untrack: true });
+    assert.equal(result.untracked, 3);
+    assert.equal(fs.readFileSync(path.join(repo, 'secret.env'), 'utf8'), 'k=changed\n');
+    assert.ok(fs.existsSync(path.join(repo, 'dist/a.js')));
+    assert.deepEqual(await statusOf(repo), { '.gitignore': '??', 'secret.env': 'D ', 'dist/a.js': 'D ', 'dist/b.js': 'D ' });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

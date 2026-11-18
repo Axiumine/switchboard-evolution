@@ -97,6 +97,8 @@ contextBridge.exposeInMainWorld('api', {
   getProjectGitDiff: (id, folderPath, filePath, side) => ipcRenderer.invoke('get-project-git-diff', id, folderPath, filePath, side),
   stageProjectGitFiles: (id, folderPath, paths, stage) => ipcRenderer.invoke('stage-project-git-files', id, folderPath, paths, stage),
   stageProjectGitLines: (id, folderPath, filePath, side, diffId, lines) => ipcRenderer.invoke('stage-project-git-lines', id, folderPath, filePath, side, diffId, lines),
+  discardProjectGitFiles: (id, folderPath, paths) => ipcRenderer.invoke('discard-project-git-files', id, folderPath, paths),
+  ignoreProjectGitPaths: (id, folderPath, paths, untrack) => ipcRenderer.invoke('ignore-project-git-paths', id, folderPath, paths, untrack),
   getFolderGitStatus: (folderPath) => ipcRenderer.invoke('get-folder-git-status', folderPath),
 
   // Git Graph tab

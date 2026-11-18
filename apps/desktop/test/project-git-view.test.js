@@ -31,6 +31,8 @@ function loadContext(localStorageImpl) {
       chevronRight: () => '<svg data-icon="chevron-right"></svg>',
     },
     localStorage: localStorageImpl || { getItem() { return null; }, setItem() {} },
+    GitChangeActions: require('../public/git-change-actions'),
+    alert: () => {},
   });
   vm.runInContext(source, context);
   return context;
@@ -420,4 +422,83 @@ test('paintGitRepository puts the summary (and any warning) after the path line'
   assert.doesNotMatch(html, /git-tab-title/);
   const order = ['git-repo-picker', 'git-tab-pathline', 'git-summary'].map(cls => html.indexOf(cls));
   assert.ok(order.every(i => i >= 0) && order[0] < order[1] && order[1] < order[2], JSON.stringify(order));
+});
+
+
+// --- Discard and .gitignore: row buttons, right-click menu, confirmation ---
+
+function stagingApi(calls) {
+  return {
+    stageProjectGitFiles: async () => ({ ok: true }),
+    stageProjectGitLines: async () => ({ ok: true }),
+    discardProjectGitFiles: async (...args) => { calls.push(['discard', ...args]); return { ok: true, failed: [] }; },
+    ignoreProjectGitPaths: async (...args) => { calls.push(['ignore', ...args]); return { ok: true }; },
+    getProjectGitInfo: async () => ({ ok: true, repositories: [] }),
+  };
+}
+
+const porcelain = (p, code) => ({ path: p, code, indexStatus: code[0], worktreeStatus: code[1], status: code === '??' ? 'untracked' : 'modified', staged: code[0] !== ' ' && code[0] !== '?' });
+const labels = (items) => plain(items.map(item => (item.sep ? '—' : item.label)));
+
+test('the row menu offers Discard in Changes and the .gitignore entry that fits the file or folder', () => {
+  const ctx = loadContext();
+  ctx.window.api = stagingApi([]);
+  const repo = { path: '/repo', changes: [porcelain('src/a.js', ' M'), porcelain('src/new.txt', '??'), porcelain('b.js', 'M ')] };
+  const state = ctx.gitTabState('p');
+  const menu = (side, target) => labels(ctx.gitRowMenuItems({ id: 'p' }, state, repo, {}, side, target));
+  assert.deepEqual(menu('unstaged', { path: 'src/new.txt', dir: false }), ['Stage Changes', 'Discard Changes…', '—', 'Add to .gitignore']);
+  assert.deepEqual(menu('unstaged', { path: 'src/a.js', dir: false }), ['Stage Changes', 'Discard Changes…', '—', 'Add to .gitignore and Remove from Git…']);
+  assert.deepEqual(menu('unstaged', { path: 'src', dir: true }), ['Stage Changes', 'Discard Changes…', '—', 'Add to .gitignore', 'Add to .gitignore and Remove from Git…']);
+  assert.deepEqual(menu('staged', { path: 'b.js', dir: false }), ['Unstage Changes', '—', 'Add to .gitignore and Remove from Git…']);
+
+  // An older main process: staging only.
+  ctx.window.api = { stageProjectGitFiles: async () => ({ ok: true }) };
+  assert.deepEqual(menu('unstaged', { path: 'src', dir: true }), ['Stage Changes']);
+});
+
+test('Changes rows, its folders and its heading get a Discard button; Staged Changes does not', () => {
+  const ctx = loadContext({ getItem() { return 'tree'; }, setItem() {} });
+  ctx.window.api = stagingApi([]);
+  const repo = { path: '/repo', changes: [porcelain('src/a.js', ' M'), porcelain('lib/b.js', 'M ')] };
+  const list = fakeList();
+  ctx.paintGitChanges({ id: 'p' }, ctx.gitTabState('p'), repo, fakeBody(list));
+  const html = (el) => String(el.innerHTML || '');
+  const groups = list.children.filter(el => el.className === 'git-file-group');
+  assert.deepEqual(groups.map(el => html(el).includes('data-act="discard-all"')), [false, true]);
+  const folders = list.children.filter(el => String(el.className).startsWith('git-folder-row'));
+  assert.deepEqual(folders.map(el => [el.dataset.key, html(el).includes('data-act="discard"')]), [['staged/lib', false], ['unstaged/src', true]]);
+  const files = list.children.filter(el => String(el.className).includes('git-file-row'));
+  assert.deepEqual(files.map(el => html(el).includes('data-act="discard"')), [false, true]);
+});
+
+test('Discard asks first, then discards exactly the files it counted', async () => {
+  const ctx = loadContext();
+  const calls = [];
+  ctx.window.api = stagingApi(calls);
+  const repo = { path: '/repo', changes: [porcelain('src/a.js', ' M'), porcelain('src/new.txt', '??'), porcelain('srcx/c.js', ' M')] };
+  const state = ctx.gitTabState('p');
+  const body = { classList: { add() {}, remove() {} }, isConnected: false };
+  const questions = [];
+  ctx.gitChangesConfirm = async (question) => { questions.push(plain(question)); return false; };
+  await ctx.gitDiscard({ id: 'p' }, state, repo, body, { path: 'src', dir: true });
+  assert.equal(calls.length, 0);
+  assert.equal(questions[0].title, 'Discard the changes in 2 files in “src”?');
+
+  ctx.gitChangesConfirm = async () => true;
+  await ctx.gitDiscard({ id: 'p' }, state, repo, body, { path: 'src', dir: true });
+  assert.deepEqual(plain(calls), [['discard', 'p', '/repo', ['src/a.js', 'src/new.txt']]]);
+});
+
+test('Add to .gitignore runs at once; Remove from Git asks first', async () => {
+  const ctx = loadContext();
+  const calls = [];
+  ctx.window.api = stagingApi(calls);
+  const repo = { path: '/repo', changes: [porcelain('dist/a.js', ' M')] };
+  const body = { classList: { add() {}, remove() {} }, isConnected: false };
+  let asked = 0;
+  ctx.gitChangesConfirm = async () => { asked += 1; return false; };
+  await ctx.gitIgnore({ id: 'p' }, ctx.gitTabState('p'), repo, body, { path: 'dist', dir: true }, false);
+  await ctx.gitIgnore({ id: 'p' }, ctx.gitTabState('p'), repo, body, { path: 'dist', dir: true }, true);
+  assert.equal(asked, 1);
+  assert.deepEqual(plain(calls), [['ignore', 'p', '/repo', ['dist'], false]]);
 });

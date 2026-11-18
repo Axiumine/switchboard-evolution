@@ -287,3 +287,17 @@ test('a phone can stage files and the picked lines of one side of a diff', async
   assert.match((await api.call('stage-project-git-lines', ['p1', '/r', 'a.js', 'unstaged', 'not-a-sha', [5]])).error, /Wrong parameter 5/);
   assert.equal(calls.length, 4);
 });
+
+test('a phone can discard changes and add paths to .gitignore, with or without leaving Git', async () => {
+  const { api, calls } = setup({
+    'discard-project-git-files': () => ({ ok: true }),
+    'ignore-project-git-paths': () => ({ ok: true }),
+  });
+  assert.ok((await api.call('discard-project-git-files', ['p1', '/r', ['src', 'a.js']])).result.ok);
+  assert.ok((await api.call('discard-project-git-files', ['p1', '/r', null])).result.ok);
+  assert.ok((await api.call('ignore-project-git-paths', ['p1', '/r', ['dist'], true])).result.ok);
+  assert.match((await api.call('discard-project-git-files', ['p1', '/r', 'a.js'])).error, /Wrong parameter 3/);
+  assert.match((await api.call('ignore-project-git-paths', ['p1', '/r', null, false])).error, /Wrong parameter 3/);
+  assert.match((await api.call('ignore-project-git-paths', ['p1', '/r', ['dist'], 'yes'])).error, /Wrong parameter 4/);
+  assert.equal(calls.length, 3);
+});

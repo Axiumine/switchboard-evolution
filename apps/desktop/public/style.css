@@ -5981,6 +5981,8 @@ body { display: flex; flex-direction: column; }
 }
 
 .git-folder-row:hover { background: rgba(255,255,255,0.035); }
+.git-folder-row:focus-visible { outline: 1px solid rgba(128,136,255,0.7); outline-offset: -1px; }
+.git-folder-row .git-row-acts { margin-left: 2px; }
 .git-folder-row.selected { background: rgba(122,132,255,0.11); }
 .git-folder-chevron { display: inline-flex; flex-shrink: 0; color: #6f6f84; }
 .git-folder-icon { display: inline-flex; flex-shrink: 0; color: #7d8dc9; }
@@ -6061,7 +6063,10 @@ body { display: flex; flex-direction: column; }
 .git-file-row:focus-within .git-row-acts,
 .git-file-row:focus .git-row-acts,
 .git-file-row.selected .git-row-acts,
-.git-file-group:hover .git-row-acts { visibility: visible; }
+.git-file-group:hover .git-row-acts,
+.git-folder-row:hover .git-row-acts,
+.git-folder-row:focus-within .git-row-acts,
+.git-folder-row:focus .git-row-acts { visibility: visible; }
 .git-row-act {
   width: 20px;
   height: 20px;
