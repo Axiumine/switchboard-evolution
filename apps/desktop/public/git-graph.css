@@ -405,11 +405,16 @@
   cursor: pointer;
 }
 
+/* The files on the left, narrow; on the right the commit's text and, under
+   it, the file opened from the list (gitGraphDetailsBodyHtml). */
 .gg-details-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 32%) minmax(0, 1fr);
   gap: 18px;
 }
+.gg-details-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 10px; }
+/* Clear of the close button in the panel's corner. */
+.gg-details-text { padding-right: 18px; min-width: 0; }
 
 .gg-details-header {
   color: #bcbccc;
@@ -424,9 +429,8 @@
 .gg-link { color: #8fa7e8; text-decoration: none; }
 .gg-link:hover { text-decoration: underline; }
 
-/* Tree/List on the left, Code Review on the right, clear of the close button
-   in the panel's corner: the one row above the files. */
-.gg-details-files-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-right: 14px; }
+/* Tree/List on the left, Code Review on the right: the one row above the files. */
+.gg-details-files-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .gg-details-files-bar .gg-code-review-btn { margin-left: auto; }
 .gg-file-view-toggle { display: flex; gap: 4px; }
 .gg-toggle-btn { border: 1px solid rgba(255,255,255,0.09); border-radius: 6px; padding: 3px 9px; background: rgba(255,255,255,0.03); color: #9090a8; font-size: 10.5px; cursor: pointer; }
@@ -467,6 +471,7 @@
 }
 
 .gg-file-row:hover { background: rgba(255,255,255,0.04); }
+.gg-file-row.gg-file-row-open { background: rgba(122,132,255,0.13); }
 
 .gg-file-status {
   width: 15px;
@@ -728,6 +733,44 @@ body.project-window .ws-body:has(> .gg-cmp-in-window) { padding: 0; display: fle
 .gg-details-inline .gg-details-files { max-height: calc(var(--gg-details-max, 75vh) - 30px); display: flex; flex-direction: column; min-height: 0; }
 .gg-details-inline .gg-details-files-bar { flex: 0 0 auto; }
 .gg-details-inline .gg-file-tree, .gg-details-inline .gg-file-flat-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+/* --- A file open in a record: under the commit's text, filling the panel --- */
+
+/* With a file open the panel takes its whole ceiling, and the file the room
+   the commit's text leaves (the text: at most 40%, scrolling). */
+.gg-details-inline:has(> .gg-details-has-file) { height: var(--gg-details-max, 75vh); }
+.gg-details-docked:has(> .gg-details-has-file) { height: 40vh; overflow: hidden; }
+.gg-details-has-file { height: 100%; grid-template-rows: minmax(0, 1fr); }
+.gg-details-has-file .gg-details-files { display: flex; flex-direction: column; min-height: 0; max-height: none; }
+.gg-details-has-file .gg-details-files-bar { flex: 0 0 auto; }
+.gg-details-has-file .gg-file-tree, .gg-details-has-file .gg-file-flat-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.gg-details-has-file .gg-details-text { flex: 0 1 auto; max-height: 40%; overflow: auto; min-height: 0; }
+.gg-details-diff {
+  flex: 1 1 0;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #14141a;
+}
+.gg-details-diff-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; color: #a8a8bc; font-size: 11px; background: #1a1a22; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; min-width: 0; }
+.gg-details-diff-head .gg-file-status { width: auto; }
+.gg-details-diff-path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #d0d0e0; }
+.gg-details-diff-note { color: #77778c; flex: 0 0 auto; }
+.gg-details-diff-actions { margin-left: auto; display: flex; gap: 2px; flex: 0 0 auto; }
+.gg-details-diff-actions .gg-icon-btn { width: 24px; height: 24px; }
+.gg-details-diff-close { font-size: 15px; }
+.gg-inline-diff-body { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; }
+.gg-details-diff-none { color: #66667a; font-size: 12px; padding: 18px; text-align: center; }
+
+/* A file in a window of its own (gitGraphRenderFileWindow): its commit and path, then its diff. */
+body.project-window .ws-body:has(> .gg-file-in-window) { padding: 0; display: flex; }
+.gg-file-in-window { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; background: #14141a; }
+.gg-file-window-head { padding: 6px 12px; }
+.gg-file-window-commit { color: #8fa7e8; flex: 0 0 auto; }
+.gg-file-window-subject { color: #a8a8bc; overflow: hidden; text-overflow: ellipsis; max-width: 40ch; flex: 0 1 auto; }
 
 /* The comparison's title: each commit's name and title; Tree/List just before the window button. */
 .gg-cmp-heading { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

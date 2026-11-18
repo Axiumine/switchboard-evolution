@@ -371,6 +371,6 @@ if (typeof module !== 'undefined' && module.exports) {
     GG_COMPARE_MAX, gitGraphCompareOrder, gitGraphCompareSteps, gitGraphCompareStepArgs, gitGraphCompareMatrix,
     gitGraphSelectAllHashes, gitGraphCompareLabel, gitGraphCompareSubject, gitGraphCompareSpecFor, gitGraphCompareButtonsHtml,
     gitGraphCompareTableHtml, gitGraphCompareTitleHtml, gitGraphCompareDisplayRows, gitGraphCompareFirstPath,
-    gitGraphCompareFileDiff, gitGraphRenderCompareView, gitGraphShowComparePopup, gitGraphCloseComparePopup,
+    gitGraphCompareFileDiff, gitGraphRenderCompareView, gitGraphShowComparePopup, gitGraphCloseComparePopup, gitGraphCompareCall,
   };
 }

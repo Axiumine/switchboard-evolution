@@ -14,7 +14,9 @@
 // #98's tree builder rather than a second implementation), and the render
 // helpers in git-graph-render.js (gitGraphFormatDate, gitGraphBuildLayoutInput,
 // gitGraphResolveLayoutFn, gitGraphRenderGraphSvg, gitGraphRenderRefPills,
-// gitGraphRowClasses, gitGraphDiffStatHtml, gitGraphFileStatusGlyph, gitGraphIcon).
+// gitGraphRowClasses, gitGraphDiffStatHtml, gitGraphFileStatusGlyph, gitGraphIcon),
+// and gitGraphCompareCall/gitGraphCompareFileDiff (git-graph-compare.js) to
+// read a file opened in a record.
 
 const GG_INITIAL_LOAD = 300;
 const GG_LOAD_MORE = 100;
@@ -98,6 +100,10 @@ function gitGraphState(projectId) {
       avatarPending: new Set(),
       codeReview: null,
       lastViewedFilePath: null,
+      // The file open in the record, under the commit's text (gitGraphOpenFileIn).
+      openFile: null,
+      // Its viewer, taken out of the panel while the panel is drawn again (gitGraphKeepFileView).
+      keptFileView: null,
     });
   }
   return gitGraphTabState.get(projectId);
@@ -659,6 +665,7 @@ function gitGraphPaint(project, state, body, opts = {}) {
     return;
   }
 
+  gitGraphKeepFileView(body, state);
   body.innerHTML = `
     <div class="gg-tab-shell gg-ref-align-${escapeHtml(state.referenceLabelAlignment || 'normal')}">
       ${gitGraphRepoPickerHtml(repos, repo)}
@@ -694,6 +701,8 @@ function gitGraphPaint(project, state, body, opts = {}) {
     const inline = body.querySelector('#gg-details-inline');
     if (inline) { gitGraphWireDetailsPanel(project, state, body, inline); gitGraphMaybeAutoCenterDetails(state, inline); }
   }
+  // A viewer kept for a panel that is no longer drawn is let go.
+  state.keptFileView = null;
   if (state.settingsOpen) gitGraphRenderSettingsDrawer(project, state, body);
   if (state.progress) gitGraphRenderProgress(project, state, body);
 }
@@ -1216,14 +1225,25 @@ function gitGraphIsAncestor(rows, ancestorHash, descendantHash) {
   return false;
 }
 
+/** A click opens the commit's record; on the record already open it closes it,
+ * and it stays closed. The second click of a double-click (which checks the
+ * commit out) leaves the record as the first click made it. */
 function gitGraphHandleRowClick(project, state, body, el, event) {
   const hash = el.dataset.ggHash;
   if (!hash) return;
+  if (event && event.detail > 1) return;
   const row = state.rows.find(r => r.hash === hash);
   if ((event.ctrlKey || event.metaKey) && gitGraphCompareWithSelected(project, state, body, hash)) return;
+  if (gitGraphIsOpenRecord(state, hash)) { gitGraphCloseDetails(project, state, body); return; }
   state.selectedHash = hash;
   state.compareHash = null;
   gitGraphOpenDetails(project, state, body, row);
+}
+
+/** Whether `hash` is the commit whose record is open (a comparison is not one commit's record). */
+function gitGraphIsOpenRecord(state, hash) {
+  const data = state.detailsData;
+  return !!(data && data.mode === 'single' && data.hash === hash);
 }
 
 /** Compares `hash` with the selected commit (the one open, or the only one
@@ -1382,6 +1402,7 @@ function gitGraphOpenDetails(project, state, body, row) {
   state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind };
   state.fileViewType = gitGraphDefaultFileView(state);
   state.lastViewedFilePath = null;
+  state.openFile = null;
   state.detailsJustOpened = true;
   gitGraphHydrateCodeReviewForDetails(state);
   gitGraphPaintDetailsOnly(project, state, body);
@@ -1408,6 +1429,7 @@ function gitGraphOpenComparison(project, state, body, fromHash, toHash) {
   state.detailsData = { mode: 'compare', fromHash, toHash };
   state.fileViewType = gitGraphDefaultFileView(state);
   state.lastViewedFilePath = null;
+  state.openFile = null;
   state.detailsJustOpened = true;
   gitGraphHydrateCodeReviewForDetails(state);
   gitGraphPaintDetailsOnly(project, state, body);
@@ -1442,6 +1464,7 @@ function gitGraphRenderDetailsPanel(project, state, body) {
   if (state.detailsLocation !== 'docked') { gitGraphPaintDetailsOnly(project, state, body); return; }
   const container = body.querySelector('#gg-details-docked');
   if (!container) return;
+  gitGraphKeepFileView(container, state);
   container.innerHTML = gitGraphDetailsBodyHtml(state);
   gitGraphWireDetailsPanel(project, state, body, container);
   gitGraphMaybeAutoCenterDetails(state, container);
@@ -1487,12 +1510,13 @@ function gitGraphDetailsBodyHtml(state) {
     : gitGraphSingleCommitHeaderHtml(data.commit, data.kind, state);
   const files = data.files || [];
   const reviewControls = gitGraphCodeReviewControlsHtml(state);
-  // Tree/List and Code Review share one bar at the top of the files column,
-  // so the commit's own text starts at the top of the panel beside it.
+  const openFile = gitGraphOpenFileFor(state);
+  // The files on the left, with Tree/List and Code Review in one bar on top;
+  // on the right the commit's own text, and under it the file opened from the
+  // list, filling the rest of the panel.
   return `
     <button type="button" class="gg-details-close" id="gg-details-close">×</button>
-    <div class="gg-details-grid">
-      <div class="gg-details-text">${header}</div>
+    <div class="gg-details-grid${openFile ? ' gg-details-has-file' : ''}">
       <div class="gg-details-files">
         <div class="gg-details-files-bar">
           <div class="gg-file-view-toggle">
@@ -1503,9 +1527,41 @@ function gitGraphDetailsBodyHtml(state) {
         </div>
         ${gitGraphFileListHtml(files, {
           fileViewType: state.fileViewType, compactFolders: state.compactFolders, collapsedFolders: state.collapsedFolders,
-          codeReview: state.codeReview, lastViewedFilePath: state.lastViewedFilePath,
+          codeReview: state.codeReview, lastViewedFilePath: state.lastViewedFilePath, openFilePath: openFile ? openFile.path : null,
         })}
       </div>
+      <div class="gg-details-side">
+        <div class="gg-details-text">${header}</div>
+        ${openFile ? gitGraphOpenFilePaneHtml(openFile) : ''}
+      </div>
+    </div>`;
+}
+
+/** The file open in the record that is open now, or null. */
+function gitGraphOpenFileFor(state) {
+  const file = state.openFile;
+  return file && file.detailsKey === gitGraphDetailsKey(state) ? file : null;
+}
+
+/** The file under the commit's text: its name, then Expand (over the window),
+ * a window of its own and ×; its diff (or its content) fills the rest. */
+function gitGraphOpenFilePaneHtml(file) {
+  const glyph = file.status ? gitGraphFileStatusGlyph(file.status) : '';
+  const note = file.kind === 'revision' ? 'At this revision' : (file.kind === 'working' ? 'With the working file' : '');
+  const renamed = file.oldPath && file.oldPath !== file.path ? `${file.oldPath} → ` : '';
+  return `
+    <div class="gg-details-diff" id="gg-details-diff">
+      <div class="gg-details-diff-head">
+        ${glyph ? `<span class="gg-file-status gg-file-status-${escapeAttr(file.status)}">${escapeHtml(glyph)}</span>` : ''}
+        <span class="gg-details-diff-path mono" title="${escapeAttr(renamed + file.path)}">${escapeHtml(renamed + file.path)}</span>
+        ${note ? `<span class="gg-details-diff-note">${note}</span>` : ''}
+        <span class="gg-details-diff-actions">
+          <button type="button" class="gg-icon-btn" id="gg-file-expand" title="Expand over the window" aria-label="Expand over the window">${gitGraphIcon('maximize', 13)}</button>
+          <button type="button" class="gg-icon-btn" id="gg-file-window" title="Open in a window of its own" aria-label="Open in a window of its own">${gitGraphIcon('popOut', 13)}</button>
+          <button type="button" class="gg-icon-btn gg-details-diff-close" id="gg-file-close" title="Close the file" aria-label="Close the file">×</button>
+        </span>
+      </div>
+      <div class="gg-inline-diff-body" id="gg-inline-diff-body"></div>
     </div>`;
 }
 
@@ -1606,7 +1662,7 @@ function gitGraphFileRowHtml(file, opts = {}) {
   const depth = opts.depth || 0;
   const codeReview = opts.codeReview;
   const reviewed = !!(codeReview && codeReview.reviewedPaths.has(file.path));
-  const rowClass = codeReview && !reviewed ? ' gg-file-unreviewed' : '';
+  const rowClass = (codeReview && !reviewed ? ' gg-file-unreviewed' : '') + (opts.openFilePath === file.path ? ' gg-file-row-open' : '');
   const eyeHtml = opts.lastViewedFilePath === file.path ? '<span class="gg-file-eye" title="Most recently viewed">◉</span>' : '';
   const glyph = gitGraphFileStatusGlyph(file.status);
   return `
@@ -1654,6 +1710,19 @@ function gitGraphWireDetailsPanel(project, state, body, container) {
       if (target) { state.selectedHash = target.hash; gitGraphOpenDetails(project, state, body, target); }
     };
   });
+  gitGraphWireOpenFile(project, state, body, container);
+}
+
+/** The open file's viewer back in its place, and its Expand, window and × buttons. */
+function gitGraphWireOpenFile(project, state, body, container) {
+  if (!gitGraphOpenFileFor(state)) { state.keptFileView = null; return; }
+  gitGraphPlaceFileView(container, state);
+  const expand = container.querySelector('#gg-file-expand');
+  if (expand) expand.onclick = () => gitGraphExpandOpenFile(state);
+  const windowBtn = container.querySelector('#gg-file-window');
+  if (windowBtn) windowBtn.onclick = () => gitGraphOpenFileWindow(project, state);
+  const close = container.querySelector('#gg-file-close');
+  if (close) close.onclick = () => gitGraphCloseOpenFile(project, state, body);
 }
 
 function gitGraphCloseDetails(project, state, body) {
@@ -1662,37 +1731,212 @@ function gitGraphCloseDetails(project, state, body) {
   state.compareHash = null;
   state.codeReview = null;
   state.lastViewedFilePath = null;
+  state.openFile = null;
   const dock = body.querySelector('#gg-details-docked');
   if (dock) dock.style.display = 'none';
   gitGraphPaint(project, state, body, { preserveScroll: true });
 }
 
+/** A file clicked in the record, or "View Diff" / "View Diff with Working File"
+ * from its menu: its diff opens in the record, under the commit's text. */
 function gitGraphOpenFileDiff(project, state, body, repo, filePath, opts = {}) {
-  if (!repo || !filePath || typeof createUnifiedMergeViewer !== 'function') return;
-  gitGraphNoteFileViewed(project, state, body, filePath);
-  const data = state.detailsData;
-  const fromRev = data.mode === 'compare' ? (data.fromHash === '#uncommitted' ? null : data.fromHash) : `${data.hash}^`;
-  const toRev = opts.forceWorkingTree ? null : (data.mode === 'compare' ? (data.toHash === '#uncommitted' ? null : data.toHash) : (data.kind === 'uncommitted' ? null : data.hash));
-  gitGraphApi('getGitGraphFileDiffBetween', project.id, repo.path, fromRev, toRev, filePath).then((result) => {
-    if (!result || !result.ok) return;
-    const host = gitGraphEnsureDiffHost();
-    host.innerHTML = '';
-    createUnifiedMergeViewer(host, result.oldContent || '', result.newContent || '', filePath, { readOnly: true });
-  });
+  return gitGraphOpenFileIn(project, state, body, repo, filePath, opts.forceWorkingTree ? 'working' : 'diff');
 }
 
-/** "View File at this Revision" (file-menu item) — read-only single-pane view of the blob. */
+/** "View File at this Revision" (file-menu item): the file as it is in the record's commit, in the same place. */
 function gitGraphViewFileAtRevision(project, state, body, repo, file) {
+  return gitGraphOpenFileIn(project, state, body, repo, file && file.path, 'revision');
+}
+
+// --- The file open in the record ---
+//
+// `state.openFile` belongs to the record it was opened from (`detailsKey`):
+// opening another record, or closing this one, closes it. Its content is
+// fetched once and kept on it (`result`), so Expand and drawing the panel
+// again need no second fetch.
+
+/**
+ * The revisions the file is read at: `kind` 'diff' is the record's own
+ * change, 'working' the record's side against the working file, 'revision'
+ * the file as it is at the record's commit (`toRev` only). Uncommitted
+ * Changes start from HEAD, as their list of files does. Null when there is
+ * nothing to show ('revision' of the working tree).
+ */
+function gitGraphFileRevs(state, kind) {
   const data = state.detailsData || {};
-  const rev = data.mode === 'single' ? data.hash : data.toHash;
-  if (!repo || !rev || rev === '#uncommitted') return;
-  gitGraphNoteFileViewed(project, state, body, file.path);
-  gitGraphApi('getGitGraphFileAtRevision', project.id, repo.path, rev, file.path).then((result) => {
-    if (!result || !result.ok) return;
-    const host = gitGraphEnsureDiffHost();
-    host.innerHTML = '';
-    if (typeof createReadOnlyViewer === 'function') createReadOnlyViewer(host, result.content || '', file.path);
-    else if (typeof createUnifiedMergeViewer === 'function') createUnifiedMergeViewer(host, result.content || '', result.content || '', file.path, { readOnly: true });
+  if (kind === 'revision') {
+    const rev = data.mode === 'single' ? data.hash : data.toHash;
+    return rev && rev !== '#uncommitted' ? { fromRev: null, toRev: rev } : null;
+  }
+  const fromRev = data.mode === 'compare'
+    ? (data.fromHash === '#uncommitted' ? null : data.fromHash)
+    : (data.kind === 'uncommitted' ? (state.headHash || 'HEAD') : `${data.hash}^`);
+  let toRev = null;
+  if (kind !== 'working') {
+    toRev = data.mode === 'compare'
+      ? (data.toHash === '#uncommitted' ? null : data.toHash)
+      : (data.kind === 'uncommitted' ? null : data.hash);
+  }
+  return { fromRev, toRev };
+}
+
+/** Opens `filePath` of the open record under the commit's text, as `kind` (gitGraphFileRevs). */
+function gitGraphOpenFileIn(project, state, body, repo, filePath, kind = 'diff') {
+  if (!repo || !filePath || !state.detailsData || state.detailsLoading) return null;
+  const revs = gitGraphFileRevs(state, kind);
+  if (!revs) return null;
+  const listed = (state.detailsData.files || []).find(f => f.path === filePath) || {};
+  const detailsKey = gitGraphDetailsKey(state);
+  const file = {
+    key: `${detailsKey}\n${kind}\n${filePath}`, detailsKey, kind, repoPath: repo.path,
+    path: filePath, oldPath: listed.oldPath || null, status: listed.status || null,
+    fromRev: revs.fromRev, toRev: revs.toRev,
+    loading: true, result: null, error: null,
+  };
+  state.openFile = file;
+  gitGraphNoteFileViewed(project, state, body, filePath);
+  gitGraphRenderDetailsPanel(project, state, body);
+  gitGraphFetchFileView(project.id, file).then((result) => {
+    file.loading = false;
+    if (result && result.ok) file.result = result;
+    else file.error = (result && result.error) || 'Could not load the file.';
+    if (state.openFile !== file || !body.isConnected) return;
+    const host = body.querySelector('#gg-inline-diff-body');
+    if (host) gitGraphMountFileView(host, file);
+  });
+  return file;
+}
+
+/** The content of `file`: both sides of its diff (a renamed file's old side under
+ * its old path, gitGraphCompareFileDiff), or the file at its revision. */
+function gitGraphFetchFileView(projectId, file) {
+  if (file.kind === 'revision') return gitGraphCompareCall('getGitGraphFileAtRevision', projectId, file.repoPath, file.toRev, file.path);
+  return gitGraphCompareFileDiff({ projectId, repoPath: file.repoPath }, file.fromRev, file.toRev, file.path, file.oldPath);
+}
+
+/** The viewer for `file` in `host`: its diff, or its content read-only. */
+function gitGraphCreateFileViewer(host, file) {
+  const result = file.result || {};
+  if (file.kind === 'revision') {
+    if (typeof createReadOnlyViewer === 'function') return createReadOnlyViewer(host, result.content || '', file.path);
+    if (typeof createUnifiedMergeViewer === 'function') return createUnifiedMergeViewer(host, result.content || '', result.content || '', file.path, { readOnly: true });
+    return null;
+  }
+  if (typeof createUnifiedMergeViewer === 'function') return createUnifiedMergeViewer(host, result.oldContent || '', result.newContent || '', file.path, { readOnly: true });
+  return null;
+}
+
+/** `file` drawn into the panel's slot: loading, its error, or its viewer. */
+function gitGraphMountFileView(host, file) {
+  host.ggFileKey = file.key;
+  host.ggMounted = false;
+  if (file.loading) { host.innerHTML = '<div class="gg-loading"><span class="gg-loading-dot"></span>Loading…</div>'; return; }
+  if (file.error) { host.innerHTML = `<div class="gg-details-diff-none">${escapeHtml(file.error)}</div>`; return; }
+  host.innerHTML = '';
+  gitGraphCreateFileViewer(host, file);
+  host.ggMounted = true;
+}
+
+/** Before the panel is drawn again (a folder folded, Tree/List, the working
+ * tree reloaded): the open file's viewer is taken out of `root`, to go back in
+ * its place as it was, scrolled and folded, instead of being built again. */
+function gitGraphKeepFileView(root, state) {
+  if (state.keptFileView || !root || typeof root.querySelector !== 'function') return;
+  const file = state.openFile;
+  const host = file ? root.querySelector('#gg-inline-diff-body') : null;
+  if (!host || !host.ggMounted || host.ggFileKey !== file.key) return;
+  const scrolls = [...host.querySelectorAll('.cm-scroller')].map(el => [el, el.scrollTop, el.scrollLeft]);
+  host.remove();
+  state.keptFileView = { host, key: file.key, scrolls };
+}
+
+/** The open file in the panel just drawn: the viewer kept from before, or a new one. */
+function gitGraphPlaceFileView(container, state) {
+  const kept = state.keptFileView;
+  state.keptFileView = null;
+  const file = gitGraphOpenFileFor(state);
+  const slot = file ? container.querySelector('#gg-inline-diff-body') : null;
+  if (!slot) return;
+  if (kept && kept.key === file.key && typeof slot.replaceWith === 'function') {
+    slot.replaceWith(kept.host);
+    for (const [el, top, left] of kept.scrolls) { el.scrollTop = top; el.scrollLeft = left; }
+    return;
+  }
+  gitGraphMountFileView(slot, file);
+}
+
+/** Expand: the open file over the window, as a file opened before this panel did. */
+function gitGraphExpandOpenFile(state) {
+  const file = gitGraphOpenFileFor(state);
+  if (!file || file.loading || file.error) return false;
+  const host = gitGraphEnsureDiffHost();
+  host.innerHTML = '';
+  gitGraphCreateFileViewer(host, file);
+  return true;
+}
+
+/** What a window of its own needs to show `file` (main.js openGitFileWindow): the
+ * revisions it is read at, and the commit's short hash and title for its header. */
+function gitGraphFileWindowSpec(state, file) {
+  const data = state.detailsData || {};
+  const hash = data.mode === 'single' ? data.hash : data.toHash;
+  const row = (state.rows || []).find(r => r.hash === hash);
+  const uncommitted = hash === '#uncommitted';
+  const label = uncommitted ? 'Uncommitted' : ((row && row.shortHash) || (data.commit && data.commit.shortHash) || String(hash || '').slice(0, 8));
+  const subject = uncommitted ? 'Uncommitted Changes' : ((data.commit && data.commit.subject) || (row && row.subject) || '');
+  return {
+    repo: file.repoPath, path: file.path, oldPath: file.oldPath, status: file.status,
+    kind: file.kind, fromRev: file.fromRev, toRev: file.toRev, label, subject,
+  };
+}
+
+/** The open file in a window of its own, which can stay above the others (its pin). */
+function gitGraphOpenFileWindow(project, state) {
+  const file = gitGraphOpenFileFor(state);
+  if (!file) return null;
+  const spec = gitGraphFileWindowSpec(state, file);
+  gitGraphApi('openGitFileWindow', project.id, file.repoPath, spec);
+  return spec;
+}
+
+/** × on the open file: the record shows the commit's text alone again. */
+function gitGraphCloseOpenFile(project, state, body) {
+  state.openFile = null;
+  state.keptFileView = null;
+  gitGraphRenderDetailsPanel(project, state, body);
+}
+
+/** A file in a window of its own (main.js openGitFileWindow, then projects-view.js
+ * with PROJECT_WINDOW.file): its commit and path on top, its diff filling the window. */
+function gitGraphRenderFileWindow(host, projectId, spec) {
+  const file = {
+    key: 'window', kind: spec.kind || 'diff', repoPath: spec.repo, path: spec.path,
+    oldPath: spec.oldPath || null, status: spec.status || null,
+    fromRev: spec.fromRev || null, toRev: spec.toRev || null,
+    loading: true, result: null, error: null,
+  };
+  const glyph = file.status ? gitGraphFileStatusGlyph(file.status) : '';
+  const note = file.kind === 'revision' ? 'At this revision' : (file.kind === 'working' ? 'With the working file' : '');
+  const renamed = file.oldPath && file.oldPath !== file.path ? `${file.oldPath} → ` : '';
+  host.innerHTML = `
+    <div class="gg-file-in-window">
+      <div class="gg-details-diff-head gg-file-window-head">
+        ${spec.label ? `<span class="mono gg-file-window-commit">${escapeHtml(spec.label)}</span>` : ''}
+        ${spec.subject ? `<span class="gg-file-window-subject" title="${escapeAttr(spec.subject)}">${escapeHtml(spec.subject)}</span>` : ''}
+        ${glyph ? `<span class="gg-file-status gg-file-status-${escapeAttr(file.status)}">${escapeHtml(glyph)}</span>` : ''}
+        <span class="gg-details-diff-path mono" title="${escapeAttr(renamed + file.path)}">${escapeHtml(renamed + file.path)}</span>
+        ${note ? `<span class="gg-details-diff-note">${note}</span>` : ''}
+      </div>
+      <div class="gg-inline-diff-body" id="gg-file-window-body"></div>
+    </div>`;
+  const slot = host.querySelector('#gg-file-window-body');
+  gitGraphMountFileView(slot, file);
+  return gitGraphFetchFileView(projectId, file).then((result) => {
+    file.loading = false;
+    if (result && result.ok) file.result = result;
+    else file.error = (result && result.error) || 'Could not load the file.';
+    if (slot.isConnected !== false) gitGraphMountFileView(slot, file);
+    return file;
   });
 }
 
@@ -1824,6 +2068,10 @@ function gitGraphBindKeyboard(project, state, body) {
     // The Compare popup over the History keeps the keys to itself.
     if (document.getElementById('gg-cmp-overlay')) return;
     if (gitGraphIsEditableTarget(e.target) && e.key !== 'Escape') return;
+    // Keys in the open file's viewer are the viewer's: its arrows, its search.
+    // Esc still closes the file expanded over the window.
+    const inViewer = e.target && typeof e.target.closest === 'function' && e.target.closest('.gg-inline-diff-body');
+    if (inViewer && !(e.key === 'Escape' && document.getElementById('gg-diff-host'))) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
       if (document.getElementById('gg-diff-host')) { gitGraphCloseDiffHost(); e.preventDefault(); return; }
@@ -2007,5 +2255,8 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphCompareBase, gitGraphCompareWithSelected, gitGraphToggleChecked, gitGraphCompareSpec, gitGraphOpenCompare,
     gitGraphRowHtml, gitGraphHeaderHtml, gitGraphControlBarHtml, gitGraphInSelectCell, gitGraphSelectionMenuItems, gitGraphSetSelecting,
     gitGraphInlineScrolls, gitGraphRestoreInlineScrolls, gitGraphFitDetailsHeight,
+    gitGraphIsOpenRecord, gitGraphOpenFileFor, gitGraphOpenFilePaneHtml, gitGraphFileRevs, gitGraphOpenFileIn,
+    gitGraphKeepFileView, gitGraphPlaceFileView, gitGraphExpandOpenFile, gitGraphFileWindowSpec, gitGraphOpenFileWindow,
+    gitGraphCloseOpenFile, gitGraphRenderFileWindow,
   };
 }

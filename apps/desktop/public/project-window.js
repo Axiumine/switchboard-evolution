@@ -6,7 +6,9 @@
 // terminals. Loaded before the other scripts, so they can read PROJECT_WINDOW.
 
 // With `compare` ({ repo, hashes, labels, subjects }), the window shows only the
-// comparison of those commits (main.js openGitCompareWindow).
+// comparison of those commits (main.js openGitCompareWindow). With `file`
+// ({ repo, path, kind, fromRev, toRev, … }), only that file of the Git History
+// (main.js openGitFileWindow).
 const PROJECT_WINDOW = (() => {
   try {
     const query = new URLSearchParams(location.search);
@@ -17,7 +19,12 @@ const PROJECT_WINDOW = (() => {
       const parsed = JSON.parse(query.get('compare') || 'null');
       if (parsed && typeof parsed.repo === 'string' && Array.isArray(parsed.hashes)) compare = parsed;
     } catch { compare = null; }
-    return { projectId, tab: query.get('tab') || 'overview', compare };
+    let file = null;
+    try {
+      const parsed = JSON.parse(query.get('file') || 'null');
+      if (parsed && typeof parsed.repo === 'string' && typeof parsed.path === 'string' && parsed.path) file = parsed;
+    } catch { file = null; }
+    return { projectId, tab: query.get('tab') || 'overview', compare, file };
   } catch { return null; }
 })();
 

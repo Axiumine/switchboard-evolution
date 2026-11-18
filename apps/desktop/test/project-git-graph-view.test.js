@@ -1464,7 +1464,7 @@ test('beside an inline panel a lane change still bends within one row, then the 
   assert.equal(d, `M${lane(1)} 15 L${lane(1)} 45 L${lane(1)} 215 C${lane(1)} 230, ${lane(0)} 230, ${lane(0)} 245`);
 });
 
-test('Tree/List and Code Review share one bar above the files, and the commit text starts at the top', () => {
+test('Tree/List and Code Review share one bar above the files, the files on the left and the commit text on the right', () => {
   const state = inlineDetailsState('proj-inline-7');
   state.detailsData = { mode: 'single', hash: 'c2', kind: 'commit', commit: { hash: 'c2', parents: ['c1'] }, files: [] };
   const html = view.gitGraphDetailsBodyHtml(state);
@@ -1473,7 +1473,194 @@ test('Tree/List and Code Review share one bar above the files, and the commit te
   assert.match(bar[1], /data-view="tree"/);
   assert.match(bar[1], /data-view="list"/);
   assert.match(bar[1], /Start Code Review/);
-  assert.ok(html.indexOf('gg-details-text') < html.indexOf('gg-details-files-bar'), 'nothing above the commit text');
+  assert.ok(html.indexOf('gg-details-files') < html.indexOf('gg-details-side'), 'the files come first, on the left');
+  assert.ok(html.indexOf('gg-details-side') < html.indexOf('gg-details-text'), 'the commit text is on the right');
+  assert.doesNotMatch(html, /gg-details-has-file|gg-details-diff/, 'no file pane until a file is opened');
+});
+
+// === A file open in the record, under the commit's text ===
+
+function fileRecordState(id) {
+  const state = inlineDetailsState(id);
+  state.selectedHash = 'c2';
+  state.headHash = 'c3';
+  state.detailsLoading = false;
+  state.detailsData = {
+    mode: 'single', hash: 'c2', kind: 'commit',
+    commit: { hash: 'c2', shortHash: 'c2short', subject: 'second', parents: ['c1'] },
+    files: [{ path: 'src/a.js', status: 'modified' }, { path: 'src/new.js', oldPath: 'src/old.js', status: 'renamed' }],
+  };
+  return state;
+}
+
+/** window.api recording every call, answering file reads with two sides. */
+function fileApi(calls) {
+  const record = (name) => (...args) => { calls.push([name, ...args]); return Promise.resolve(name === 'getGitGraphFileAtRevision' ? { ok: true, content: 'at rev' } : { ok: true, oldContent: 'old', newContent: 'new' }); };
+  return { api: { getGitGraphFileDiffBetween: record('getGitGraphFileDiffBetween'), getGitGraphFileAtRevision: record('getGitGraphFileAtRevision'), openGitFileWindow: record('openGitFileWindow') } };
+}
+
+test('a click on the open commit closes its record and it stays closed; the second click of a double-click leaves it open', () => {
+  const state = fileRecordState('proj-toggle-1');
+  const project = { id: 'proj-toggle-1' };
+  const body = fakeScrollBody();
+  const el = { dataset: { ggHash: 'c2' } };
+  view.gitGraphHandleRowClick(project, state, body, el, { detail: 2 });
+  assert.equal(state.detailsData.hash, 'c2', 'a double-click (checkout) does not close it');
+  view.gitGraphHandleRowClick(project, state, body, el, { detail: 1 });
+  assert.equal(state.detailsData, null, 'clicked again, the record closes');
+  assert.equal(state.selectedHash, null);
+});
+
+test('a click on another commit opens that one instead', () => {
+  const state = fileRecordState('proj-toggle-2');
+  const project = { id: 'proj-toggle-2' };
+  const body = fakeScrollBody();
+  global.window = { api: { getGitGraphCommitDetail: () => new Promise(() => {}) } };
+  view.gitGraphHandleRowClick(project, state, body, { dataset: { ggHash: 'c1' } }, { detail: 1 });
+  assert.equal(state.detailsData.hash, 'c1');
+  assert.equal(state.selectedHash, 'c1');
+});
+
+test('a file clicked in the record opens under the commit text, not over the window, with Expand and a window of its own', async () => {
+  const state = fileRecordState('proj-file-1');
+  const project = { id: 'proj-file-1' };
+  const body = fakeScrollBody();
+  const calls = [];
+  global.window = fileApi(calls);
+  const created = [];
+  global.document = { getElementById: () => null, createElement: () => { const el = fakeElement(); created.push(el); return el; }, body: { appendChild() {} } };
+  try {
+    const file = view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/a.js');
+    assert.equal(state.openFile, file);
+    assert.deepEqual([file.fromRev, file.toRev, file.kind], ['c2^', 'c2', 'diff']);
+    assert.equal(state.lastViewedFilePath, 'src/a.js');
+    assert.equal(created.length, 0, 'no overlay');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls[0], ['getGitGraphFileDiffBetween', 'proj-file-1', '/repo', 'c2^', 'c2', 'src/a.js']);
+    assert.equal(file.loading, false);
+
+    const html = view.gitGraphDetailsBodyHtml(state);
+    assert.match(html, /gg-details-has-file/);
+    assert.ok(html.indexOf('gg-details-text') < html.indexOf('gg-details-diff'), 'the file sits under the commit text');
+    assert.match(html, /id="gg-file-expand"/);
+    assert.match(html, /id="gg-file-window"/);
+    assert.match(html, /class="gg-file-row gg-file-row-open" data-gg-kind="file" data-gg-file-path="src\/a\.js"/);
+
+    assert.equal(view.gitGraphExpandOpenFile(state), true, 'Expand opens it over the window');
+    assert.ok(created.length > 0);
+    assert.equal(calls.length, 1, 'with what was already read');
+  } finally { delete global.document; }
+});
+
+test('a renamed file is read under its old path on the old side; the menu opens the file at its revision and against the working file', async () => {
+  const state = fileRecordState('proj-file-2');
+  const project = { id: 'proj-file-2' };
+  const body = fakeScrollBody();
+  const calls = [];
+  global.window = fileApi(calls);
+  view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/new.js');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(calls.some(c => c[0] === 'getGitGraphFileAtRevision' && c[3] === 'c2^' && c[4] === 'src/old.js'));
+  assert.equal(state.openFile.oldPath, 'src/old.js');
+
+  calls.length = 0;
+  const atRev = view.gitGraphViewFileAtRevision(project, state, body, { path: '/repo' }, { path: 'src/a.js' });
+  assert.deepEqual([atRev.kind, atRev.toRev], ['revision', 'c2']);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls[0], ['getGitGraphFileAtRevision', 'proj-file-2', '/repo', 'c2', 'src/a.js']);
+
+  const working = view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/a.js', { forceWorkingTree: true });
+  assert.deepEqual([working.kind, working.toRev], ['working', null]);
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('Uncommitted Changes are read from HEAD to the working tree', () => {
+  const state = fileRecordState('proj-file-3');
+  state.detailsData = { mode: 'single', hash: '#uncommitted', kind: 'uncommitted', files: [{ path: 'x.js', status: 'modified' }] };
+  assert.deepEqual(view.gitGraphFileRevs(state, 'diff'), { fromRev: 'c3', toRev: null });
+  assert.equal(view.gitGraphFileRevs(state, 'revision'), null, 'no revision to show for the working tree');
+  state.headHash = null;
+  assert.deepEqual(view.gitGraphFileRevs(state, 'diff'), { fromRev: 'HEAD', toRev: null });
+});
+
+test('the window button opens the file in a window of its own, with its commit for the header', async () => {
+  const state = fileRecordState('proj-file-4');
+  const project = { id: 'proj-file-4' };
+  const body = fakeScrollBody();
+  const calls = [];
+  global.window = fileApi(calls);
+  assert.equal(view.gitGraphOpenFileWindow(project, state), null, 'nothing open, nothing to show');
+  view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/a.js');
+  const spec = view.gitGraphOpenFileWindow(project, state);
+  assert.deepEqual(calls.find(c => c[0] === 'openGitFileWindow'), ['openGitFileWindow', 'proj-file-4', '/repo', {
+    repo: '/repo', path: 'src/a.js', oldPath: null, status: 'modified', kind: 'diff',
+    fromRev: 'c2^', toRev: 'c2', label: 'c2short', subject: 'second',
+  }]);
+  assert.equal(spec.label, 'c2short');
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('the open file closes with its ×, with its record, and when another record opens', async () => {
+  const state = fileRecordState('proj-file-5');
+  const project = { id: 'proj-file-5' };
+  const body = fakeScrollBody();
+  global.window = fileApi([]);
+  view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/a.js');
+  view.gitGraphCloseOpenFile(project, state, body);
+  assert.equal(state.openFile, null);
+  assert.doesNotMatch(view.gitGraphDetailsBodyHtml(state), /gg-details-diff/);
+
+  view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/a.js');
+  view.gitGraphCloseDetails(project, state, body);
+  assert.equal(state.openFile, null);
+
+  state.detailsData = fileRecordState('proj-file-5b').detailsData;
+  view.gitGraphOpenFileDiff(project, state, body, { path: '/repo' }, 'src/a.js');
+  global.window.api.getGitGraphCommitDetail = () => new Promise(() => {});
+  view.gitGraphOpenDetails(project, state, body, state.rows[2]);
+  assert.equal(state.openFile, null);
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('drawing the panel again puts the open file\'s viewer back as it was instead of building it again', () => {
+  const state = fileRecordState('proj-file-6');
+  const key = `${'single:c2::'}\ndiff\nsrc/a.js`;
+  state.openFile = { key, detailsKey: 'single:c2::', kind: 'diff', path: 'src/a.js', loading: false, result: { ok: true, oldContent: 'a', newContent: 'b' } };
+  const scroller = { scrollTop: 120, scrollLeft: 4 };
+  let removed = false;
+  const mounted = { ggMounted: true, ggFileKey: key, querySelectorAll: () => [scroller], remove() { removed = true; } };
+  view.gitGraphKeepFileView({ querySelector: () => mounted }, state);
+  assert.ok(removed, 'taken out before the panel is drawn again');
+  assert.equal(state.keptFileView.host, mounted);
+
+  scroller.scrollTop = 0; // as a node taken out of the page and put back
+  let placed = null;
+  const slot = { replaceWith(node) { placed = node; } };
+  view.gitGraphPlaceFileView({ querySelector: (sel) => (sel === '#gg-inline-diff-body' ? slot : null) }, state);
+  assert.equal(placed, mounted, 'the same viewer goes back in');
+  assert.equal(scroller.scrollTop, 120, 'scrolled where it was');
+  assert.equal(state.keptFileView, null);
+
+  // A viewer for another file is not kept.
+  view.gitGraphKeepFileView({ querySelector: () => ({ ...mounted, ggFileKey: 'other' }) }, state);
+  assert.equal(state.keptFileView, null);
+});
+
+test('a file window shows the file\'s commit and path, then its diff', async () => {
+  const calls = [];
+  global.window = fileApi(calls);
+  const slot = fakeElement();
+  const host = { innerHTML: '', querySelector: () => slot };
+  const file = await view.gitGraphRenderFileWindow(host, 'proj-file-7', {
+    repo: '/repo', path: 'src/a.js', kind: 'diff', fromRev: 'c2^', toRev: 'c2', status: 'modified', label: 'c2short', subject: 'second',
+  });
+  assert.match(host.innerHTML, /c2short/);
+  assert.match(host.innerHTML, /second/);
+  assert.match(host.innerHTML, /src\/a\.js/);
+  assert.match(host.innerHTML, /gg-file-in-window/);
+  assert.deepEqual(calls[0], ['getGitGraphFileDiffBetween', 'proj-file-7', '/repo', 'c2^', 'c2', 'src/a.js']);
+  assert.equal(file.loading, false);
+  assert.equal(file.error, null);
 });
 
 test('every record opens in the Tree view, even after List was chosen on the one before', async () => {

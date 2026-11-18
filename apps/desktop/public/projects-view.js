@@ -1747,6 +1747,7 @@ function renderOverview() {
   else if (tabName === 'files') renderFilesTab(project, body);
   else if (tabName === 'plan') renderPlanTab(project, body);
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.compare) renderGitCompareWindow(project, body);
+  else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.file) renderGitFileWindow(project, body);
   else if (tabName === 'git') renderProjectGitWorkspace(project, body);
   else renderOverviewBody(project, body);
 
@@ -1781,7 +1782,9 @@ function tabWithWindow(tab, tabButton) {
 
 /** The header of a project window: the project, the tab it shows and the pin. */
 function projectWindowHeaderHtml(project, tabName) {
-  const label = PROJECT_WINDOW.compare ? 'Compare' : (PROJECT_WINDOW_TAB_LABELS[tabName] || 'Overview');
+  const label = PROJECT_WINDOW.compare ? 'Compare'
+    : PROJECT_WINDOW.file ? (pathBasename(PROJECT_WINDOW.file.path) || PROJECT_WINDOW.file.path)
+      : (PROJECT_WINDOW_TAB_LABELS[tabName] || 'Overview');
   document.title = `${project.name} · ${label}`;
   const state = groupState(projectSessionsAll(project));
   return `
@@ -1803,6 +1806,11 @@ function projectWindowHeaderHtml(project, tabName) {
 function renderGitCompareWindow(project, body) {
   const { repo, hashes, labels, subjects } = PROJECT_WINDOW.compare;
   gitGraphRenderCompareView(body, { projectId: project.id, repoPath: repo, hashes, labels: labels || [], subjects: subjects || [] });
+}
+
+/** A file window's page (main.js openGitFileWindow): one file of the Git History, filling the window. */
+function renderGitFileWindow(project, body) {
+  gitGraphRenderFileWindow(body, project.id, PROJECT_WINDOW.file);
 }
 
 /** A project window's page, once the projects are loaded: its project on its tab. */

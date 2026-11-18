@@ -294,7 +294,7 @@ function createWindow() {
     taskManager.shutdown();
     // They close with the main window, and open again with the next one.
     freezeOpenWindows();
-    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows]) if (!win.isDestroyed()) win.close();
+    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows]) if (!win.isDestroyed()) win.close();
     mainWindow = null;
   });
 }
@@ -1794,6 +1794,54 @@ function openGitCompareWindow(projectId, repoPath, hashes, labels, subjects) {
 
 ipcMain.handle('open-git-compare-window', (_event, projectId, repoPath, hashes, labels, subjects) => openGitCompareWindow(projectId, repoPath, hashes, labels, subjects));
 
+// --- A file of the Git History in a window of its own ---
+// From the file open in a record of the History (project-git-graph-view.js
+// gitGraphOpenFileWindow): index.html again, as a project window that shows
+// only that file's diff (or the file at a revision), which can stay above the
+// others with its pin. A new window at each click, a little lower and to the
+// right of the one before. Not opened again at the next start; they close
+// with the main window.
+const fileWindows = new Set();
+const GIT_FILE_WINDOW_SPEC = { title: 'Diff', width: 1100, height: 780, minWidth: 520, minHeight: 360, onTop: false };
+const GIT_FILE_FROM_REV = /^([0-9a-f]{4,64}\^?|HEAD)$/i;
+const GIT_FILE_TO_REV = /^[0-9a-f]{4,64}$/i;
+const GIT_FILE_KINDS = new Set(['diff', 'working', 'revision']);
+
+/** The file a window shows, checked and trimmed; null when it is not one. */
+function gitFileWindowSpec(file) {
+  if (!file || typeof file !== 'object') return null;
+  const kind = GIT_FILE_KINDS.has(file.kind) ? file.kind : null;
+  if (!kind) return null;
+  if (typeof file.path !== 'string' || !file.path || file.path.length > 4096) return null;
+  if (file.oldPath != null && (typeof file.oldPath !== 'string' || file.oldPath.length > 4096)) return null;
+  const fromRev = file.fromRev == null ? null : file.fromRev;
+  const toRev = file.toRev == null ? null : file.toRev;
+  if (fromRev !== null && (typeof fromRev !== 'string' || !GIT_FILE_FROM_REV.test(fromRev))) return null;
+  if (toRev !== null && (typeof toRev !== 'string' || !GIT_FILE_TO_REV.test(toRev))) return null;
+  if (kind === 'revision' ? !toRev : !fromRev) return null;
+  const status = typeof file.status === 'string' && /^[a-z]{1,20}$/.test(file.status) ? file.status : null;
+  return {
+    kind, path: file.path, oldPath: file.oldPath || null, status, fromRev, toRev,
+    label: String(file.label || '').slice(0, 60), subject: String(file.subject || '').slice(0, 200),
+  };
+}
+
+function openGitFileWindow(projectId, repoPath, file) {
+  if (typeof projectId !== 'string' || !projectId || projectId.length > 200) return false;
+  if (typeof repoPath !== 'string' || !repoPath || repoPath.length > 4096) return false;
+  const spec = gitFileWindowSpec(file);
+  if (!spec) return false;
+  const win = createPageWindow('git-file', GIT_FILE_WINDOW_SPEC, { offset: 24 * fileWindows.size });
+  fileWindows.add(win);
+  win.loadFile(path.join(__dirname, 'public', 'index.html'), {
+    query: { projectWindow: projectId, tab: 'git', file: JSON.stringify({ repo: repoPath, ...spec }) },
+  });
+  win.on('closed', () => fileWindows.delete(win));
+  return true;
+}
+
+ipcMain.handle('open-git-file-window', (_event, projectId, repoPath, file) => openGitFileWindow(projectId, repoPath, file));
+
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When
 // the app quits, or the main window closes and takes the others with it,
@@ -1848,6 +1896,7 @@ function toolWindowKindOf(webContents) {
   for (const [kind, win] of toolWindows) if (!win.isDestroyed() && win.webContents === webContents) return kind;
   for (const [key, win] of projectWindows) if (!win.isDestroyed() && win.webContents === webContents) return `project-${key.split('\n')[1]}`;
   for (const win of compareWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-compare';
+  for (const win of fileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-file';
   return null;
 }
 
