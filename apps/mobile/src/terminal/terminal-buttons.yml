@@ -1,0 +1,86 @@
+# The key bar above a terminal's text field.
+#
+# This file is the bar: scripts/build-terminal-keys.mjs turns it into
+# src/terminal/terminal-buttons.generated.ts, which the app reads. After a
+# change run `npm run build-terminal-keys`; a test fails while the two differ.
+# Nothing here is a setting people change in the app.
+#
+# Every key has:
+#   label   the text on the key
+#   action  what a tap does
+#   up      optional: what a swipe up on the key does; its label shows small and
+#           faint above the key's own
+#
+# Actions:
+#   Esc  Tab  Enter  Backspace  Delete  Insert
+#   Up  Down  Left  Right  Home  End  PgUp  PgDn  F1 ... F12
+#   Shift+<key>  Ctrl+<key>  Alt+<key>   for example Shift+Tab, Ctrl+C, Alt+B
+#   Ctrl  Alt  Fn  Super                 on their own: modifiers (see below)
+#   Undo  Redo                           Ctrl+_ and Ctrl+Shift+Z
+#   paste  copy  select-all              in the terminal
+#   more                                 opens the More keys sheet
+#   text in quotes types that text, for example "~"
+
+look:
+  height: 44                 # of every key, in points; every key in a row is as wide as the others
+  key_text: 13               # size of the key's label
+  swipe_text:
+    size: 9                  # size of the swipe-up label, above the key's label
+    opacity: 0.4             # 0 (hidden) to 1 (full): lower is fainter
+
+rows:
+  - - { label: ESC,   action: Esc,       up: { label: UNDO, action: Undo } }
+    - { label: FN,    action: Fn,        up: { label: "^A", action: select-all } }
+    - { label: PASTE, action: paste,     up: { label: COPY, action: copy } }
+    - { label: "/",   action: "/",       up: { label: "$",  action: "$" } }
+    - { label: "~",   action: "~",       up: { label: "|",  action: "|" } }
+    - { label: "↑",   action: Up,        up: { label: PGUP, action: PgUp } }
+    - { label: "⌫",   action: Backspace, up: { label: INS,  action: Insert } }
+    - { label: DEL,   action: Delete,    up: { label: "⋯",  action: more } }
+
+  - - { label: "⇥",   action: Tab,       up: { label: "⇧⇥", action: Shift+Tab } }
+    - { label: CTRL,  action: Ctrl,      up: { label: "^C", action: Ctrl+C } }
+    - { label: ALT,   action: Alt,       up: { label: "`",  action: "`" } }
+    - { label: "⌘",   action: Super,     up: { label: REDO, action: Redo } }
+    - { label: "←",   action: Left,      up: { label: HOME, action: Home } }
+    - { label: "↓",   action: Down,      up: { label: PGDN, action: PgDn } }
+    - { label: "→",   action: Right,     up: { label: END,  action: End } }
+    - { label: "↵",   action: Enter,     up: { label: "⇧↵", action: Shift+Enter } }
+
+modifiers:
+  # A tap on CTRL, ALT, FN or ⌘ turns it on (the key stays lit) for the next key
+  # of the bar or the next character typed in the field, then it goes off by
+  # itself. A second tap turns it off unused. Several can be on together, for
+  # example CTRL and ALT.
+  # ⌘ (Super: Command, Windows) reaches the terminal as in kitty's keyboard
+  # protocol: Super+K is ESC[107;9u. Only programs that read it see it.
+  fn:
+    # With FN on these keys become others; every other key stays as it is.
+    "1": F1
+    "2": F2
+    "3": F3
+    "4": F4
+    "5": F5
+    "6": F6
+    "7": F7
+    "8": F8
+    "9": F9
+    "0": F10
+    "A": F11
+    "B": F12
+    Up: PgUp
+    Down: PgDn
+    Left: Home
+    Right: End
+
+# Held down, these keys repeat, as on a real keyboard.
+repeat_while_held: [Up, Down, Left, Right, Backspace, Delete]
+
+# The sheet ⋯ opens, four keys to a row.
+more_keys:
+  - { label: "^D", action: Ctrl+D }
+  - { label: "^L", action: Ctrl+L }
+  - { label: "^R", action: Ctrl+R }
+  - { label: "^Z", action: Ctrl+Z }
+  - { label: "\\", action: "\\" }
+  - { label: "//", action: "//" }

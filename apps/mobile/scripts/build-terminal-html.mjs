@@ -285,6 +285,11 @@ const bridge = `
       },
       focus: function () { term.focus(); },
       blur: function () { term.blur(); },
+      // The key bar's Paste, Copy and Select All. paste() goes through xterm,
+      // which brackets the text when the program asked for bracketed paste.
+      paste: function (text) { term.paste(text); },
+      copy: function () { post({ type: 'copy', text: term.getSelection() }); },
+      selectAll: function () { term.selectAll(); },
     };
     // Started without the font (it took too long): measure again once it is there.
     if (!loaded) fonts.then(function () { term.options.fontFamily = 'monospace'; term.options.fontFamily = family; });

@@ -77,6 +77,7 @@
     "eslint-config-expo": "~58.0.4",
     "jest": "~30.5.2",
     "jest-expo": "~58.0.13",
+    "js-yaml": "^5.5.0",
     "material-icon-theme": "5.40.0",
     "patch-package": "^8.0.1",
     "subset-font": "^2.9.0",
@@ -96,7 +97,8 @@
     "release:ios": "bash scripts/release-ios.sh",
     "postinstall": "patch-package && node scripts/build-terminal-html.mjs && node scripts/build-editor-html.mjs",
     "build-terminal": "node scripts/build-terminal-html.mjs",
-    "build-editor": "node scripts/build-editor-html.mjs"
+    "build-editor": "node scripts/build-editor-html.mjs",
+    "build-terminal-keys": "node scripts/build-terminal-keys.mjs"
   },
   "private": true,
   "description": "Companion mobile app for Switchboard: manage your Claude Code and Codex sessions from your phone over Tailscale.",

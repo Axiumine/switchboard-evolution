@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useRef, useState, type ComponentType, type Ref } from 'react';
 import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, Switch, Text, View, type LayoutChangeEvent } from 'react-native';
 import { useKeyboardState } from 'react-native-keyboard-controller';
@@ -6,6 +7,7 @@ import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } fro
 
 import { useLayoutClass } from '@/layout/size';
 import { onDesktopEvent, request, useConnection } from '@/store/connection';
+import { onTerminalCommand } from '@/terminal/commands';
 import { DEFAULT_FONT_SIZE, FIT_BY_DEFAULT, MAX_FONT_SIZE, MIN_FONT_SIZE, fitNote, sizeLabel } from '@/terminal/defaults';
 import { TERMINAL_HTML } from '@/terminal/terminal-html.generated';
 import { colors, spacing } from '@/theme';
@@ -84,6 +86,14 @@ export function TerminalView({ sessionId, onInput, visible = true }: { sessionId
 
   useEffect(() => { onInput?.(send); }, [onInput, send]);
 
+  // Paste, Copy and Select All from the key bar.
+  useEffect(() => onTerminalCommand((id, command) => {
+    if (id !== sessionId && id !== idRef.current) return;
+    if (command.type === 'paste') run(`sb.paste(${JSON.stringify(command.text)})`);
+    else if (command.type === 'copy') run('sb.copy()');
+    else run('sb.selectAll()');
+  }), [run, sessionId]);
+
   // Output for this session. The id can change once (a fork, a Codex
   // session getting its real id); follow it.
   useEffect(() => onDesktopEvent((event, args) => {
@@ -148,6 +158,8 @@ export function TerminalView({ sessionId, onInput, visible = true }: { sessionId
       setLoaded(true);
     } else if (message.type === 'input') {
       send(message.data);
+    } else if (message.type === 'copy') {
+      if (message.text) Clipboard.setStringAsync(message.text).catch(() => {});
     } else if (message.type === 'size') {
       setSize({ cols: message.cols || 0, rows: message.rows || 0, width: message.width || 0 });
     } else if (message.type === 'measure' && fitRef.current && message.cols && message.rows) {

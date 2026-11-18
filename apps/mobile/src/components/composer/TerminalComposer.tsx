@@ -3,6 +3,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { terminalSend, uploadHint } from '@/sessions/attachments';
 import { useCapability, useConnection } from '@/store/connection';
+import { encode, holdsAny, insertedText, type Modifiers } from '@/terminal/keys';
+import { TERMINAL_BUTTONS } from '@/terminal/terminal-buttons.generated';
 import { colors, spacing } from '@/theme';
 import { AttachButton } from './AttachButton';
 import { AttachmentStrip } from './AttachmentStrip';
@@ -12,12 +14,15 @@ import { TerminalKeys } from './TerminalKeys';
 import { useAttachments } from './useAttachments';
 
 /**
- * The terminal's bottom block: the key row, the attachments, then a field
+ * The terminal's bottom block: the key bar, the attachments, then a field
  * whose Send types the text, pastes the attachments' paths on the computer
- * and presses Enter.
+ * and presses Enter. While a modifier of the bar is lit, the next character
+ * typed in the field goes straight to the terminal with it (Ctrl and c is
+ * Ctrl+C) instead of into the field.
  */
 export function TerminalComposer({ sessionId, send, placeholder = 'Type a command or reply…' }: { sessionId: string; send: (data: string) => void; placeholder?: string }) {
   const [text, setText] = useState('');
+  const [held, setHeld] = useState<Modifiers>({});
   const attachments = useAttachments(sessionId);
   // An older computer cannot take files from the phone.
   const canAttach = useCapability('save-session-attachment');
@@ -36,13 +41,23 @@ export function TerminalComposer({ sessionId, send, placeholder = 'Type a comman
     if (canAttach) attachments.clear();
   };
 
+  const onChangeText = (next: string) => {
+    const typed = holdsAny(held) ? insertedText(text, next) : null;
+    if (typed) {
+      send(encode({ kind: 'text', text: typed, mods: {} }, held, TERMINAL_BUTTONS.fn));
+      setHeld({});
+    } else {
+      setText(next);
+    }
+  };
+
   return (
     <View style={styles.container}>
-      <TerminalKeys send={send} />
+      <TerminalKeys sessionId={sessionId} send={send} held={held} onHeldChange={setHeld} />
       {canAttach ? <AttachmentStrip attachments={attachments} hint={uploadHint(attachments.items, computer)} /> : null}
       <View style={styles.row}>
         {canAttach ? <AttachButton attachments={attachments} /> : null}
-        <ComposerField value={text} onChangeText={setText} placeholder={placeholder} minHeight={48} />
+        <ComposerField value={text} onChangeText={onChangeText} placeholder={placeholder} minHeight={48} />
         <SendButton onPress={submit} disabled={!canSend} busy={uploading} />
       </View>
     </View>
