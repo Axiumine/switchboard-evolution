@@ -5,7 +5,8 @@
 // writes the calls); the page answers with postMessage({ type, ... }):
 //   ready                            the page can take calls
 //   loaded                           a file is shown
-//   state { dirty, canUndo, canRedo } after every change of these
+//   state { dirty, canUndo, canRedo, cursors }
+//                                    after every change of these
 //   text { id, text }                the answer to getText(id)
 
 import { EditorView, keymap, lineNumbers, highlightSpecialChars, Decoration } from '@codemirror/view';
@@ -30,6 +31,8 @@ import { diff } from '@codemirror/legacy-modes/mode/diff';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
+
+import { CURSOR_ACTIONS, multipleCursors } from './cursors.js';
 
 // ── Languages ────────────────────────────────────────────────────────
 // The same table as the desktop's public/codemirror-setup.js (CODE_LANGUAGES):
@@ -134,6 +137,7 @@ function postState(state) {
     dirty: state.doc.length !== original.length || state.doc.toString() !== original,
     canUndo: undoDepth(state) > 0,
     canRedo: redoDepth(state) > 0,
+    cursors: state.selection.ranges.length,
   };
   const key = JSON.stringify(message);
   if (key === lastState) return;
@@ -152,15 +156,16 @@ function createState(text, filename, wrap) {
       bracketMatching(),
       // Shortcuts for a hardware keyboard.
       keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+      multipleCursors(),
       languageCompartment.of(languageFor(filename)),
       wrapCompartment.of(wrap ? EditorView.lineWrapping : []),
       editableCompartment.of(editableExtension(editable)),
       markField,
       dracula,
       appTheme,
-      // Dirty, undo and redo change only with the text.
+      // Dirty, undo and redo change with the text, the cursors with the selection.
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) postState(update.state);
+        if (update.docChanged || update.selectionSet) postState(update.state);
       }),
     ],
   });
@@ -215,10 +220,19 @@ window.addEventListener('resize', () => {
   if (view.hasFocus) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: 'nearest', yMargin: 24 }) });
 });
 
+/** A command of the bar over the keyboard (CURSOR_ACTIONS), then the keyboard stays on the text. */
+function cursors(action) {
+  const command = Object.prototype.hasOwnProperty.call(CURSOR_ACTIONS, action) ? CURSOR_ACTIONS[action] : null;
+  if (!command || !editable) return;
+  command(view);
+  view.focus();
+}
+
 window.sb = {
   load,
   setEditable,
   revert,
+  cursors,
   undo: () => undo(view),
   redo: () => redo(view),
   getText: (id) => post({ type: 'text', id, text: view.state.doc.toString() }),

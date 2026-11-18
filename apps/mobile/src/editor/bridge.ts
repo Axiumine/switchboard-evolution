@@ -4,7 +4,11 @@
  * page sends back with postMessage.
  */
 
-export type EditorState = { dirty: boolean; canUndo: boolean; canRedo: boolean };
+/** `cursors`: how many cursors and selections the text has (several with the cursor bar or Cmd+D). */
+export type EditorState = { dirty: boolean; canUndo: boolean; canRedo: boolean; cursors: number };
+
+/** What the cursor bar over the keyboard asks of the page (CURSOR_ACTIONS in scripts/editor-page/cursors.js). */
+export type CursorAction = 'next' | 'all' | 'above' | 'below' | 'one';
 
 export type EditorMessage =
   | { type: 'ready' }
@@ -12,7 +16,7 @@ export type EditorMessage =
   | ({ type: 'state' } & EditorState)
   | { type: 'text'; id: number; text: string };
 
-export type EditorCall = 'load' | 'setEditable' | 'revert' | 'undo' | 'redo' | 'getText';
+export type EditorCall = 'load' | 'setEditable' | 'revert' | 'undo' | 'redo' | 'getText' | 'cursors';
 
 /**
  * The script that calls window.sb[fn](...args) in the page. Each argument
@@ -35,7 +39,7 @@ export function parseMessage(data: string): EditorMessage | null {
       return { type: message.type };
     case 'state':
       if (typeof message.dirty !== 'boolean' || typeof message.canUndo !== 'boolean' || typeof message.canRedo !== 'boolean') return null;
-      return { type: 'state', dirty: message.dirty, canUndo: message.canUndo, canRedo: message.canRedo };
+      return { type: 'state', dirty: message.dirty, canUndo: message.canUndo, canRedo: message.canRedo, cursors: Number.isInteger(message.cursors) && message.cursors > 0 ? message.cursors : 1 };
     case 'text':
       if (!Number.isInteger(message.id) || typeof message.text !== 'string') return null;
       return { type: 'text', id: message.id, text: message.text };

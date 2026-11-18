@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Com
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 
-import { call, parseMessage, type EditorState } from '@/editor/bridge';
+import { call, parseMessage, type CursorAction, type EditorState } from '@/editor/bridge';
 import { EDITOR_HTML } from '@/editor/editor-html.generated';
 import { colors } from '@/theme';
 
@@ -21,6 +21,8 @@ export type CodeEditorHandle = {
   redo(): void;
   /** Back to the text it was given, dropping every edit. */
   revert(): void;
+  /** A command of the cursor bar: next or all occurrences, a cursor above or below, back to one. */
+  cursors(action: CursorAction): void;
 };
 
 /**
@@ -77,6 +79,7 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, onSta
     undo: () => run(call('undo')),
     redo: () => run(call('redo')),
     revert: () => run(call('revert')),
+    cursors: (action) => run(call('cursors', action)),
   }), [run]);
 
   const onMessage = useCallback((event: WebViewMessageEvent) => {
@@ -89,7 +92,7 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, onSta
     } else if (message.type === 'loaded') {
       setLoaded(true);
     } else if (message.type === 'state') {
-      onStateRef.current?.({ dirty: message.dirty, canUndo: message.canUndo, canRedo: message.canRedo });
+      onStateRef.current?.({ dirty: message.dirty, canUndo: message.canUndo, canRedo: message.canRedo, cursors: message.cursors });
     } else if (message.type === 'text') {
       const resolve = texts.current.get(message.id);
       texts.current.delete(message.id);

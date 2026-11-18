@@ -29,6 +29,7 @@ describe('a call to the editor page', () => {
     expect(runInPage(call('undo')).calls).toEqual([{ fn: 'undo', args: [] }]);
     expect(runInPage(call('load', 'x', 'y', undefined)).calls).toEqual([{ fn: 'load', args: ['x', 'y', undefined] }]);
     expect(runInPage(call('setEditable', true)).calls).toEqual([{ fn: 'setEditable', args: [true] }]);
+    expect(runInPage(call('cursors', 'next')).calls).toEqual([{ fn: 'cursors', args: ['next'] }]);
   });
 });
 
@@ -36,7 +37,10 @@ describe('a message from the editor page', () => {
   it('reads the four kinds', () => {
     expect(parseMessage('{"type":"ready"}')).toEqual({ type: 'ready' });
     expect(parseMessage('{"type":"loaded","extra":1}')).toEqual({ type: 'loaded' });
-    expect(parseMessage('{"type":"state","dirty":true,"canUndo":true,"canRedo":false}')).toEqual({ type: 'state', dirty: true, canUndo: true, canRedo: false });
+    expect(parseMessage('{"type":"state","dirty":true,"canUndo":true,"canRedo":false,"cursors":3}')).toEqual({ type: 'state', dirty: true, canUndo: true, canRedo: false, cursors: 3 });
+    // A count that is missing or wrong is one cursor.
+    expect(parseMessage('{"type":"state","dirty":true,"canUndo":true,"canRedo":false}')).toEqual({ type: 'state', dirty: true, canUndo: true, canRedo: false, cursors: 1 });
+    expect(parseMessage('{"type":"state","dirty":false,"canUndo":false,"canRedo":false,"cursors":0}')).toMatchObject({ cursors: 1 });
     expect(parseMessage(JSON.stringify({ type: 'text', id: 4, text: 'a\nb' }))).toEqual({ type: 'text', id: 4, text: 'a\nb' });
   });
 

@@ -8,6 +8,7 @@ import { fileLinkPress, markdownParser, pathCodeRule, taskItemRule } from '@/com
 import { openPath } from '@/components/chat/OpenFile';
 import { markdownStyles } from '@/components/ChatView';
 import { CodeEditor, type CodeEditorHandle } from '@/components/files/CodeEditor';
+import { CursorBar } from '@/components/files/CursorBar';
 import { HeaderButton } from '@/components/HeaderButton';
 import type { EditorState } from '@/editor/bridge';
 import { downloadSupported, shareProjectFile, type KnownContent } from '@/files/download';
@@ -20,7 +21,7 @@ type FileData = { ok: boolean; error?: string; previewType?: 'text' | 'html' | '
 
 const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
-const CLEAN: EditorState = { dirty: false, canUndo: false, canRedo: false };
+const CLEAN: EditorState = { dirty: false, canUndo: false, canRedo: false, cursors: 1 };
 
 /**
  * A project file: text and Markdown to read or edit, images to look at, and
@@ -28,6 +29,7 @@ const CLEAN: EditorState = { dirty: false, canUndo: false, canRedo: false };
  * Edit makes editable in place; Markdown is shown formatted, or raw in the
  * editor. `inline` draws its own bar (beside the tree of the Files tab on a
  * wide screen); otherwise its buttons go in the screen's header.
+ * While editing, the cursor bar sits over the keyboard (CursorBar).
  * Give it a `key` per file, so another file starts with no edit in progress.
  * With `line` (a search result) a text file opens scrolled to that line, which
  * is marked; a Markdown file then opens raw, where lines are lines.
@@ -169,6 +171,8 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
         <Stack.Screen options={{ title: name, headerRight: buttons }} />
       )}
       {body}
+      {/* Over the keyboard while editing: VS Code's multiple cursors. */}
+      {editing && isText ? <CursorBar cursors={edit.cursors} onAction={(action) => editor.current?.cursors(action)} /> : null}
     </KeyboardAvoidingView>
   );
 }
