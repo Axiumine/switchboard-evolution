@@ -662,11 +662,9 @@ function bindSessionListEvents(container) {
 
     const pin = item.querySelector('.session-pin');
     if (pin) {
-      pin.onclick = async (e) => {
+      pin.onclick = (e) => {
         e.stopPropagation();
-        const { starred } = await window.api.toggleStar(session.sessionId);
-        session.starred = starred;
-        refreshSidebar({ resort: true });
+        toggleSessionStar(session);
       };
     }
 
@@ -773,6 +771,33 @@ function bindSessionListEvents(container) {
   }
 }
 
+// --- Stars ---
+
+/** The star of a session row, outlined, or filled when pinned. */
+function starIconSvg(filled, size = 14) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.78 5.63L21 9.54l-4.5 4.39 1.06 6.2L12 17.2l-5.56 2.93 1.06-6.2L3 9.54l6.22-.91L12 3z"/></svg>`;
+}
+
+/** A pinned session's own star color (star-tints.js), so several pinned ones tell apart; '' when not pinned. */
+function sessionStarColor(session) {
+  if (!session?.starred || typeof StarTints === 'undefined') return '';
+  return StarTints.starTintColor(session.starTint, session.sessionId);
+}
+
+/**
+ * Pin or unpin a session from any of its rows: the Sessions tab, a project's
+ * drawer, track card or search result. Every view shows the change at once;
+ * main tells the phones (projects-changed).
+ */
+async function toggleSessionStar(session) {
+  const result = await window.api.toggleStar(session.sessionId);
+  // An older main answered with the flag alone.
+  const starred = typeof result === 'object' && result ? result.starred : result;
+  session.starred = starred ? 1 : 0;
+  session.starTint = starred ? (result?.starTint ?? null) : null;
+  refreshSidebar({ resort: true, reason: 'sessions' });
+}
+
 function buildSessionItem(session) {
   const item = document.createElement('div');
   item.className = 'session-item';
@@ -800,7 +825,9 @@ function buildSessionItem(session) {
   pin.title = session.starred ? 'Unstar session' : 'Star session';
   pin.setAttribute('aria-label', pin.title);
   pin.setAttribute('aria-pressed', String(!!session.starred));
-  pin.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="${session.starred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.78 5.63L21 9.54l-4.5 4.39 1.06 6.2L12 17.2l-5.56 2.93 1.06-6.2L3 9.54l6.22-.91L12 3z"/></svg>`;
+  // Pinned, in the session's own tint.
+  if (session.starred) pin.style.color = sessionStarColor(session);
+  pin.innerHTML = starIconSvg(!!session.starred);
 
   // Keep the status dot separate so running, busy and unread updates still apply.
   const mark = document.createElement('span');

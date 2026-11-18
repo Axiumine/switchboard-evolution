@@ -8036,6 +8036,38 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .pane-session:hover .pane-title { padding-right: 30px; }
 .tcard .tcard-session .pane-row-archive { right: 10px; top: 7px; }
 
+/* The star at the right of every session row, as on the Sessions tab: dim
+   until the row is under the pointer, filled in its own tint when pinned. The
+   archive button sits just left of it. */
+.pane-session > .pane-title,
+.pane-session > .pane-meta { margin-right: 20px; }
+.pane-pin {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #7a7a96;
+  opacity: 0.4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.12s, color 0.12s, transform 0.12s;
+}
+.pane-session:hover .pane-pin { opacity: 0.8; }
+.pane-pin:hover,
+.pane-pin:focus-visible { opacity: 1; color: #f5be3c; transform: translateY(-50%) scale(1.15); }
+.pane-pin.pinned { opacity: 1; }
+.pane-session .pane-row-archive { right: 28px; }
+.tcard .tcard-session .pane-pin { right: 8px; }
+.tcard .tcard-session .pane-row-archive { right: 32px; }
+
 /* The plan card borrows the dot shape but not the session states: these are
    "the next phase" and "all phases done", and neither of them spins. */
 .proj-dot--next { background: #f0a050; box-shadow: 0 0 6px rgba(240,160,80,0.5); }

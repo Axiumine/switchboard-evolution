@@ -25,6 +25,8 @@ function load({ answer = null } = {}) {
     projectForSession: () => null,
     showPromptDialog: async (opts) => { calls.prompts.push({ ...opts }); return answer; },
     loadProjects: () => { calls.loaded++; },
+    starIconSvg: () => '',
+    toggleSessionStar: (s) => { calls.starred = (calls.starred || []).concat(s.sessionId); },
   });
   vm.runInContext(menu + flow, context);
   return { context, calls };
@@ -39,6 +41,15 @@ test('every project session menu offers Rename, terminals included', () => {
     assert.ok(labels.includes('Rename…'), `${type}: ${labels.join(', ')}`);
     assert.equal(labels.indexOf('Rename…') + 1, labels.indexOf('Copy session ID'));
   }
+});
+
+test('every project session menu can star and unstar it', () => {
+  const { context, calls } = load();
+  const star = context.sessionMenuItems(session()).find(i => i.label === 'Star session');
+  assert.ok(star);
+  star.onClick();
+  assert.deepEqual(calls.starred, ['s1']);
+  assert.ok(context.sessionMenuItems(session({ starred: 1 })).some(i => i.label === 'Unstar session'));
 });
 
 test('the menu item opens the rename dialog with the current name', async () => {

@@ -9,6 +9,7 @@ const DATA_DIR = process.env.SWITCHBOARD_DATA_DIR
   ? path.resolve(process.env.SWITCHBOARD_DATA_DIR)
   : path.join(os.homedir(), '.switchboard');
 const fs = require('fs');
+const starTints = require('./public/star-tints');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DB_PATH = path.join(DATA_DIR, 'switchboard.db');
@@ -295,6 +296,25 @@ db.exec(`
   // session row's clock chip; nothing else depends on it.
   if (!cols.has('scheduleId')) db.exec('ALTER TABLE session_meta ADD COLUMN scheduleId TEXT');
   if (!cols.has('scheduledAt')) db.exec('ALTER TABLE session_meta ADD COLUMN scheduledAt TEXT');
+  // The color of a pinned session's star (an index into star-tints.js), so
+  // several pinned sessions tell apart. Null while not pinned.
+  if (!cols.has('starTint')) db.exec('ALTER TABLE session_meta ADD COLUMN starTint INTEGER');
+}
+{
+  // Sessions pinned before tints existed, or by an older Switchboard sharing
+  // this database, get theirs here, each one different while the palette lasts.
+  const untinted = db.prepare('SELECT sessionId FROM session_meta WHERE starred = 1 AND starTint IS NULL ORDER BY sessionId').all();
+  if (untinted.length) {
+    const used = db.prepare('SELECT starTint FROM session_meta WHERE starred = 1 AND starTint IS NOT NULL').all().map(r => r.starTint);
+    const setTint = db.prepare('UPDATE session_meta SET starTint = ? WHERE sessionId = ?');
+    db.transaction(() => {
+      for (const { sessionId } of untinted) {
+        const tint = starTints.pickStarTint(used);
+        used.push(tint);
+        setTint.run(tint, sessionId);
+      }
+    })();
+  }
 }
 {
   // Where a project's sessions start by default (null = the project folder).
@@ -349,10 +369,14 @@ const stmts = {
     INSERT INTO session_meta (sessionId, name) VALUES (?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET name = excluded.name
   `),
+  // A pin takes the tint given; an unpin drops its tint, so the next pin draws again.
   upsertStar: db.prepare(`
-    INSERT INTO session_meta (sessionId, starred) VALUES (?, 1)
-    ON CONFLICT(sessionId) DO UPDATE SET starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END
+    INSERT INTO session_meta (sessionId, starred, starTint) VALUES (@sessionId, 1, @tint)
+    ON CONFLICT(sessionId) DO UPDATE SET
+      starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END,
+      starTint = CASE WHEN starred = 1 THEN NULL ELSE @tint END
   `),
+  starTints: db.prepare('SELECT starTint FROM session_meta WHERE starred = 1 AND starTint IS NOT NULL AND sessionId != ?'),
   upsertArchived: db.prepare(`
     INSERT INTO session_meta (sessionId, archived) VALUES (?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET archived = excluded.archived
@@ -511,10 +535,12 @@ function setName(sessionId, name) {
   stmts.upsertName.run(sessionId, name);
 }
 
+/** Pin or unpin a session. A pin gets a tint the other pinned sessions use least. */
 function toggleStar(sessionId) {
-  stmts.upsertStar.run(sessionId);
+  const used = stmts.starTints.all(sessionId).map(r => r.starTint);
+  stmts.upsertStar.run({ sessionId, tint: starTints.pickStarTint(used) });
   const row = stmts.get.get(sessionId);
-  return row.starred;
+  return { starred: row.starred, starTint: row.starTint ?? null };
 }
 
 function setArchived(sessionId, archived) {

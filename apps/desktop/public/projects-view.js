@@ -629,6 +629,13 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
     btn.onclick = (e) => { e.stopPropagation(); if (dismissible) dismissSession(id); else toggleArchiveSession(session); };
     row.appendChild(btn);
   }
+  // The star, at the right of the row as on the Sessions tab.
+  const pin = document.createElement('button');
+  pin.type = 'button';
+  pin.className = 'pane-pin';
+  paintPaneStar(pin, session);
+  pin.onclick = (e) => { e.stopPropagation(); if (hoverPreview) hideSessionHoverPreview(id); toggleSessionStar(session); };
+  row.appendChild(pin);
   row.onclick = () => { if (hoverPreview) hideSessionHoverPreview(id); openSession(session); };
   row.oncontextmenu = (e) => {
     e.preventDefault();
@@ -638,6 +645,17 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
   };
   if (hoverPreview) attachSessionHoverPreview(row, session);
   return row;
+}
+
+/** A row's star: outlined, or filled in the session's own tint when pinned. */
+function paintPaneStar(pin, session) {
+  const pinned = !!session.starred;
+  pin.classList.toggle('pinned', pinned);
+  pin.title = pinned ? 'Unstar session' : 'Star session';
+  pin.setAttribute('aria-label', pin.title);
+  pin.setAttribute('aria-pressed', String(pinned));
+  pin.style.color = pinned ? sessionStarColor(session) : '';
+  pin.innerHTML = starIconSvg(pinned, 13);
 }
 
 // --- Status ---
@@ -744,6 +762,9 @@ function updateProjectStatusDots() {
   });
   document.querySelectorAll('.pane-session[data-session-id], .tcard-session[data-session-id]').forEach(el => {
     const session = sessionMap.get(el.dataset.sessionId);
+    // A pin from the phone, or from another row of the same session.
+    const pin = el.querySelector('.pane-pin');
+    if (session && pin && pin.getAttribute('aria-pressed') !== String(!!session.starred)) paintPaneStar(pin, session);
     const dot = el.querySelector('.session-status-dot');
     if (!session || !dot) return;
     const state = sessionState(session);
@@ -3431,6 +3452,7 @@ function sessionMenuItems(session) {
     session.type !== 'terminal' ? { label: 'View messages', icon: PICONS.messages(14), onClick: () => showJsonlViewer(session) } : null,
   ].filter(Boolean);
   const stateActions = [
+    { label: session.starred ? 'Unstar session' : 'Star session', icon: starIconSvg(!session.starred, 14), onClick: () => toggleSessionStar(session) },
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameSessionFlow(session) },
     { label: 'Copy session ID', onClick: () => window.api.writeClipboard(session.sessionId) },
     isDismissibleSession(session.sessionId) ? { label: 'Dismiss', icon: PICONS.x(14), hint: 'never started', onClick: () => dismissSession(session.sessionId) } : null,

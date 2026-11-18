@@ -521,6 +521,7 @@ function buildProjectsFromCache(showArchived) {
       runtime: row.runtime || DEFAULT_HARNESS,
       name: meta?.name || null,
       starred: meta?.starred || 0,
+      starTint: meta?.starred ? (meta.starTint ?? null) : null,
       archived: meta?.archived || 0,
       // Explicit filing into a project / track (projects.js). Null when the
       // session was never filed; the tree builder then falls back to cwd.
@@ -590,7 +591,7 @@ function buildProjectsFromCache(showArchived) {
       const meta = metaMap.get(sessionId);
       proj.sessions.push({
         sessionId, summary: 'Terminal', firstPrompt: '', projectPath: session.projectPath,
-        name: meta?.name || null, starred: meta?.starred || 0, archived: 0, messageCount: 0,
+        name: meta?.name || null, starred: meta?.starred || 0, starTint: meta?.starred ? (meta.starTint ?? null) : null, archived: 0, messageCount: 0,
         modified: new Date(session._openedAt).toISOString(),
         created: new Date(session._openedAt).toISOString(),
         type: 'terminal',
@@ -624,7 +625,7 @@ function buildProjectsFromCache(showArchived) {
       runtime: session.runtime || 'claude',
       // The title the CLI shows in the terminal stands in for the transcript's.
       aiTitle: session._cliTitle || null,
-      name: meta?.name || null, starred: meta?.starred || 0, archived: meta?.archived || 0, messageCount: 0,
+      name: meta?.name || null, starred: meta?.starred || 0, starTint: meta?.starred ? (meta.starTint ?? null) : null, archived: meta?.archived || 0, messageCount: 0,
       modified: new Date(session._openedAt).toISOString(),
       created: new Date(session._openedAt).toISOString(),
       projectId: session.projectId || meta?.projectId || null,

@@ -1973,8 +1973,10 @@ ipcMain.handle('force-stop-owner', async (_event, owner) => {
 
 // --- IPC: toggle-star ---
 ipcMain.handle('toggle-star', (_event, sessionId) => {
-  const starred = toggleStar(sessionId);
-  return { starred };
+  const result = toggleStar(sessionId);
+  // A pin from a phone shows in the window, and the other way round.
+  notifyRendererProjectsChanged('sessions');
+  return result;
 });
 
 // --- IPC: rename-session ---
@@ -2335,6 +2337,7 @@ ipcMain.handle('remote-access-revoke-device', (_event, id) => {
 ipcMain.handle('archive-session', (_event, sessionId, archived) => {
   const val = archived ? 1 : 0;
   setArchived(sessionId, val);
+  notifyRendererProjectsChanged('sessions');
   return { archived: val };
 });
 
