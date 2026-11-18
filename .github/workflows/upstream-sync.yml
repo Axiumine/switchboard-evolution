@@ -1,0 +1,109 @@
+name: Upstream sync
+
+# Once a week, merge the new commits of upstream Switchboard (doctly/switchboard)
+# into apps/desktop with scripts/upstream-sync.sh.
+# - Clean merge: the result is pushed to the `upstream-sync` branch and a pull
+#   request is opened (or updated) for review. Nothing lands on main by itself.
+# - Conflicts: an issue lists the conflicted files and the commands to do the
+#   merge by hand.
+# Needs "Allow GitHub Actions to create and approve pull requests" in the
+# repository's Actions settings.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Upstream branch, tag or commit to merge
+        default: main
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_REF: ${{ inputs.ref || 'main' }}
+      SYNC_BRANCH: upstream-sync
+      LABEL: upstream-sync
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set +e
+          bash scripts/upstream-sync.sh --ref "$UPSTREAM_REF"
+          code=$?
+          set -e
+          if [ "$code" = 2 ]; then git merge --abort; exit 0; fi
+          exit "$code"
+
+      - name: Label
+        if: steps.merge.outputs.status != 'up-to-date'
+        run: gh label create "$LABEL" --color 0E8A16 --description "Changes from upstream Switchboard" --force
+
+      - name: Open or update the pull request
+        if: steps.merge.outputs.status == 'merged'
+        env:
+          SHORT: ${{ steps.merge.outputs.upstream_short }}
+        run: |
+          git push --force origin "HEAD:refs/heads/$SYNC_BRANCH"
+          title="Sync upstream Switchboard $SHORT"
+          {
+            echo "Merges the new commits of [doctly/switchboard](https://github.com/doctly/switchboard) \`$UPSTREAM_REF\` into \`apps/desktop\`."
+            echo
+            echo "Upstream commits:"
+            echo
+            git log --no-merges --format='- [`%h`](https://github.com/doctly/switchboard/commit/%H) %s (%an)' HEAD^1..HEAD^2
+            echo
+            echo "Check the app before merging: run the tests and start it once."
+          } > body.md
+          number="$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file body.md
+          else
+            gh pr create --head "$SYNC_BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "$title" --body-file body.md --label "$LABEL"
+          fi
+
+      - name: Open or update the issue
+        if: steps.merge.outputs.status == 'conflict'
+        env:
+          SHORT: ${{ steps.merge.outputs.upstream_short }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          title="Upstream Switchboard $SHORT needs a manual merge"
+          {
+            echo "Merging [doctly/switchboard](https://github.com/doctly/switchboard) \`$UPSTREAM_REF\` ($SHORT) into \`apps/desktop\` has conflicts in:"
+            echo
+            printf '%s\n' "$CONFLICTS" | sed 's/^/- `/; s/$/`/'
+            echo
+            echo "To merge by hand:"
+            echo
+            echo '```bash'
+            echo "git switch -c upstream-sync"
+            echo "scripts/upstream-sync.sh --ref $UPSTREAM_REF   # stops at the conflicts"
+            echo "# fix the files, then: git add <files> && git commit"
+            echo '```'
+          } > body.md
+          number="$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --title "$title" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md --label "$LABEL"
+          fi

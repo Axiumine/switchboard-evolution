@@ -8,7 +8,12 @@ apps/mobile      Expo app, the desktop's companion over Tailscale (its own AGENT
 packages/shared  modules both apps use, copied into them by scripts/sync-shared.mjs
 ```
 
-The desktop app started from Switchboard (doctly/switchboard), with its own features on top, and the mobile app from switchboard-mobile. This repository has no link to either: nothing is rebased or merged from them.
+The desktop app started from Switchboard (doctly/switchboard), with its own features on top, and the mobile app from switchboard-mobile.
+
+- Upstream `main` is recorded in the history as merged into `apps/desktop` (merge of e594fa9).
+- `scripts/upstream-sync.sh` brings in later upstream commits with a subtree merge (`git merge -X subtree=apps/desktop`). The weekly `.github/workflows/upstream-sync.yml` runs it and opens a pull request, or an issue when there are conflicts.
+- Changes for Doctly go as pull requests from the fork vivi7/switchboard, whose `main` stays identical to upstream; see the README, "Upstream".
+- switchboard-mobile has no link in the history: its commits are carried over with `git am --directory=apps/mobile`.
 
 ## Rules
 
