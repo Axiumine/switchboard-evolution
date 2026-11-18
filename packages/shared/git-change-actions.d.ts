@@ -1,7 +1,7 @@
 // Types for git-change-actions.js, next to this file.
 
 /** One entry of the desktop's parsePorcelain(), as get-project-git-info sends it. */
-export type PorcelainChange = { path: string; status: string; indexStatus?: string; worktreeStatus?: string };
+export type PorcelainChange = { path: string; status: string; code?: string; indexStatus?: string; worktreeStatus?: string };
 /** A file or folder row; null stands for every change. */
 export type ChangeTarget = { path: string; dir: boolean };
 export type Question = { title: string; detail: string; confirm: string };
@@ -18,3 +18,7 @@ export function ignorePattern(path: string, isDir: boolean): string;
 export function discardQuestion(targets: PorcelainChange[], name?: string | null, options?: { trash?: string }): Question;
 /** The question before Add to .gitignore and Remove from Git. */
 export function untrackQuestion(name: string, isDir: boolean): Question;
+/** Whether the diff of `change` offers Edit: the file is on disk (not a deletion; in a conflict, unless both sides deleted it). */
+export function canEdit(change: PorcelainChange | null | undefined): boolean;
+/** What the editor of `change` compares its text with, in words, shown above it in edit mode. */
+export function editNote(change: PorcelainChange | null | undefined): string;
