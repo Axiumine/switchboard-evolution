@@ -1,8 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, Stack } from 'expo-router';
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -14,6 +14,7 @@ import { COMPARE_MAX, compareBase, compareLabel, compareOrder, compareParams } f
 import { forceRetry, pushAction, rowActions, type GraphAction } from '@/git/actions';
 import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, type GraphRow } from '@/git/graph';
 import { buildLayoutInput, type GraphCommit, type HistoryRow, type Stash, type Uncommitted } from '@/git/history';
+import { badgeTexts, BADGE_GAP, BADGE_PADDING, BADGE_SIZE, estimateTextWidth, META_SIZE, SUBJECT_SIZE } from '@/git/row-width';
 import { relativeTime, shortProjectPath } from '@/sessions/model';
 import { onDesktopEvent, request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -36,6 +37,10 @@ const MORE = 100;
 const MAX_COMMITS = 5000;
 // The tick box before the graph in each row.
 const CHECK_WIDTH = 24;
+// A row's padding on the left and right, and the gap between the graph and the text.
+const ROW_LEFT = spacing.sm;
+const ROW_RIGHT = spacing.md;
+const TEXT_GAP = spacing.sm;
 // A push or a fetch may take the computer up to two minutes.
 const ACTION_TIMEOUT_MS = 130_000;
 
@@ -103,6 +108,20 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
   // A row dropped or reset away is no longer ticked (like the open row, it is read against what is loaded).
   const ticked = useMemo(() => new Set([...checked].filter((hash) => loaded.has(hash))), [checked, loaded]);
   const extraData = useMemo(() => ({ open, view, lastViewed, ticked, selecting }), [open, view, lastViewed, ticked, selecting]);
+
+  // Sideways the list is as wide as its widest row, guessed for every loaded row and measured for the ones drawn,
+  // so a long subject and every branch on it can be read. The open row's details stay in sight as it scrolls.
+  const [viewport, setViewport] = useState(0);
+  const [measured, setMeasured] = useState({ folder, width: 0 });
+  const [scrollX] = useState(() => new Animated.Value(0));
+  const onScrollX = useMemo(() => Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: true }), [scrollX]);
+  const onRowWidth = useCallback((width: number) => {
+    setMeasured((m) => (m.folder === folder && width <= m.width + 0.5 ? m : { folder, width: Math.max(m.folder === folder ? m.width : 0, width) }));
+  }, [folder]);
+  const graphWidth = Math.max(lanes, 1) * LANE_WIDTH;
+  const guessed = useMemo(() => history.reduce((widest, row) => Math.max(widest, estimateTextWidth(row)), 0), [history]);
+  const chrome = ROW_LEFT + (selecting ? CHECK_WIDTH : 0) + graphWidth + TEXT_GAP + ROW_RIGHT;
+  const contentWidth = Math.ceil(Math.max(viewport, chrome + guessed, measured.folder === folder ? measured.width : 0));
 
 
   // The repository changed (here, on the computer, or from a terminal), and the progress of a network action.
@@ -222,8 +241,17 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
         </View>
       ) : null}
       {data?.error || graph.error ? <Text style={styles.empty}>{data?.error || graph.error?.message}</Text> : null}
+      <Animated.ScrollView
+        horizontal
+        style={styles.fill}
+        onLayout={(e) => setViewport(e.nativeEvent.layout.width)}
+        onScroll={onScrollX}
+        scrollEventThrottle={16}
+        showsHorizontalScrollIndicator
+      >
       <FlatList
         ref={list}
+        style={{ width: contentWidth }}
         data={history}
         keyExtractor={(row) => row.hash}
         extraData={extraData}
@@ -240,8 +268,10 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
               onToggleCheck={() => toggleCheck(item.hash)}
               onPress={() => toggle(item.hash)}
               onLongPress={() => { remotes.refetch(); setSelected(item); }}
+              onWidth={onRowWidth}
             />
             {item.hash === open ? (
+              <Animated.View style={{ width: viewport || undefined, transform: [{ translateX: scrollX }] }}>
               <CommitDetails
                 key={item.hash}
                 projectId={projectId}
@@ -249,7 +279,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
                 row={item}
                 headHash={headHash}
                 below={layout[index].below}
-                graphWidth={Math.max(lanes, 1) * LANE_WIDTH}
+                graphWidth={graphWidth}
                 leading={selecting ? CHECK_WIDTH : 0}
                 colour={(i) => laneColour(palette, i)}
                 fileView={view}
@@ -263,6 +293,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
                 // Near the end of the list the details only fit once they are there.
                 onShown={() => scrollToRow(item.hash)}
               />
+              </Animated.View>
             ) : null}
           </Fragment>
         )}
@@ -276,6 +307,7 @@ export function GitGraphView({ projectId, folder, embedded = false, onReviewChan
         ListEmptyComponent={graph.isLoading ? <ActivityIndicator style={{ margin: spacing.xl }} color={colors.accent} /> : <Text style={styles.empty}>No commits.</Text>}
         ListFooterComponent={data?.hasMore && limit < MAX_COMMITS ? <ActivityIndicator style={{ margin: spacing.lg }} color={colors.textFaint} /> : undefined}
       />
+      </Animated.ScrollView>
       {ticked.size >= 2 ? (
         <View style={[styles.compareBar, { paddingBottom: (embedded ? 0 : insets.bottom) + spacing.md }]}>
           <Text style={styles.compareText}>{ticked.size > COMPARE_MAX ? `Compare up to ${COMPARE_MAX} commits` : `${ticked.size} selected`}</Text>
@@ -324,17 +356,17 @@ function confirmThen(action: GraphAction, run: (action: GraphAction) => void) {
   ]);
 }
 
-const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, selecting, checked, onToggleCheck, onPress, onLongPress }: {
+const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selected, selecting, checked, onToggleCheck, onPress, onLongPress, onWidth }: {
   row: HistoryRow; geometry: GraphRow; lanes: number; palette: string[]; selected: boolean; selecting: boolean; checked: boolean;
   onToggleCheck: () => void; onPress: () => void; onLongPress: () => void;
+  /** The width the row needs, once its text is drawn: the list widens to the widest. */
+  onWidth: (width: number) => void;
 }) {
   const colour = (index: number) => laneColour(palette, index);
   const refs = row.refs || { heads: [], remotes: [], tags: [] };
-  const badges = [
-    ...refs.heads.map((name) => ({ key: `h:${name}`, text: name, style: styles.badgeHead })),
-    ...refs.remotes.map((r) => ({ key: `r:${r.remote}/${r.name}`, text: `${r.remote}/${r.name}`, style: styles.badgeRemote })),
-    ...refs.tags.map((name) => ({ key: `t:${name}`, text: name, style: styles.badgeTag })),
-  ];
+  // Every ref in full, in badgeTexts' order: branches, remote branches, tags.
+  const kinds = [...refs.heads.map(() => styles.badgeHead), ...refs.remotes.map(() => styles.badgeRemote), ...refs.tags.map(() => styles.badgeTag)];
+  const badges = badgeTexts(row).map((text, i) => ({ key: `${i}:${text}`, text, style: kinds[i] }));
   const special = row.kind !== 'commit';
   return (
     <Pressable
@@ -366,10 +398,10 @@ const CommitRow = memo(function CommitRow({ row, geometry, lanes, palette, selec
           stroke={colour(geometry.node.colorIndex)} strokeWidth={special || row.isHead ? 2 : 0}
         />
       </Svg>
-      <View style={styles.text}>
+      {/* As wide as its text: the list is wider than the screen when a row needs it, and scrolls sideways. */}
+      <View style={styles.text} onLayout={(e) => onWidth(e.nativeEvent.layout.x + e.nativeEvent.layout.width + ROW_RIGHT)}>
         <View style={styles.subjectLine}>
-          {badges.slice(0, 3).map((badge) => <Text key={badge.key} style={[styles.badge, badge.style]} numberOfLines={1}>{badge.text}</Text>)}
-          {badges.length > 3 ? <Text style={styles.more}>+{badges.length - 3}</Text> : null}
+          {badges.map((badge) => <Text key={badge.key} style={[styles.badge, badge.style]} numberOfLines={1}>{badge.text}</Text>)}
           <Text style={[styles.subject, special && styles.special]} numberOfLines={1}>{row.subject}</Text>
         </View>
         {row.kind === 'commit' ? <Text style={styles.meta} numberOfLines={1}>{row.shortHash} · {row.authorName} · {relativeTime(row.commitDate)}</Text> : null}
@@ -390,21 +422,20 @@ const styles = StyleSheet.create({
   runningText: { flex: 1, color: colors.text, fontSize: 12, fontFamily: 'Menlo' },
   cancel: { color: colors.danger, fontSize: 14 },
   empty: { color: colors.textFaint, textAlign: 'center', marginTop: spacing.xl, paddingHorizontal: spacing.lg },
-  row: { flexDirection: 'row', alignItems: 'center', height: ROW_HEIGHT, paddingLeft: spacing.sm, paddingRight: spacing.md },
+  row: { flexDirection: 'row', alignItems: 'center', height: ROW_HEIGHT, paddingLeft: ROW_LEFT, paddingRight: ROW_RIGHT },
   pressed: { backgroundColor: colors.surface },
   check: { width: CHECK_WIDTH, height: ROW_HEIGHT, alignItems: 'center', justifyContent: 'center' },
   selectedCount: { color: colors.accent, fontSize: 12.5, fontWeight: '600' },
   selected: { backgroundColor: colors.raised },
-  text: { flex: 1, marginLeft: spacing.sm, gap: 1 },
-  subjectLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  subject: { color: colors.text, fontSize: 14, flexShrink: 1 },
+  text: { flexShrink: 0, marginLeft: TEXT_GAP, gap: 1 },
+  subjectLine: { flexDirection: 'row', alignItems: 'center', gap: BADGE_GAP },
+  subject: { color: colors.text, fontSize: SUBJECT_SIZE },
   special: { color: colors.textDim, fontStyle: 'italic' },
-  meta: { color: colors.textFaint, fontSize: 11 },
-  badge: { fontSize: 10, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, overflow: 'hidden', maxWidth: 110, color: colors.text },
+  meta: { color: colors.textFaint, fontSize: META_SIZE },
+  badge: { fontSize: BADGE_SIZE, paddingHorizontal: BADGE_PADDING, paddingVertical: 1, borderRadius: 4, overflow: 'hidden', color: colors.text },
   badgeHead: { backgroundColor: 'rgba(128,136,255,0.3)' },
   badgeRemote: { backgroundColor: 'rgba(255,255,255,0.1)', color: colors.textDim },
   badgeTag: { backgroundColor: 'rgba(224,160,80,0.3)' },
-  more: { color: colors.textFaint, fontSize: 10 },
   compareBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   compareText: { flex: 1, color: colors.text, fontSize: 14 },
   compareButton: { minHeight: 40, paddingHorizontal: spacing.lg, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(128,136,255,0.22)' },
