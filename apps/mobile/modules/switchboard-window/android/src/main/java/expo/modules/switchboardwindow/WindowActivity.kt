@@ -22,9 +22,11 @@ class WindowActivity : ReactActivity() {
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    // As MainActivity: sizes for the display this window is on (DeX, a monitor).
-    DisplayMetricsHolder.initDisplayMetrics(this)
     super.onCreate(null)
+    // As MainActivity: sizes for the display this window is on (DeX, a monitor).
+    // After super.onCreate, never before: the root view made there sets them
+    // from the application context, the phone's own screen, for every window.
+    DisplayMetricsHolder.initDisplayMetrics(this)
     MultiWindow.created(this)
     intent.getStringExtra(EXTRA_TITLE)?.let { name ->
       title = name
