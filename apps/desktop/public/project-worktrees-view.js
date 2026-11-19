@@ -263,10 +263,57 @@ function wtStatusHtml(wt, live, order = 'default') {
     if (wt.behind) parts.push(`<span class="wt-sync" title="${wtAttr(`${wtPlural(wt.behind, 'commit')} behind its upstream`)}">↓${wt.behind}</span>`);
     parts.push(wtTimeHtml(wt, order));
   }
-  if (live?.length) {
-    parts.push(`<span class="ws-badge wt-live" title="${wtAttr(live.map(s => s.name || s.summary || s.sessionId).join('\n'))}">${live.length} running</span>`);
-  }
+  if (live?.length) parts.push(wtLiveButtonHtml(live));
   return parts.join('');
+}
+
+// --- Sessions running in a worktree ---
+
+function wtSessionTitle(session) {
+  if (typeof sessionTitle === 'function') return sessionTitle(session);
+  return session.name || session.summary || session.sessionId;
+}
+
+/** "N running" as a button: it lists the sessions, and a click on one opens it. */
+function wtLiveButtonHtml(live) {
+  const names = live.map(wtSessionTitle).join('\n');
+  return `<button type="button" class="ws-badge wt-live wt-live-btn" data-act="running" aria-haspopup="menu" title="${wtAttr(`Open a session running here\n${names}`)}">${live.length} running${PICONS.chevronDown(9)}</button>`;
+}
+
+// What a running session is doing, in the words of the project's session dots.
+const WT_ACTIVITY_LABELS = { attention: 'Needs you', running: 'Working', ready: 'Finished, not read yet', idle: 'Open' };
+const WT_ACTIVITY_ORDER = ['attention', 'ready', 'running', 'idle', ''];
+
+function wtSessionActivity(session) {
+  return typeof sessionActivity === 'function' ? sessionActivity(session) : '';
+}
+
+/** A session's line in the menu: what it is doing, if on screen, and its last message's time. */
+function wtSessionHint(session) {
+  const parts = [];
+  const activity = WT_ACTIVITY_LABELS[wtSessionActivity(session)];
+  if (activity) parts.push(activity);
+  if (typeof activeSessionId !== 'undefined' && activeSessionId === session.sessionId) parts.push('current');
+  const time = session.modified || session.created;
+  if (time) parts.push(formatDate(new Date(time)));
+  return parts.join(' · ');
+}
+
+/** The sessions running in a worktree as menu items, the ones that want you first; a click opens one. */
+function wtRunningSessionItems(live) {
+  const rank = session => WT_ACTIVITY_ORDER.indexOf(wtSessionActivity(session));
+  return [...(live || [])]
+    .sort((a, b) => rank(a) - rank(b) || String(b.modified || '').localeCompare(String(a.modified || '')))
+    .map(session => ({
+      label: wtSessionTitle(session),
+      icon: typeof cliIcon === 'function' ? cliIcon(session, 14) : '',
+      hint: wtSessionHint(session),
+      onClick: () => { if (typeof openSession === 'function') openSession(session); },
+    }));
+}
+
+function wtRunningMenuItems(wt, live) {
+  return [{ head: `Open a session running in ${wtLabel(wt)}` }, ...wtRunningSessionItems(live)];
 }
 
 /**
@@ -373,8 +420,9 @@ function wtListHtml(project, state) {
       ? `<div class="git-empty-row">${escapeHtml(repo.error)}</div>`
       : worktrees.map((wt) => {
         const key = `w${index++}`;
-        state.rows.set(key, { repo, wt });
-        return wtRowHtml(wt, key, live.get(wt.path) || [], repo, settings.sortOrder || 'default');
+        const sessions = live.get(wt.path) || [];
+        state.rows.set(key, { repo, wt, live: sessions });
+        return wtRowHtml(wt, key, sessions, repo, settings.sortOrder || 'default');
       }).join('');
     return `
       <section class="git-section wt-repo" data-repo="${groupIndex}">
@@ -426,15 +474,17 @@ function paintWorktreeList(project, state, body) {
   list.querySelectorAll('.wt-row').forEach((row) => {
     const entry = state.rows.get(row.dataset.wt);
     if (!entry) return;
-    const { repo, wt } = entry;
+    const { repo, wt, live } = entry;
+    const running = row.querySelector('[data-act="running"]');
+    if (running) running.onclick = (e) => showContextMenu(wtRunningMenuItems(wt, live), { anchor: e.currentTarget });
     const session = row.querySelector('[data-act="session"]');
     if (session) session.onclick = (e) => showContextMenu(wtSessionMenuItems(project, wt), { anchor: e.currentTarget });
     const changes = row.querySelector('[data-act="changes"]');
     if (changes) changes.onclick = () => wtChangesDialog(project, repo, wt);
     const open = row.querySelector('[data-act="open"]');
     if (open) open.onclick = () => wtOpenFolder(project, wt.path);
-    row.querySelector('[data-act="more"]').onclick = (e) => showContextMenu(wtRowMenuItems(project, repo, wt), { anchor: e.currentTarget });
-    row.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(wtRowMenuItems(project, repo, wt), { x: e.clientX, y: e.clientY }); };
+    row.querySelector('[data-act="more"]').onclick = (e) => showContextMenu(wtRowMenuItems(project, repo, wt, live), { anchor: e.currentTarget });
+    row.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(wtRowMenuItems(project, repo, wt, live), { x: e.clientX, y: e.clientY }); };
   });
 }
 
@@ -594,8 +644,13 @@ function wtFolderFor(project, wt) {
   return (project.folders || []).find(f => f.path === wt.path || (wt.attachedPath && f.path === wt.attachedPath)) || null;
 }
 
-function wtRowMenuItems(project, repo, wt) {
+function wtRowMenuItems(project, repo, wt, live = []) {
   const items = [{ head: wtLabel(wt) }];
+  // The sessions running here: one opens straight away, several from a submenu.
+  const running = wtRunningSessionItems(live);
+  if (running.length === 1) items.push({ ...running[0], label: `Open “${running[0].label}”` });
+  else if (running.length > 1) items.push({ label: 'Open a running session', icon: ICONS.terminal(13), hint: `${running.length} here`, submenu: running });
+  if (running.length) items.push({ sep: true });
   if (wt.exists) {
     items.push({ label: 'New session', icon: PICONS.plus(13), submenu: wtSessionMenuItems(project, wt) });
     if (wtCanShowChanges(wt)) items.push({ label: 'Uncommitted and unpushed…', icon: WT_ICONS.gitGraph(13), onClick: () => wtChangesDialog(project, repo, wt) });
@@ -1657,5 +1712,6 @@ if (typeof module !== 'undefined' && module.exports) {
     wtRowHtml, wtRowPath, wtBadgesHtml, wtStatusHtml, wtListHtml, wtRowMenuItems, wtRepoMenuItems,
     wtMergedListHtml, wtPreviewTemplate, wtRefFolderName, wtStartPointOptions, wtAttr,
     wtChangesButtonHtml, wtChangesVerdict, wtChangesBodyHtml, wtChangeState,
+    wtRunningMenuItems, wtRunningSessionItems, wtSessionHint,
   };
 }

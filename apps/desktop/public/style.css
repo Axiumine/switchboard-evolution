@@ -6405,6 +6405,18 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .wt-state.changed { color: #e0aa63; background: rgba(224,170,99,0.1); }
 .wt-sync { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; color: #9a9ab0; }
 
+/* "N running": a button that lists the sessions running in the worktree. */
+.wt-live-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid rgba(62,207,90,0.22);
+  font-family: inherit;
+  cursor: pointer;
+}
+.wt-live-btn:hover, .wt-live-btn:focus-visible { background: rgba(62,207,90,0.2); border-color: rgba(62,207,90,0.45); outline: none; }
+.wt-live-btn svg { opacity: 0.8; }
+
 /* The row's git-graph button: lit when there is work not committed or not pushed. */
 .wt-changes-btn.has-pending { color: #e0aa63; }
 

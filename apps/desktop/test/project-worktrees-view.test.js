@@ -405,3 +405,40 @@ test('the panel lists the files and the unpushed commits, escaped', () => {
   assert.match(clean, /Nothing to commit: the working tree is clean/);
   assert.match(clean, /Everything is pushed to origin\/feat/);
 });
+
+test('"N running" is a button listing the sessions running in the worktree; a click opens one', () => {
+  const opened = [];
+  const ctx = loadContext({
+    sessionTitle: s => s.name,
+    sessionActivity: s => ({ a: 'running', b: 'attention' })[s.sessionId] || 'idle',
+    cliIcon: s => `<svg data-cli="${s.runtime}"></svg>`,
+    openSession: s => opened.push(s.sessionId),
+  });
+  const live = [
+    { sessionId: 'a', name: 'Fix the cart', runtime: 'claude', modified: '2026-11-19T10:00:00Z' },
+    { sessionId: 'b', name: 'Review <it>', runtime: 'codex', modified: '2026-11-19T09:00:00Z' },
+  ];
+  const row = ctx.wtRowHtml(wt('/w/a', { branch: 'a' }), 'w0', live);
+  assert.match(row, /<button type="button" class="ws-badge wt-live wt-live-btn" data-act="running" aria-haspopup="menu"/);
+  assert.match(row, />2 running</);
+  assert.match(row, /Open a session running here\nFix the cart\nReview &lt;it&gt;/);
+
+  const items = ctx.wtRunningMenuItems(wt('/w/a', { branch: 'a' }), live);
+  assert.equal(items[0].head, 'Open a session running in a');
+  assert.deepEqual(plain(items.slice(1).map(i => [i.label, i.hint])), [
+    ['Review <it>', 'Needs you · 2d ago'],
+    ['Fix the cart', 'Working · 2d ago'],
+  ], 'the one that needs you first');
+  items[1].onClick();
+  assert.deepEqual(opened, ['b']);
+
+  // The row menu: one session opens straight away, several from a submenu.
+  const project = { id: 'p', folders: [] };
+  const repo = { id: 'r', name: 'app', mainPath: '/w/app' };
+  const one = ctx.wtRowMenuItems(project, repo, wt('/w/a', { branch: 'a' }), live.slice(0, 1));
+  assert.equal(one[1].label, 'Open “Fix the cart”');
+  const two = ctx.wtRowMenuItems(project, repo, wt('/w/a', { branch: 'a' }), live);
+  assert.equal(two[1].label, 'Open a running session');
+  assert.equal(two[1].submenu.length, 2);
+  assert.equal(ctx.wtRowMenuItems(project, repo, wt('/w/a', { branch: 'a' }))[1].label, 'New session', 'nothing running: as before');
+});
