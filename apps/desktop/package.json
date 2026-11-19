@@ -1,7 +1,7 @@
 {
   "name": "switchboard-e",
   "productName": "Switchboard Evolution",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "private": true,
   "description": "Switchboard Evolution: a desktop app for running and managing coding-agent sessions across projects",
   "author": "Vincenzo Favara",
