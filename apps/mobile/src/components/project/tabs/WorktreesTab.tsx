@@ -20,6 +20,7 @@ import {
 import {
   ask, patchCachedSettings, runAction, setNotice, SLOW_TIMEOUT_MS, startInWorktree, useNotice, useProjectWorktrees, useRunningByWorktree, type Notice,
 } from '@/worktrees/queries';
+import { canShowChanges, hasPendingWork } from '@/worktrees/changes';
 import { useTabScroll } from '../useTabScroll';
 
 type Harness = { id: string; label: string; enabled: boolean };
@@ -55,6 +56,8 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   const openInTab = useOpenSession();
   const scroll = useTabScroll(pid, 'worktrees');
   const supported = useCapability('get-project-worktrees');
+  // A desktop older than 5.9 cannot list a worktree's uncommitted files and unpushed commits.
+  const canChanges = useCapability('worktree-changes');
   const online = useConnection((s) => s.status.state === 'online');
   const listing = useProjectWorktrees(supported ? pid : undefined);
   const notice = useNotice(pid);
@@ -178,12 +181,15 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
     ];
   };
 
+  const openChanges = (wt: Worktree) => router.push({ pathname: '/worktrees/changes', params: { projectId: pid, path: wt.path } });
+
   const rowOptions = (repo: WorktreeRepository, wt: Worktree): SheetOption[] => {
     const options: SheetOption[] = [];
     for (const session of running.get(wt.path) || []) {
       options.push({ label: `Open “${sessionTitle(session)}”`, hint: 'running here', onPress: () => openSession(session) });
     }
     if (wt.exists) options.push({ label: 'New session…', hint: 'Claude, Codex or a terminal here', onPress: () => setMenu({ kind: 'session', wt }) });
+    if (canChanges && canShowChanges(wt)) options.push({ label: 'Uncommitted and unpushed…', hint: 'what removing it would lose', onPress: () => openChanges(wt) });
     options.push({ label: 'Copy path', hint: shortPath(wt.path, homeDir), onPress: () => copyPath(wt.path) });
     const folder = folderFor(project.folders, wt);
     options.push(folder
@@ -360,6 +366,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
               live={running.get(wt.path) || []}
               onPress={() => setMenu({ kind: 'row', repo, wt })}
               onSession={() => setMenu({ kind: 'session', wt })}
+              onChanges={canChanges && canShowChanges(wt) ? () => openChanges(wt) : undefined}
             />
           ))}
         </View>
@@ -376,7 +383,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
         refreshControl={pull}
       >
         {body}
-        {repositories?.length ? <Text style={styles.footer}>Tap a worktree for its actions; + starts a session in it. Pull down to read them again.</Text> : null}
+        {repositories?.length ? <Text style={styles.footer}>Tap a worktree for its actions; the git button shows what is not committed or pushed, + starts a session in it. Pull down to read them again.</Text> : null}
       </ScrollView>
 
       <Sheet visible={!!menu} title={menuTitle} options={menuOptions()} onClose={() => setMenu(null)} />
@@ -393,8 +400,10 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   );
 }
 
-function WorktreeRow({ wt, order, path, live, onPress, onSession }: {
+function WorktreeRow({ wt, order, path, live, onPress, onSession, onChanges }: {
   wt: Worktree; order: SortOrder; path: string; live: Session[]; onPress: () => void; onSession: () => void;
+  /** Opens the worktree's uncommitted files and unpushed commits; none from an older desktop. */
+  onChanges?: () => void;
 }) {
   const badges = worktreeBadges(wt);
   const status: { text: string; color: string }[] = [];
@@ -439,6 +448,17 @@ function WorktreeRow({ wt, order, path, live, onPress, onSession }: {
         ) : null}
         {wt.locked && wt.lockReason ? <Text style={styles.lockReason} numberOfLines={1}>Locked: {wt.lockReason}</Text> : null}
       </View>
+      {onChanges ? (
+        <Pressable
+          onPress={onChanges}
+          hitSlop={6}
+          style={({ pressed }) => [styles.rowButton, pressed && styles.pressedButton]}
+          accessibilityRole="button"
+          accessibilityLabel={`Uncommitted files and unpushed commits of ${label}`}
+        >
+          <Ionicons name="git-network-outline" size={18} color={hasPendingWork(wt) ? colors.attention : colors.textDim} />
+        </Pressable>
+      ) : null}
       {wt.exists ? (
         <Pressable onPress={onSession} hitSlop={6} style={({ pressed }) => [styles.rowButton, pressed && styles.pressedButton]} accessibilityRole="button" accessibilityLabel={`New session in ${label}`}>
           <Ionicons name="add" size={18} color={colors.accent} />
