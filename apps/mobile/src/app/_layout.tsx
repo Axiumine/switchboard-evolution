@@ -12,6 +12,7 @@ import { SyncBar } from '@/components/SyncBar';
 import { useDownload } from '@/files/download';
 import { AppStack as Stack } from '@/layout/AppStack';
 import { BottomInsetTaken } from '@/layout/bottomInset';
+import { SidebarDivider } from '@/layout/SidebarDivider';
 import { isDuoModel } from '@/layout/hinge';
 import { queryClient } from '@/remote/query';
 import { useConnection } from '@/store/connection';
@@ -66,6 +67,7 @@ export default function RootLayout() {
             <Stack.Screen name="worktrees/settings" options={{ title: 'Worktree settings' }} />
             <Stack.Screen name="worktrees/folder" options={{ title: 'Worktree folder' }} />
           </Stack>
+          <SidebarDivider />
         </WithDownloadBar>
         <AttentionToast />
         <SyncBar />
@@ -85,7 +87,7 @@ function WithDownloadBar({ children }: { children: ReactNode }) {
   const shown = downloading && !typing;
   return (
     <View style={styles.screens}>
-      <BottomInsetTaken taken={shown}>{children}</BottomInsetTaken>
+      <BottomInsetTaken taken={shown}><View style={styles.screens}>{children}</View></BottomInsetTaken>
       {shown ? <DownloadBar /> : null}
     </View>
   );

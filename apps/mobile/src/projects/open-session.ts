@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { CommonActions, TabActions } from 'expo-router/react-navigation';
 import { createContext, useCallback, useContext } from 'react';
 
-import { isDuoModel } from '@/layout/hinge';
+import { isDuoModel, twoPanesNow } from '@/layout/hinge';
 import { queryClient } from '@/remote/query';
 import { useListUi } from './list-ui';
 import { projectSessions, type Project } from './model';
@@ -92,13 +92,15 @@ export function useOpenSession(): (sessionId: string, view?: SessionView) => voi
  * Surface Duo the left screen turns to Projects (DuoTabs) and the session opens
  * on the right: on its project's Session tab when it has a project, else on
  * its own screen, never across both screens unless asked for (Split screen).
- * Anywhere else a session of the Sessions tab opens on its own screen, as before.
+ * Beside the sidebar of a wide window (DeX) it opens on the right the same
+ * way, and the sidebar stays on its tab. On a phone a session of the Sessions
+ * tab opens on its own screen, as before.
  */
 export function openSessionFromTabs(
   navigation: Navigator | undefined,
   session: { sessionId: string; projectPath?: string | null },
   projectId: string | null | undefined,
-  { inProject = isDuoModel() }: { inProject?: boolean } = {},
+  { inProject = twoPanesNow() }: { inProject?: boolean } = {},
 ): void {
   const project = projectId ?? projectOfSession(session.sessionId);
   // From a tab: on a Surface Duo the left screen turns to Projects first, then

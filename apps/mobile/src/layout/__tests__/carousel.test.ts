@@ -27,6 +27,27 @@ describe('cardFrame', () => {
   });
 });
 
+describe('cardFrame beside a sidebar (DeX, a tablet)', () => {
+  const sidebar = { x: 360, width: 1 };
+  const D = 1920;
+  const right = { x: 361, width: 1559 };
+
+  it('gives the root the whole window while it is alone, else the sidebar', () => {
+    expect(cardFrame({ windowWidth: D, hinge: sidebar, index: 0, top: true, full: false, sidebar: true })).toEqual({ x: 0, width: D });
+    expect(cardFrame({ windowWidth: D, hinge: sidebar, index: 0, top: false, full: false, sidebar: true })).toEqual({ x: 0, width: 360 });
+  });
+
+  it('keeps every screen opened after it on the right, the last one and those under it alike', () => {
+    expect(cardFrame({ windowWidth: D, hinge: sidebar, index: 1, top: true, full: false, sidebar: true })).toEqual(right);
+    expect(cardFrame({ windowWidth: D, hinge: sidebar, index: 1, top: false, full: false, sidebar: true })).toEqual(right);
+    expect(cardFrame({ windowWidth: D, hinge: sidebar, index: 3, top: true, full: false, sidebar: true })).toEqual(right);
+  });
+
+  it('keeps a session asking for both screens on the right too: the sidebar stays', () => {
+    expect(cardFrame({ windowWidth: D, hinge: sidebar, index: 2, top: true, full: true, sidebar: true })).toEqual(right);
+  });
+});
+
 describe('trimForLeftTouch', () => {
   const state = { index: 2, routes: [{ key: 'tabs' }, { key: 'project' }, { key: 'file' }] };
 

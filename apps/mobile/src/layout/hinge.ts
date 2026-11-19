@@ -1,5 +1,8 @@
 import * as Device from 'expo-device';
-import { PixelRatio, useWindowDimensions } from 'react-native';
+import { Dimensions, PixelRatio, useWindowDimensions } from 'react-native';
+
+import { sidebarSplit, useSidebar } from '@/layout/sidebar';
+import { layoutClass } from '@/layout/size';
 
 // Surface Duo and Duo 2 run one app across two screens, and the hinge between
 // them hides a band in the middle of the window. Android says nothing about it
@@ -32,8 +35,42 @@ export function isDuoModel(model: string | null = Device.modelName): boolean {
   return !!model && model in DUOS;
 }
 
-/** The hinge in this window now, or null. */
+/**
+ * The band between the two panes: a Duo's hinge, or anywhere else the edge of
+ * the sidebar in a wide window (sidebar.ts); null with one pane.
+ */
+export function splitFor(model: string | null, width: number, scale: number, sidebarWidth: number): Hinge | null {
+  if (isDuoModel(model)) return hingeFor(model, width, scale);
+  return sidebarSplit(width, sidebarWidth);
+}
+
+/** The band between the panes in this window now, or null. */
 export function useHinge(): Hinge | null {
   const { width } = useWindowDimensions();
-  return hingeFor(Device.modelName, width, PixelRatio.get());
+  const sidebar = useSidebar((s) => s.width);
+  return splitFor(Device.modelName, width, PixelRatio.get(), sidebar);
+}
+
+/** The band between the panes for a window this wide, read outside React (a card's animation). */
+export function splitNow(width: number): Hinge | null {
+  return splitFor(Device.modelName, width, PixelRatio.get(), useSidebar.getState().width);
+}
+
+/** Whether the panes are a sidebar and a workspace (a wide window) rather than a Duo's two screens. */
+export function hasSidebar(model: string | null = Device.modelName): boolean {
+  return !isDuoModel(model);
+}
+
+/**
+ * Whether the app is laid out in two panes, with the Duo's navigators
+ * (DuoTabs, AppStack's carousel): on a Duo, and in a wide window anywhere else.
+ */
+export function useTwoPanes(): boolean {
+  const { width } = useWindowDimensions();
+  return isDuoModel() || layoutClass(width) === 'expanded';
+}
+
+/** useTwoPanes, read outside React. */
+export function twoPanesNow(): boolean {
+  return isDuoModel() || layoutClass(Dimensions.get('window').width) === 'expanded';
 }

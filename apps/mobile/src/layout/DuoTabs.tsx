@@ -9,12 +9,13 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppTabBar } from '@/components/AppTabBar';
-import { useHinge } from '@/layout/hinge';
+import { hasSidebar, useHinge } from '@/layout/hinge';
 import { TabShown } from '@/layout/shown';
 import { useListUi } from '@/projects/list-ui';
 import { useAreaWidth } from '@/layout/size';
 
-// The tabs on a Surface Duo. With both screens to themselves (the root of the
+// The tabs on a Surface Duo, and beside the sidebar in a wide window (DeX, a
+// tablet), where the sidebar is the left screen. With both screens to themselves (the root of the
 // carousel, AppStack, with nothing open on the right yet) Projects is always
 // on the left, the tab bar under it, and the other tab in use on the right:
 // Sessions at first, then whichever the bar picks. Otherwise (something open
@@ -54,20 +55,23 @@ function DuoTabsNavigator({ id, initialRouteName, children, screenOptions, backB
   // A jump, not a navigate: a navigate brings the tabs to the front of the
   // stack, which closes whatever is open on the right.
   const focus = (name: string) => { if (focused.name !== name) navigation.dispatch(TabActions.jumpTo(name)); };
-  const both = !!hinge && width >= hinge.x * 2;
+  // Across both panes: the area goes past the band between them.
+  const both = !!hinge && width > hinge.x + hinge.width;
+  const sidebar = hasSidebar();
   // The tab on the right side by side: the last one in use other than Projects.
   const [rightTab, setRightTab] = useState(focused.name === 'projects' ? 'index' : focused.name);
   if (focused.name !== 'projects' && focused.name !== rightTab) setRightTab(focused.name);
   const shownNames = both ? ['projects', rightTab] : [focused.name];
-  // A session opened anywhere: the left screen shows it in Projects, highlighted.
+  // A session opened anywhere: on a Duo the left screen shows it in Projects, highlighted.
   // After the render, never during it: a navigation there stalls a screen sliding in.
+  // The sidebar stays on its tab, as the desktop's does.
   const revealCount = useListUi((s) => s.revealCount);
   const seenReveal = useRef(revealCount);
   useEffect(() => {
     if (revealCount === seenReveal.current) return;
     seenReveal.current = revealCount;
-    if (state.routes[state.index].name !== 'projects') navigation.dispatch(TabActions.jumpTo('projects'));
-  }, [revealCount, navigation, state]);
+    if (!sidebar && state.routes[state.index].name !== 'projects') navigation.dispatch(TabActions.jumpTo('projects'));
+  }, [revealCount, navigation, state, sidebar]);
   const missing = shownNames.filter((name) => !state.routes.some((route) => route.name === name));
   useEffect(() => {
     for (const name of missing) navigation.dispatch(CommonActions.preload(name));
@@ -75,9 +79,9 @@ function DuoTabsNavigator({ id, initialRouteName, children, screenOptions, backB
 
   // Whether these tabs are in sight at all: in front, or (open across both
   // screens) the screen on the left of the one in front, unless that one
-  // takes both (a session split into chat and terminal).
+  // takes both (a session split into chat and terminal). The sidebar always is.
   const rootShown = useNavigationState((s: { index: number; routes: { name: string; params?: { split?: string } }[] }) => {
-    if (s.index === 0) return true;
+    if (s.index === 0 || (sidebar && !!hinge)) return true;
     const top = s.routes[s.index];
     return !!hinge && s.index === 1 && !(top?.name === 'session/[id]' && top.params?.split === '1');
   });

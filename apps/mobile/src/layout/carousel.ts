@@ -8,8 +8,13 @@ import type { Hinge } from '@/layout/hinge';
 // A screen changing its own params (a project switching tab on the left)
 // leaves the other screen where it is. These are the rules; AppStack draws them.
 
-/** Where a screen of the stack sits once it has arrived, in dp. */
-export function cardFrame({ windowWidth, hinge, index, top, full }: {
+/**
+ * Where a screen of the stack sits once it has arrived, in dp. Beside a
+ * sidebar (`sidebar`, a wide window that is not a Duo) the root keeps the
+ * sidebar and everything opened after it stays on the right, as on the
+ * desktop: nothing slides into the sidebar.
+ */
+export function cardFrame({ windowWidth, hinge, index, top, full, sidebar = false }: {
   windowWidth: number;
   hinge: Hinge | null;
   /** Its place in the stack: 0 is the root. */
@@ -18,8 +23,14 @@ export function cardFrame({ windowWidth, hinge, index, top, full }: {
   top: boolean;
   /** Whether it wants both screens (a split session). */
   full: boolean;
+  /** Whether the band is a sidebar's edge rather than a Duo's hinge. */
+  sidebar?: boolean;
 }): { x: number; width: number } {
   if (!hinge) return { x: 0, width: windowWidth };
+  if (sidebar) {
+    if (index === 0) return { x: 0, width: top ? windowWidth : hinge.x };
+    return { x: hinge.x + hinge.width, width: windowWidth - hinge.x - hinge.width };
+  }
   if (top && (index === 0 || full)) return { x: 0, width: windowWidth };
   if (top) return { x: hinge.x + hinge.width, width: windowWidth - hinge.x - hinge.width };
   return { x: 0, width: hinge.x };

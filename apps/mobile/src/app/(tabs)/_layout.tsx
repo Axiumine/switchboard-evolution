@@ -3,20 +3,19 @@ import { Tabs } from 'expo-router';
 import { AppTabBar } from '@/components/AppTabBar';
 import { headerEdgeOptions } from '@/components/HeaderButton';
 import { DuoTabs } from '@/layout/DuoTabs';
-import { isDuoModel } from '@/layout/hinge';
+import { useTwoPanes } from '@/layout/hinge';
 import { colors } from '@/theme';
 
 // The app opens on Sessions, though Projects comes first in the bar, as on the desktop.
 export const unstable_settings = { initialRouteName: 'index' };
 
-// On a Surface Duo, tabs that sit side by side when they have both screens.
-const TabsNavigator = (isDuoModel() ? DuoTabs : Tabs) as typeof Tabs;
-
 /**
  * The tabs of the desktop's sidebar strip: Projects, Sessions, Stats, the
- * Task Manager and Settings (AppTabBar). On a Surface Duo, see DuoTabs.
+ * Task Manager and Settings (AppTabBar). On a Surface Duo, and in a wide
+ * window (DeX, a tablet) beside the sidebar, side by side: see DuoTabs.
  */
 export default function TabsLayout() {
+  const TabsNavigator = (useTwoPanes() ? DuoTabs : Tabs) as typeof Tabs;
   return (
     <TabsNavigator
       tabBar={({ state, navigateToTab, insets }) => (
