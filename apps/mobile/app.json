@@ -67,7 +67,8 @@
         }
       ],
       "expo-sharing",
-      "./plugins/with-display-metrics"
+      "./plugins/with-display-metrics",
+      "./plugins/with-multi-window"
     ],
     "experiments": {
       "typedRoutes": true,

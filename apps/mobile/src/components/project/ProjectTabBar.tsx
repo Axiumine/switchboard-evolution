@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -14,13 +15,17 @@ const ACTIVE_LABEL = '#e4e4fa';
  * view when it is selected or restored. `meta` is a short note after a
  * label (the plan's `3/7`), `dots` a state dot after it (what the Session
  * tab's session is doing). `tabs` leaves some out (Session until one is open).
+ * With `onPopOut`, the tabs it takes (`popOut`) have the desktop's button
+ * that opens them in a window of their own.
  */
-export function ProjectTabBar({ tabs = PROJECT_TABS, active, onChange, meta, dots }: {
+export function ProjectTabBar({ tabs = PROJECT_TABS, active, onChange, meta, dots, onPopOut, popOut }: {
   tabs?: readonly { key: ProjectTab; label: string }[];
   active: ProjectTab;
   onChange: (tab: ProjectTab) => void;
   meta?: Partial<Record<ProjectTab, string>>;
   dots?: Partial<Record<ProjectTab, string>>;
+  onPopOut?: (tab: ProjectTab) => void;
+  popOut?: readonly ProjectTab[];
 }) {
   const scroller = useRef<ScrollViewInstance>(null);
   const spans = useRef<Partial<Record<ProjectTab, { x: number; width: number }>>>({});
@@ -75,6 +80,11 @@ export function ProjectTabBar({ tabs = PROJECT_TABS, active, onChange, meta, dot
               <Text style={[styles.label, selected && styles.labelActive]}>{label}</Text>
               {meta?.[key] ? <Text style={styles.meta}>{meta[key]}</Text> : null}
               {dots?.[key] ? <View style={[styles.dot, { backgroundColor: dots[key] }]} /> : null}
+              {onPopOut && popOut?.includes(key) ? (
+                <Pressable onPress={() => onPopOut(key)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Open ${label} in a window`}>
+                  <Ionicons name="open-outline" size={13} color={colors.textFaint} />
+                </Pressable>
+              ) : null}
               {selected ? <View style={styles.underline} /> : null}
             </Pressable>
           );

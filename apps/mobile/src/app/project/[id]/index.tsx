@@ -24,6 +24,8 @@ import { rowState } from '@/sessions/model';
 import { projectSnoozed, resolveSnoozePresets } from '@/shared/vendor/snooze';
 import { useConnection } from '@/store/connection';
 import { colors } from '@/theme';
+import { openWindow, useCanOpenWindows } from '@/windows/open';
+import { WINDOW_TABS } from '@/windows/window-spec';
 
 /**
  * One project, on the desktop's tabs: Overview, Session, Plan, Files, Git
@@ -37,6 +39,7 @@ export default function ProjectScreen() {
   const plan = useProjectPlan(id);
   const now = useMinute();
   const nav = useProjectTab(id);
+  const canPopOut = useCanOpenWindows();
   const { tab, selectTab, sessionId } = nav;
   const sessionState = useConnection((s) => (sessionId ? rowState(sessionId, s.live[sessionId], s.notices) : 'idle'));
   // A tab is built when first visited and kept, so its scroll, sheets and queries survive switching.
@@ -106,7 +109,16 @@ export default function ProjectScreen() {
             : <HeaderButton icon="ellipsis-horizontal" accessibilityLabel="Project actions" onPress={() => setActions(true)} />),
         }}
       />
-      <ProjectTabBar tabs={tabs} active={tab} onChange={selectTab} meta={meta} dots={sessionState === 'idle' ? undefined : { session: STATE_COLORS[sessionState] }} />
+      <ProjectTabBar
+        tabs={tabs}
+        active={tab}
+        onChange={selectTab}
+        meta={meta}
+        dots={sessionState === 'idle' ? undefined : { session: STATE_COLORS[sessionState] }}
+        // As on the desktop, every tab but Session opens in a window of its own (DeX, a tablet).
+        popOut={WINDOW_TABS}
+        onPopOut={canPopOut ? (key) => { if (key !== 'session') openWindow({ kind: 'project', projectId: project.id, tab: key }, project.name); } : undefined}
+      />
       <ProjectSessionContext.Provider value={nav.openSession}>
         <SwipeTabs tabs={tabs} active={tab} onChange={selectTab}>
           {tabs.filter(({ key }) => key === tab || visited.includes(key)).map(({ key }) => (

@@ -1,0 +1,9 @@
+<resources>
+  <!-- The app's background from the first frame, as the main window's theme gives it. -->
+  <style name="SwitchboardWindow" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <item name="android:windowBackground">@color/switchboard_window_background</item>
+    <item name="android:statusBarColor">@color/switchboard_window_background</item>
+    <item name="android:navigationBarColor">@color/switchboard_window_background</item>
+  </style>
+  <color name="switchboard_window_background">#111118</color>
+</resources>

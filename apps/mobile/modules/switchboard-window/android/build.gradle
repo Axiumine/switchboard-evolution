@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.github.vivi7.switchboard'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.switchboardwindow"
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+}

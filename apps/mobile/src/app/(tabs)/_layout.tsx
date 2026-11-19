@@ -1,10 +1,17 @@
 import { Tabs } from 'expo-router';
 
 import { AppTabBar } from '@/components/AppTabBar';
-import { headerEdgeOptions } from '@/components/HeaderButton';
+import { HeaderButton, headerEdgeOptions } from '@/components/HeaderButton';
 import { DuoTabs } from '@/layout/DuoTabs';
 import { useTwoPanes } from '@/layout/hinge';
 import { colors } from '@/theme';
+import { openWindow, useCanOpenWindows } from '@/windows/open';
+import type { WindowSpec } from '@/windows/window-spec';
+
+/** The header button that opens Stats or the Task Manager in a window of its own, as the desktop's tooltip does. */
+const popOut = (spec: WindowSpec, label: string) => ({
+  headerRight: () => <HeaderButton icon="open-outline" accessibilityLabel={`Open ${label} in a window`} onPress={() => openWindow(spec)} />,
+});
 
 // The app opens on Sessions, though Projects comes first in the bar, as on the desktop.
 export const unstable_settings = { initialRouteName: 'index' };
@@ -16,6 +23,7 @@ export const unstable_settings = { initialRouteName: 'index' };
  */
 export default function TabsLayout() {
   const TabsNavigator = (useTwoPanes() ? DuoTabs : Tabs) as typeof Tabs;
+  const canPopOut = useCanOpenWindows();
   return (
     <TabsNavigator
       tabBar={({ state, navigateToTab, insets }) => (
@@ -38,8 +46,8 @@ export default function TabsLayout() {
     >
       <TabsNavigator.Screen name="projects" options={{ title: 'Projects' }} />
       <TabsNavigator.Screen name="index" options={{ title: 'Sessions' }} />
-      <TabsNavigator.Screen name="stats" options={{ title: 'Stats' }} />
-      <TabsNavigator.Screen name="processes" options={{ title: 'Task Manager' }} />
+      <TabsNavigator.Screen name="stats" options={{ title: 'Stats', ...(canPopOut ? popOut({ kind: 'stats' }, 'Stats') : {}) }} />
+      <TabsNavigator.Screen name="processes" options={{ title: 'Task Manager', ...(canPopOut ? popOut({ kind: 'processes' }, 'the Task Manager') : {}) }} />
       <TabsNavigator.Screen name="settings" options={{ title: 'Settings' }} />
     </TabsNavigator>
   );
