@@ -1,6 +1,6 @@
 // The session list, as the desktop's Sessions tab builds it (public/sidebar.js
-// and public/utils.js in switchboard): sessions grouped by the folder they
-// run in, newest first, with each session's live state.
+// and public/utils.js in switchboard): one list, newest first, or grouped by
+// the folder they run in, with each session's live state.
 
 /** A session as get-projects returns it. */
 export type Session = {
@@ -33,7 +33,31 @@ export type Folder = { folder: string; projectPath: string; sessions: Session[] 
  */
 export type LiveState = { busy: boolean; attention: boolean; exited: boolean; starting: boolean; busySince?: number };
 
-export type SessionFilter = 'all' | 'running' | 'starred' | 'today';
+/** The status combo: running is any live session that has not exited, needs input is one asking for you. */
+export type StatusFilter = 'all' | 'running' | 'needsInput' | 'notRunning';
+/** The pinned combo. */
+export type PinFilter = 'all' | 'pinned' | 'notPinned';
+/** The order combo: pure time, or running and pinned sessions first. */
+export type SessionOrder = 'recent' | 'runningPinned';
+
+export const STATUS_FILTERS: readonly { key: StatusFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'running', label: 'Running' },
+  { key: 'needsInput', label: 'Needs input' },
+  { key: 'notRunning', label: 'Not running' },
+];
+
+export const PIN_FILTERS: readonly { key: PinFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'pinned', label: 'Pinned' },
+  { key: 'notPinned', label: 'Not pinned' },
+];
+
+/** `short` is what the combo button reads on a narrow screen. */
+export const SESSION_ORDERS: readonly { key: SessionOrder; label: string; short: string }[] = [
+  { key: 'recent', label: 'Most recent first', short: 'Recent first' },
+  { key: 'runningPinned', label: 'Running & pinned first', short: 'Running first' },
+];
 
 export type SessionState = 'attention' | 'busy' | 'running' | 'idle';
 
@@ -117,37 +141,65 @@ export function rowState(sessionId: string, live: LiveState | undefined, notices
   return state;
 }
 
-function isToday(session: Session, now: number): boolean {
-  const time = sessionTime(session);
-  return new Date(time).toDateString() === new Date(now).toDateString();
-}
-
 export type Section = { title: string; projectPath: string; data: Session[] };
 
+export type SessionListOptions = {
+  status?: StatusFilter;
+  pinned?: PinFilter;
+  order?: SessionOrder;
+  /** One section per folder; off (the default) is a single list with an empty title. */
+  groupByFolders?: boolean;
+  live?: Record<string, LiveState>;
+  matches?: Set<string> | null;
+};
+
+/** Running and pinned first, then running, then pinned, then the rest; time breaks ties. */
+function runningPinnedRank(session: Session, live: Record<string, LiveState>): number {
+  const running = sessionState(live[session.sessionId]) !== 'idle';
+  const pinned = !!session.starred;
+  return running && pinned ? 0 : running ? 1 : pinned ? 2 : 3;
+}
+
 /**
- * Folders with their sessions, newest first, after the filter and an
- * optional set of search matches. Empty folders are left out.
+ * The sessions after the status and pinned filters and an optional set of
+ * search matches, in the chosen order: one list, or one section per folder
+ * (newest session first among folders). Archived sessions and empty folders
+ * are left out. Time only sorts, it never filters.
  */
 export function buildSections(
   folders: Folder[],
-  { filter = 'all', live = {}, matches = null, now = Date.now() }: { filter?: SessionFilter; live?: Record<string, LiveState>; matches?: Set<string> | null; now?: number } = {},
+  { status = 'all', pinned = 'all', order = 'recent', groupByFolders = false, live = {}, matches = null }: SessionListOptions = {},
 ): Section[] {
   const keep = (session: Session) => {
     if (session.archived) return false;
     if (matches && !matches.has(session.sessionId)) return false;
-    if (filter === 'running') return sessionState(live[session.sessionId]) !== 'idle';
-    if (filter === 'starred') return !!session.starred;
-    if (filter === 'today') return isToday(session, now);
+    const state = sessionState(live[session.sessionId]);
+    if (status === 'running' && state === 'idle') return false;
+    if (status === 'needsInput' && state !== 'attention') return false;
+    if (status === 'notRunning' && state !== 'idle') return false;
+    if (pinned === 'pinned' && !session.starred) return false;
+    if (pinned === 'notPinned' && session.starred) return false;
     return true;
   };
+  const compare = (a: Session, b: Session) => {
+    if (order === 'runningPinned') {
+      const rank = runningPinnedRank(a, live) - runningPinnedRank(b, live);
+      if (rank) return rank;
+    }
+    return sessionTime(b) - sessionTime(a);
+  };
+  if (!groupByFolders) {
+    const data = folders.flatMap((folder) => folder.sessions.filter(keep)).sort(compare);
+    return data.length ? [{ title: '', projectPath: '', data }] : [];
+  }
   return folders
     .map((folder) => ({
       title: shortProjectPath(folder.projectPath),
       projectPath: folder.projectPath,
-      data: folder.sessions.filter(keep).sort((a, b) => sessionTime(b) - sessionTime(a)),
+      data: folder.sessions.filter(keep).sort(compare),
     }))
     .filter((section) => section.data.length > 0)
-    .sort((a, b) => sessionTime(b.data[0]) - sessionTime(a.data[0]));
+    .sort((a, b) => Math.max(...b.data.map(sessionTime)) - Math.max(...a.data.map(sessionTime)));
 }
 
 /**

@@ -1,29 +1,24 @@
 import { useQuery } from '@tanstack/react-query';
 import { Redirect, router, Tabs, useNavigation } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { HeaderButton } from '@/components/HeaderButton';
 import { usePullRefresh } from '@/components/PullRefresh';
 import { SearchStopBar } from '@/components/SearchStopBar';
 import { SessionActions } from '@/components/SessionActions';
+import { SessionListControls } from '@/components/SessionListControls';
 import { SessionRow } from '@/components/SessionRow';
 import { projectSessions } from '@/projects/model';
 import { openSessionFromTabs } from '@/projects/open-session';
 import { useProjectTree } from '@/projects/queries';
-import { buildSections, rowState, type Folder, type Session, type SessionFilter } from '@/sessions/model';
+import { useSessionListPrefs } from '@/sessions/list-prefs';
+import { buildSections, rowState, shortProjectPath, type Folder, type Session } from '@/sessions/model';
 import { isLive, runningAmong } from '@/sessions/search-stop';
 import { useSessionSearch } from '@/sessions/useSessionSearch';
 import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
-
-const FILTERS: { key: SessionFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'running', label: 'Running' },
-  { key: 'starred', label: 'Pinned' },
-  { key: 'today', label: 'Today' },
-];
 
 export default function SessionsScreen() {
   const loaded = useConnection((s) => s.loaded);
@@ -34,7 +29,10 @@ export default function SessionsScreen() {
   const diffs = useConnection((s) => s.diffs);
   // A change to review waits for you as much as a question does.
   const reviewing = useMemo(() => new Set(Object.values(diffs).map((d) => d.sessionId)), [diffs]);
-  const [filter, setFilter] = useState<SessionFilter>('all');
+  const status = useSessionListPrefs((s) => s.status);
+  const pinned = useSessionListPrefs((s) => s.pinned);
+  const order = useSessionListPrefs((s) => s.order);
+  const groupByFolders = useSessionListPrefs((s) => s.groupByFolders);
   const [selected, setSelected] = useState<Session | null>(null);
 
   const projects = useQuery({
@@ -47,8 +45,8 @@ export default function SessionsScreen() {
   const { query, setQuery, search, searching, matchIds, excludedSessions, leftOut, leaveOut, restore } = useSessionSearch('sessions', allSessions);
   const sections = useMemo(() => {
     const matches = matchIds ? new Set([...matchIds].filter((id) => !excludedSessions.has(id))) : null;
-    return buildSections(projects.data || [], { filter, live, matches });
-  }, [projects.data, filter, live, matchIds, excludedSessions]);
+    return buildSections(projects.data || [], { status, pinned, order, groupByFolders, live, matches });
+  }, [projects.data, status, pinned, order, groupByFolders, live, matchIds, excludedSessions]);
   const shown = useMemo(() => sections.flatMap((s) => s.data), [sections]);
   const running = useMemo(() => runningAmong(shown, (id) => isLive(live[id])), [shown, live]);
 
@@ -73,9 +71,11 @@ export default function SessionsScreen() {
         onPress={open}
         onLongPress={showActions}
         onLeaveOut={searching ? leaveOutRow : undefined}
+        // No folder headers in the flat list, so each row says which folder it is in.
+        folder={groupByFolders ? undefined : shortProjectPath(item.projectPath)}
       />
     ),
-    [live, notices, reviewing, open, showActions, searching, leaveOutRow],
+    [live, notices, reviewing, open, showActions, searching, leaveOutRow, groupByFolders],
   );
 
   const pull = usePullRefresh(() => projects.refetch());
@@ -105,20 +105,14 @@ export default function SessionsScreen() {
           autoCapitalize="none"
           clearButtonMode="while-editing"
         />
-        <View style={styles.filters}>
-          {FILTERS.map((f) => (
-            <Pressable key={f.key} onPress={() => setFilter(f.key)} style={[styles.chip, filter === f.key && styles.chipActive]} accessibilityRole="button" accessibilityState={{ selected: filter === f.key }}>
-              <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>{f.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <SessionListControls />
         {searching ? <SearchStopBar shown={shown.length} running={running} leftOut={leftOut} query={search} onRestore={restore} /> : null}
       </View>
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.sessionId}
         renderItem={renderItem}
-        renderSectionHeader={({ section }) => <Text style={styles.sectionHeader} numberOfLines={1}>{section.title}</Text>}
+        renderSectionHeader={({ section }) => (section.title ? <Text style={styles.sectionHeader} numberOfLines={1}>{section.title}</Text> : null)}
         stickySectionHeadersEnabled
         initialNumToRender={20}
         refreshControl={pull}
@@ -145,11 +139,6 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     fontSize: 15,
   },
-  filters: { flexDirection: 'row', gap: spacing.sm },
-  chip: { paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: colors.border },
-  chipActive: { backgroundColor: 'rgba(128,136,255,0.18)', borderColor: colors.accent },
-  chipText: { color: colors.textDim, fontSize: 13 },
-  chipTextActive: { color: colors.text },
   sectionHeader: {
     color: colors.textDim,
     fontSize: 12,

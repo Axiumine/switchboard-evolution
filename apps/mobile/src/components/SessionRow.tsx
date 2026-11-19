@@ -26,11 +26,15 @@ type Props = {
   session: Session; state: RowState; onPress: (session: Session) => void; onLongPress: (session: Session) => void; inset?: boolean;
   /** While searching: the X that leaves this row out of the search. */
   onLeaveOut?: (session: Session) => void;
+  /** The folder it runs in, short ("Code/switchboard"): shown in a list that has no folder headers. */
+  folder?: string;
 };
 
 /** One session: its state dot, title, and the CLI, age and size underneath. */
-export const SessionRow = memo(function SessionRow({ session, state, onPress, onLongPress, inset, onLeaveOut }: Props) {
+export const SessionRow = memo(function SessionRow({ session, state, onPress, onLongPress, inset, onLeaveOut, folder }: Props) {
+  // The folder comes after the age, so a long path is what gets cut short.
   const meta = [cliLabel(session), relativeTime(session.modified || session.created)];
+  if (folder) meta.push(folder);
   if (session.messageCount) meta.push(`${session.messageCount} msgs`);
   if (STATE_LABELS[state]) meta.unshift(STATE_LABELS[state]);
   return (

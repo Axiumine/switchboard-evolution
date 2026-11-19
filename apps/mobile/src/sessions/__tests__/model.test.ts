@@ -25,18 +25,99 @@ test('titles follow name, then AI title, then summary, cleaned like the desktop'
   expect(shortProjectPath('/Users/alex/Code/switchboard')).toBe('Code/switchboard');
 });
 
-test('sections hold a folder each, newest session first, newest folder first', () => {
-  const sections = buildSections(folders, { now });
+const ids = (sections: ReturnType<typeof buildSections>) => sections.flatMap((s) => s.data.map((d) => d.sessionId));
+const state = (over: Partial<LiveState>): LiveState => ({ busy: false, attention: false, exited: false, starting: false, ...over });
+
+test('grouped by folders: a section each, newest session first, newest folder first', () => {
+  const sections = buildSections(folders, { groupByFolders: true });
   expect(sections.map((s) => s.title)).toEqual(['Code/switchboard', 'work/api']);
   expect(sections[0].data.map((s) => s.sessionId)).toEqual(['new', 'old']);
 });
 
-test('filters and search matches narrow the list', () => {
-  const live: Record<string, LiveState> = { busy: { busy: true, attention: false, exited: false, starting: false } };
-  expect(buildSections(folders, { now, filter: 'running', live }).flatMap((s) => s.data.map((d) => d.sessionId))).toEqual(['busy']);
-  expect(buildSections(folders, { now, filter: 'starred' }).flatMap((s) => s.data.map((d) => d.sessionId))).toEqual(['new']);
-  expect(buildSections(folders, { now, filter: 'today' }).flatMap((s) => s.data.map((d) => d.sessionId))).toEqual(['new', 'busy']);
-  expect(buildSections(folders, { now, matches: new Set(['old']) }).flatMap((s) => s.data.map((d) => d.sessionId))).toEqual(['old']);
+test('not grouped (the default): one list without a header, all folders, newest first', () => {
+  const sections = buildSections(folders);
+  expect(sections).toHaveLength(1);
+  expect(sections[0].title).toBe('');
+  expect(ids(sections)).toEqual(['new', 'busy', 'old']);
+  expect(buildSections([{ folder: 'c', projectPath: '/tmp/empty', sessions: [] }])).toEqual([]);
+});
+
+test('time only sorts: an old session is still listed, with no Today cut', () => {
+  expect(ids(buildSections(folders, { groupByFolders: true }))).toEqual(['new', 'old', 'busy']);
+  expect(ids(buildSections(folders))).toContain('old');
+});
+
+test('status filter: running, needs input, not running', () => {
+  const live: Record<string, LiveState> = {
+    busy: state({ busy: true }),
+    old: state({ attention: true }),
+    new: state({ exited: true }),
+  };
+  expect(ids(buildSections(folders, { status: 'running', live }))).toEqual(['busy', 'old']);
+  expect(ids(buildSections(folders, { status: 'needsInput', live }))).toEqual(['old']);
+  expect(ids(buildSections(folders, { status: 'notRunning', live }))).toEqual(['new']);
+  expect(ids(buildSections(folders, { status: 'notRunning' }))).toEqual(['new', 'busy', 'old']);
+  expect(ids(buildSections(folders, { status: 'all', live }))).toEqual(['new', 'busy', 'old']);
+});
+
+test('a session that is starting counts as running, as the old chip had it', () => {
+  expect(ids(buildSections(folders, { status: 'running', live: { old: state({ starting: true }) } }))).toEqual(['old']);
+});
+
+test('pinned filter: pinned or not pinned', () => {
+  expect(ids(buildSections(folders, { pinned: 'pinned' }))).toEqual(['new']);
+  expect(ids(buildSections(folders, { pinned: 'notPinned' }))).toEqual(['busy', 'old']);
+  expect(ids(buildSections(folders, { pinned: 'all' }))).toEqual(['new', 'busy', 'old']);
+});
+
+test('filters combine and the search matches narrow further', () => {
+  const live: Record<string, LiveState> = { busy: state({ busy: true }), new: state({ busy: true }) };
+  expect(ids(buildSections(folders, { status: 'running', pinned: 'notPinned', live }))).toEqual(['busy']);
+  expect(ids(buildSections(folders, { matches: new Set(['old']) }))).toEqual(['old']);
+  expect(ids(buildSections(folders, { matches: new Set(['old', 'busy']), pinned: 'notPinned' }))).toEqual(['busy', 'old']);
+});
+
+const mixed: Folder[] = [
+  { folder: 'a', projectPath: '/w/alpha', sessions: [
+    { sessionId: 'plain-new', projectPath: '/w/alpha', modified: at(1) },
+    { sessionId: 'pin-old', projectPath: '/w/alpha', modified: at(500), starred: 1 },
+    { sessionId: 'run-old', projectPath: '/w/alpha', modified: at(400) },
+  ] },
+  { folder: 'b', projectPath: '/w/beta', sessions: [
+    { sessionId: 'pin-new', projectPath: '/w/beta', modified: at(10), starred: 1 },
+    { sessionId: 'run-pin-old', projectPath: '/w/beta', modified: at(900), starred: 1 },
+    { sessionId: 'run-new', projectPath: '/w/beta', modified: at(20), created: at(2000) },
+    { sessionId: 'created-only', projectPath: '/w/beta', created: at(5) },
+  ] },
+];
+const mixedLive: Record<string, LiveState> = {
+  'run-old': state({ busy: true }),
+  'run-pin-old': state({ attention: true }),
+  'run-new': state({}),
+};
+
+test('"Most recent first" is pure time, modified else created, whatever runs or is pinned', () => {
+  expect(ids(buildSections(mixed, { live: mixedLive }))).toEqual(
+    ['plain-new', 'created-only', 'pin-new', 'run-new', 'run-old', 'pin-old', 'run-pin-old'],
+  );
+});
+
+test('"Running & pinned first": running and pinned, then running, then pinned, then time', () => {
+  expect(ids(buildSections(mixed, { live: mixedLive, order: 'runningPinned' }))).toEqual(
+    ['run-pin-old', 'run-new', 'run-old', 'pin-new', 'pin-old', 'plain-new', 'created-only'],
+  );
+});
+
+test('grouped, the order applies inside each folder and folders go by their newest session', () => {
+  const sections = buildSections(mixed, { live: mixedLive, order: 'runningPinned', groupByFolders: true });
+  expect(sections.map((s) => s.title)).toEqual(['w/alpha', 'w/beta']);
+  expect(sections[0].data.map((s) => s.sessionId)).toEqual(['run-old', 'pin-old', 'plain-new']);
+  expect(sections[1].data.map((s) => s.sessionId)).toEqual(['run-pin-old', 'run-new', 'pin-new', 'created-only']);
+});
+
+test('archived sessions are never listed', () => {
+  expect(ids(buildSections(folders, { groupByFolders: true }))).not.toContain('gone');
+  expect(ids(buildSections(folders))).not.toContain('gone');
 });
 
 test('relative times read like the desktop', () => {
