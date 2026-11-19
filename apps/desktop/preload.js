@@ -160,6 +160,8 @@ contextBridge.exposeInMainWorld('api', {
   pruneWorktrees: (id, repoPath, opts) => ipcRenderer.invoke('worktree-prune', id, repoPath, opts),
   attachWorktreeToProject: (id, worktreePath) => ipcRenderer.invoke('worktree-attach', id, worktreePath),
   detachWorktreeFromProject: (id, worktreePath) => ipcRenderer.invoke('worktree-detach', id, worktreePath),
+  getWorktreeChanges: (id, worktreePath) => ipcRenderer.invoke('worktree-changes', id, worktreePath),
+  getWorktreeFileDiff: (id, worktreePath, filePath) => ipcRenderer.invoke('worktree-file-diff', id, worktreePath, filePath),
   onProjectPlanChanged: (callback) => {
     ipcRenderer.on('project-plan-changed', (_event, projectId) => callback(projectId));
   },

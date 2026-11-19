@@ -539,3 +539,85 @@ test('runUserCommand answers even when a command ignores SIGTERM or leaves a pro
   assert.equal(background.output, 'started');
   assert.ok(Date.now() - started < 3000, 'does not wait for the background process');
 });
+
+test('worktreeChanges lists uncommitted files and the commits no remote has, and diffs a file', { skip }, async () => {
+  const t = await setup();
+  try {
+    // A remote the main branch is pushed to.
+    const remote = path.join(t.base, 'remote.git');
+    gitIn(t.base, 'init', '-q', '--bare', remote);
+    gitIn(t.app, 'remote', 'add', 'origin', remote);
+    gitIn(t.app, 'push', '-q', '-u', 'origin', 'main');
+
+    // Clean and pushed: nothing to lose.
+    const clean = await worktrees.worktreeChanges(t.projectId, t.app);
+    assert.equal(clean.ok, true);
+    assert.equal(clean.isMain, true);
+    assert.equal(clean.changesTotal, 0);
+    assert.equal(clean.unpushed.kind, 'upstream');
+    assert.equal(clean.unpushed.base, 'origin/main');
+    assert.equal(clean.unpushed.total, 0);
+
+    // A new branch with two commits of its own and no upstream, plus local edits.
+    const created = await worktrees.createWorktree(t.projectId, { repoPath: t.app, mode: 'new', branch: 'feat/x' });
+    assert.equal(created.ok, true, created.error);
+    const tree = created.worktree.path;
+    commitIn(tree, 'one.txt', 'one\n');
+    commitIn(tree, 'two.txt', 'two\nlines\n');
+    fs.writeFileSync(path.join(tree, 'README.md'), '# hello\nmore\n');
+    fs.writeFileSync(path.join(tree, 'scratch.txt'), 'wip\n');
+
+    const result = await worktrees.worktreeChanges(t.projectId, tree);
+    assert.equal(result.ok, true);
+    assert.equal(result.branch, 'feat/x');
+    assert.equal(result.isMain, false);
+    assert.deepEqual(result.changes.map(c => [c.path, c.status]).sort(), [['README.md', 'modified'], ['scratch.txt', 'untracked']]);
+    assert.equal(result.changesTotal, 2);
+    assert.equal(result.unpushed.kind, 'remotes', 'no upstream: compared with every remote branch');
+    assert.equal(result.unpushed.total, 2);
+    assert.deepEqual(result.unpushed.commits.map(c => c.subject), ['add two.txt', 'add one.txt']);
+    assert.equal(result.unpushed.commits[0].files, 1);
+    assert.equal(result.unpushed.commits[0].insertions, 2);
+    assert.ok(result.unpushed.commits[0].time > 0);
+    assert.match(result.unpushed.commits[0].shortHash, /^[0-9a-f]{7,}$/);
+
+    // Pushed with an upstream: one more commit is the only one not pushed.
+    gitIn(tree, 'push', '-q', '-u', 'origin', 'feat/x');
+    commitIn(tree, 'three.txt', '3\n');
+    const ahead = await worktrees.worktreeChanges(t.projectId, tree);
+    assert.equal(ahead.unpushed.kind, 'upstream');
+    assert.equal(ahead.unpushed.base, 'origin/feat/x');
+    assert.deepEqual(ahead.unpushed.commits.map(c => c.subject), ['add three.txt']);
+    assert.equal(ahead.ahead, 1);
+
+    const diff = await worktrees.worktreeFileDiff(t.projectId, tree, 'README.md');
+    assert.equal(diff.ok, true);
+    assert.match(diff.diff, /^\+more$/m);
+    const untracked = await worktrees.worktreeFileDiff(t.projectId, tree, 'scratch.txt');
+    assert.match(untracked.diff, /^\+wip$/m);
+    await assert.rejects(worktrees.worktreeFileDiff(t.projectId, tree, '../outside.txt'), /outside the repository/);
+    await assert.rejects(worktrees.worktreeFileDiff(t.projectId, tree, 'one.txt'), /not currently changed/);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('worktreeChanges without a remote compares with the main worktree\'s branch, and refuses foreign folders', { skip }, async () => {
+  const t = await setup();
+  const stranger = makeRepo(path.join(t.base, 'stranger'));
+  try {
+    const created = await worktrees.createWorktree(t.projectId, { repoPath: t.app, mode: 'new', branch: 'solo' });
+    assert.equal(created.ok, true, created.error);
+    commitIn(created.worktree.path, 'solo.txt', 'solo\n');
+    const result = await worktrees.worktreeChanges(t.projectId, created.worktree.path);
+    assert.equal(result.unpushed.kind, 'local');
+    assert.equal(result.unpushed.base, 'main');
+    assert.deepEqual(result.unpushed.commits.map(c => c.subject), ['add solo.txt']);
+    const main = await worktrees.worktreeChanges(t.projectId, t.app);
+    assert.equal(main.unpushed.kind, 'none', 'the main worktree with no remote has nothing to compare with');
+    await assert.rejects(worktrees.worktreeChanges(t.projectId, stranger), /not a worktree of this project/);
+    await assert.rejects(worktrees.worktreeFileDiff(t.projectId, stranger, 'README.md'), /not a worktree of this project/);
+  } finally {
+    t.cleanup();
+  }
+});

@@ -6405,6 +6405,80 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .wt-state.changed { color: #e0aa63; background: rgba(224,170,99,0.1); }
 .wt-sync { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; color: #9a9ab0; }
 
+/* The row's git-graph button: lit when there is work not committed or not pushed. */
+.wt-changes-btn.has-pending { color: #e0aa63; }
+
+/* Uncommitted files and unpushed commits of a worktree */
+.wt-dialog--changes { width: min(760px, calc(100vw - 48px)); }
+.wt-ch-top { display: flex; align-items: center; gap: 8px; }
+.wt-ch-top h3 { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; margin: 0; }
+.wt-ch-top h3 svg { flex-shrink: 0; color: #8a90e8; }
+.wt-ch-top h3 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }
+.wt-ch-body { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; transition: opacity 0.15s; }
+.wt-ch-body.is-busy { opacity: 0.55; }
+.wt-ch-where { color: #9a9ab0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-ch-last { color: #6a6a80; font-family: inherit; }
+.wt-ch-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.wt-ch-verdict.is-safe { color: #8fd29c; background: rgba(74,190,96,0.09); }
+.wt-ch-verdict.is-warn { color: #e8b678; background: rgba(224,170,99,0.1); }
+.wt-ch-section { border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; overflow: hidden; }
+.wt-ch-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  background: rgba(255,255,255,0.025);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.wt-ch-title { color: #c8c8dc; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.wt-ch-meta { margin-left: auto; color: #77778d; font-size: 10.5px; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }
+.wt-ch-list { display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; }
+.wt-ch-empty { padding: 10px; color: #77778d; font-size: 12px; }
+.wt-ch-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wt-ch-file:hover { background: rgba(255,255,255,0.03); }
+.wt-ch-file.open { background: rgba(122,132,255,0.08); }
+.wt-ch-chevron { display: inline-flex; flex-shrink: 0; color: #6f6f84; transition: transform 0.12s; }
+.wt-ch-file.open .wt-ch-chevron { transform: rotate(90deg); }
+.wt-ch-file .git-file-code { padding-top: 0; }
+.wt-ch-name { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d0d0e2; font-size: 11.5px; }
+.wt-ch-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #64647a; font-size: 10.5px; direction: rtl; text-align: left; }
+.wt-ch-state { flex-shrink: 0; color: #77778d; font-size: 10px; }
+.wt-ch-diff { max-height: 360px; overflow: auto; background: #14141a; border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04); }
+.wt-ch-diff .git-diff { padding-top: 4px; }
+.wt-ch-commit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 1px;
+  padding: 6px 10px;
+}
+.wt-ch-commit + .wt-ch-commit { border-top: 1px solid rgba(255,255,255,0.04); }
+.wt-ch-hash { grid-row: span 2; color: #e0aa63; font-size: 11px; padding-top: 1px; }
+.wt-ch-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d0d0e2; font-size: 12px; }
+.wt-ch-commit-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6a6a80; font-size: 10.5px; }
+.wt-ch-actions .wt-ch-remove { margin-right: auto; color: #f08aa0; }
+
 /* Dialogs */
 .wt-dialog { max-height: calc(100vh - 80px); overflow-y: auto; }
 .wt-dialog--wide { width: min(560px, calc(100vw - 48px)); }

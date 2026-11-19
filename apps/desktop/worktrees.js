@@ -898,6 +898,55 @@ async function detachFromProject(projectId, worktreePath) {
   return projects.detachFolder(projectId, context.folder.path);
 }
 
+// --- What a worktree holds that is nowhere else (read-only) ---
+
+// Files a list shows at most; a folder of thousands of untracked files says how many there are.
+const CHANGES_LIST_LIMIT = 2000;
+
+/**
+ * A worktree's uncommitted files and the commits no remote has, to look at
+ * before removing it. Any worktree of the project's repositories, the main
+ * one too, attached or not.
+ */
+async function worktreeChanges(projectId, worktreePath) {
+  const { worktree, list } = await requireProjectRepository(projectId, worktreePath);
+  if (worktree.bare) throw new Error('A bare repository has no files checked out');
+  if (!isDirectory(worktree.path)) throw new Error('The worktree folder is gone');
+  const main = list[0];
+  // With no remote at all, "unpushed" means not in the main worktree's branch.
+  const fallbackBase = !worktree.isMain && main?.branch && main.branch !== worktree.branch ? main.branch : '';
+  const [snap, unpushed] = await Promise.all([
+    git.snapshot(worktree.path, { commitLimit: 1 }),
+    git.unpushedCommits(worktree.path, { fallbackBase }),
+  ]);
+  if (!snap.git) throw new Error('That folder is not a git checkout');
+  const changes = snap.changes || [];
+  return {
+    ok: true,
+    path: worktree.path,
+    isMain: !!worktree.isMain,
+    branch: snap.branch,
+    detached: snap.detached,
+    head: snap.head,
+    locked: !!worktree.locked,
+    operation: snap.operation,
+    ahead: snap.ahead,
+    behind: snap.behind,
+    changes: changes.slice(0, CHANGES_LIST_LIMIT),
+    changesTotal: changes.length,
+    stats: snap.stats,
+    lastCommit: snap.commits?.[0] || null,
+    unpushed,
+  };
+}
+
+/** The diff of one uncommitted file of a worktree, against HEAD. */
+async function worktreeFileDiff(projectId, worktreePath, filePath) {
+  const { worktree } = await requireProjectRepository(projectId, worktreePath);
+  if (worktree.bare || !isDirectory(worktree.path)) throw new Error('The worktree folder is gone');
+  return { ok: true, ...(await git.fileDiff(worktree.path, String(filePath || ''))) };
+}
+
 module.exports = {
   init,
   DEFAULT_PATH_TEMPLATE,
@@ -908,4 +957,5 @@ module.exports = {
   removeWorktree, deleteBranch, mergedWorktrees,
   lockWorktree, unlockWorktree, moveWorktree, repairWorktrees, prunePreview, pruneWorktrees,
   attachToProject, detachFromProject,
+  worktreeChanges, worktreeFileDiff,
 };

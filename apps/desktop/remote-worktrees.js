@@ -102,6 +102,9 @@ allow('worktree-prune-preview', [isId, isPath]);
 allow('worktree-prune', [isId, isPath, optional(fields({ detachStale: isBool }))]);
 allow('worktree-attach', [isId, isPath]);
 allow('worktree-detach', [isId, isPath]);
+// Read-only: what a worktree holds that is nowhere else, before removing it.
+allow('worktree-changes', [isId, isPath]);
+allow('worktree-file-diff', [isId, isPath, isString(4096)]);
 allow('list-env-files', [isId, isPath], { run: realEnvFiles });
 
 module.exports = { envFilesForPhone };

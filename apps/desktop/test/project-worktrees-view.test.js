@@ -333,3 +333,75 @@ test('hostile repository, branch, path and lock names render as text and stay in
     assert.match(rest, /^<[a-z0-9-]+\s*\/?>$/i, `unexpected markup in ${tag}`);
   }
 });
+
+test('the git-graph button sits before the folder button and lights up for work not committed or not pushed', () => {
+  const ctx = loadContext({ window: { api: { platform: 'darwin', getWorktreeChanges() {} } } });
+  const row = ctx.wtRowHtml(wt('/w/a', { branch: 'a', dirty: true, ahead: 2 }), 'w0', []);
+  assert.match(row, /data-act="changes"[^>]*>[\s\S]*data-act="open"/, 'before the folder button');
+  assert.match(row, /wt-changes-btn has-pending/);
+  assert.match(row, /Uncommitted changes · 2 commits not pushed/);
+  const clean = ctx.wtRowHtml(wt('/w/b', { branch: 'b', dirty: false }), 'w1', []);
+  assert.match(clean, /data-act="changes"/);
+  assert.doesNotMatch(clean, /has-pending/);
+  assert.match(clean, /Nothing to commit/);
+  assert.doesNotMatch(ctx.wtRowHtml(wt('/w/gone', { exists: false }), 'w2', []), /data-act="changes"/, 'not for a folder that is gone');
+  assert.doesNotMatch(ctx.wtRowHtml(wt('/w/bare', { bare: true }), 'w3', []), /data-act="changes"/, 'not for a bare repository');
+  // An older main process cannot read them: no button.
+  assert.doesNotMatch(loadContext().wtRowHtml(wt('/w/a', { branch: 'a' }), 'w0', []), /data-act="changes"/);
+  const project = { id: 'p', folders: [] };
+  const repo = { id: 'r', name: 'app', mainPath: '/w/app' };
+  const labels = plain(ctx.wtRowMenuItems(project, repo, wt('/w/a', { branch: 'a' })).filter(i => i.label).map(i => i.label));
+  assert.ok(labels.includes('Uncommitted and unpushed…'));
+});
+
+test('the verdict says what removing a worktree would lose', () => {
+  const ctx = loadContext();
+  const base = { branch: 'feat', detached: false, head: 'abc1234', changes: [], changesTotal: 0, stats: { insertions: 0, deletions: 0 } };
+  const safe = ctx.wtChangesVerdict({ ...base, unpushed: { kind: 'upstream', base: 'origin/feat', total: 0, commits: [] } });
+  assert.equal(safe.safe, true);
+  assert.match(safe.lines.join('\n'), /every commit is on origin\/feat: removing it loses no work/);
+
+  const dirty = ctx.wtChangesVerdict({ ...base, changesTotal: 3, unpushed: { kind: 'upstream', base: 'origin/feat', total: 2, commits: [] }, behind: 1 });
+  assert.equal(dirty.safe, false);
+  const text = dirty.lines.join('\n');
+  assert.match(text, /3 uncommitted files: removing the worktree loses them/);
+  assert.match(text, /2 commits not pushed to origin\/feat\. Removing the worktree keeps the branch feat; deleting the branch too loses them/);
+  assert.match(text, /1 commit behind origin\/feat/);
+
+  const noUpstream = ctx.wtChangesVerdict({ ...base, unpushed: { kind: 'remotes', base: '', total: 1, commits: [] } });
+  assert.match(noUpstream.lines.join('\n'), /1 commit not on any remote \(the branch has no upstream\)/);
+
+  const detached = ctx.wtChangesVerdict({ ...base, branch: '', detached: true, unpushed: { kind: 'remotes', base: '', total: 2, commits: [] } });
+  assert.match(detached.lines.join('\n'), /on no branch and no remote: removing the worktree leaves them only in git's reflog/);
+
+  const local = ctx.wtChangesVerdict({ ...base, unpushed: { kind: 'local', base: 'main', total: 0, commits: [] } });
+  assert.match(local.lines.join('\n'), /every commit is in main/);
+});
+
+test('the panel lists the files and the unpushed commits, escaped', () => {
+  const ctx = loadContext({ escapeHtml: realEscapeHtml() });
+  const evil = '<img src=x onerror=alert(1)>';
+  const html = ctx.wtChangesBodyHtml({
+    branch: `feat${evil}`, detached: false, head: 'abc1234',
+    changes: [
+      { path: `src/${evil}.js`, status: 'modified', indexStatus: 'M', worktreeStatus: 'M' },
+      { path: 'new.txt', status: 'untracked', indexStatus: '?', worktreeStatus: '?' },
+    ],
+    changesTotal: 2,
+    stats: { insertions: 4, deletions: 1 },
+    unpushed: { kind: 'upstream', base: 'origin/feat', total: 1, truncated: false, commits: [
+      { hash: 'abc1234def', shortHash: 'abc1234', author: 'Ann', time: Date.now(), subject: `Fix ${evil}`, files: 2, insertions: 3, deletions: 0 },
+    ] },
+  });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /2 files · \+4 −1/);
+  assert.match(html, />Staged \+ unstaged</);
+  assert.match(html, />Untracked</);
+  assert.match(html, /1 not on origin\/feat/);
+  assert.match(html, />abc1234</);
+  assert.match(html, /2 files \+3 −0/);
+
+  const clean = ctx.wtChangesBodyHtml({ branch: 'feat', head: 'a', changes: [], changesTotal: 0, unpushed: { kind: 'upstream', base: 'origin/feat', total: 0, commits: [] } });
+  assert.match(clean, /Nothing to commit: the working tree is clean/);
+  assert.match(clean, /Everything is pushed to origin\/feat/);
+});

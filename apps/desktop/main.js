@@ -772,6 +772,8 @@ ipcMain.handle('worktree-prune-preview', guarded((id, repoPath) => worktrees.pru
 ipcMain.handle('worktree-prune', guarded((id, repoPath, opts) => worktrees.pruneWorktrees(id, wtPath(repoPath), opts || {})));
 ipcMain.handle('worktree-attach', guarded(trustingNewFolders((id, worktreePath) => worktrees.attachToProject(id, wtPath(worktreePath)))));
 ipcMain.handle('worktree-detach', guarded((id, worktreePath) => worktrees.detachFromProject(id, wtPath(worktreePath))));
+ipcMain.handle('worktree-changes', guarded((id, worktreePath) => worktrees.worktreeChanges(id, wtPath(worktreePath))));
+ipcMain.handle('worktree-file-diff', guarded((id, worktreePath, filePath) => worktrees.worktreeFileDiff(id, wtPath(worktreePath), String(filePath || ''))));
 
 // --- IPC: get-projects ---
 ipcMain.handle('open-external', (_event, url) => {

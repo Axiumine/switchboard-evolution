@@ -28,6 +28,8 @@ const VALID = {
   'worktree-prune': ['p1', REPO, { detachStale: true }],
   'worktree-attach': ['p1', TREE],
   'worktree-detach': ['p1', TREE],
+  'worktree-changes': ['p1', TREE],
+  'worktree-file-diff': ['p1', TREE, 'src/a.js'],
 };
 const CHANNELS = Object.keys(VALID);
 
@@ -46,7 +48,7 @@ test('every worktree channel is callable by a phone', async () => {
   assert.equal(calls.length, CHANNELS.length);
   const capabilities = api.capabilities();
   for (const method of [...CHANNELS, 'list-env-files']) assert.ok(capabilities.includes(method), method);
-  assert.equal(CHANNELS.length + 1, 19);
+  assert.equal(CHANNELS.length + 1, 21);
 });
 
 test('wrong parameters are refused before the handler runs', async () => {
@@ -67,6 +69,8 @@ test('wrong parameters are refused before the handler runs', async () => {
     ['worktree-remove', ['p1', TREE, { force: 'yes' }]],
     ['worktree-remove', ['p1', TREE, { force: true, surprise: true }]],
     ['worktree-unlock', ['p1', TREE, 'extra']],
+    ['worktree-changes', ['p1', 'relative/tree']],
+    ['worktree-file-diff', ['p1', TREE, '']],
   ];
   for (const [method, params] of refused) {
     assert.match((await api.call(method, params)).error, /Wrong parameter|Wrong parameters/, `${method} ${JSON.stringify(params)}`);

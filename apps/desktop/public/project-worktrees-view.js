@@ -69,6 +69,8 @@ const WT_ICONS = {
   wrench: wtSvg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4Z"/>'),
   link: wtSvg('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>'),
   unlink: wtSvg('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/><path d="m3 3 18 18"/>'),
+  // Lucide's git-graph: the worktree's uncommitted files and unpushed commits.
+  gitGraph: wtSvg('<circle cx="5" cy="6" r="3"/><path d="M5 9v6"/><circle cx="5" cy="18" r="3"/><path d="M12 3v18"/><circle cx="19" cy="6" r="3"/><path d="M16 15.7A9 9 0 0 0 19 9"/>'),
   sliders: wtSvg('<path d="M4 6h9"/><path d="M17 6h3"/><circle cx="15" cy="6" r="2"/><path d="M4 12h3"/><path d="M11 12h9"/><circle cx="9" cy="12" r="2"/><path d="M4 18h11"/><path d="M19 18h1"/><circle cx="17" cy="18" r="2"/>'),
 };
 
@@ -278,6 +280,22 @@ function wtRowPath(wt, repo) {
   return wtShortPath(wt.path);
 }
 
+/** Whether a row can show its uncommitted files: a checkout on disk, and a main process that reads them. */
+function wtCanShowChanges(wt) {
+  return !!wt.exists && !wt.bare && typeof window !== 'undefined' && typeof window.api?.getWorktreeChanges === 'function';
+}
+
+/** The row's git-graph button; lit when the list already knows of changes or unpushed commits. */
+function wtChangesButtonHtml(wt) {
+  const notes = [];
+  if (wt.dirty === true) notes.push('Uncommitted changes');
+  else if (wt.dirty === false) notes.push('Nothing to commit');
+  if (wt.ahead) notes.push(`${wtPlural(wt.ahead, 'commit')} not pushed`);
+  const pending = wt.dirty === true || (wt.ahead || 0) > 0;
+  const title = `Uncommitted files and unpushed commits${notes.length ? `\n${notes.join(' · ')}` : ''}`;
+  return `<button type="button" class="ws-btn ws-btn--sm ws-btn--icon wt-changes-btn${pending ? ' has-pending' : ''}" data-act="changes" title="${wtAttr(title)}" aria-label="Uncommitted files and unpushed commits">${WT_ICONS.gitGraph(13)}</button>`;
+}
+
 function wtRowHtml(wt, key, live, repo = null, order = 'default') {
   const title = `${wt.path}${wt.locked && wt.lockReason ? `\nLocked: ${wt.lockReason}` : ''}`;
   return `
@@ -290,6 +308,7 @@ function wtRowHtml(wt, key, live, repo = null, order = 'default') {
       <div class="wt-row-status">${wtStatusHtml(wt, live, order)}</div>
       <div class="wt-row-actions">
         ${wt.exists ? `<button type="button" class="ws-btn ws-btn--sm" data-act="session" title="Start a session or a terminal in this worktree">${PICONS.plus(11)}<span>Session</span>${PICONS.chevronDown(10)}</button>
+        ${wtCanShowChanges(wt) ? wtChangesButtonHtml(wt) : ''}
         <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="open" title="${wtAttr(wtOpenLabel())}">${PICONS.folder(13)}</button>` : ''}
         <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="more" title="More">${PICONS.dots(13)}</button>
       </div>
@@ -410,6 +429,8 @@ function paintWorktreeList(project, state, body) {
     const { repo, wt } = entry;
     const session = row.querySelector('[data-act="session"]');
     if (session) session.onclick = (e) => showContextMenu(wtSessionMenuItems(project, wt), { anchor: e.currentTarget });
+    const changes = row.querySelector('[data-act="changes"]');
+    if (changes) changes.onclick = () => wtChangesDialog(project, repo, wt);
     const open = row.querySelector('[data-act="open"]');
     if (open) open.onclick = () => wtOpenFolder(project, wt.path);
     row.querySelector('[data-act="more"]').onclick = (e) => showContextMenu(wtRowMenuItems(project, repo, wt), { anchor: e.currentTarget });
@@ -577,6 +598,7 @@ function wtRowMenuItems(project, repo, wt) {
   const items = [{ head: wtLabel(wt) }];
   if (wt.exists) {
     items.push({ label: 'New session', icon: PICONS.plus(13), submenu: wtSessionMenuItems(project, wt) });
+    if (wtCanShowChanges(wt)) items.push({ label: 'Uncommitted and unpushed…', icon: WT_ICONS.gitGraph(13), onClick: () => wtChangesDialog(project, repo, wt) });
     items.push({ label: wtOpenLabel(), icon: PICONS.folder(13), onClick: () => wtOpenFolder(project, wt.path) });
   }
   items.push({ label: 'Copy path', icon: WT_ICONS.copy(13), onClick: () => wtCopyPath(project, wt.path) });
@@ -1363,6 +1385,262 @@ function wtSettingsDialog(project) {
   });
 }
 
+// --- Uncommitted files and unpushed commits ---
+// What removing a worktree would lose: the files git has not committed there
+// and the commits no remote has. Read-only; staging and committing stay in
+// the Git tab.
+
+const WT_CHANGE_LETTERS = { conflicted: '!', untracked: 'U', added: 'A', deleted: 'D', renamed: 'R', modified: 'M' };
+
+function wtChangeLetter(change) {
+  return WT_CHANGE_LETTERS[change.status] || 'M';
+}
+
+/** Staged, unstaged, both, untracked or conflicted, in words. */
+function wtChangeState(change) {
+  if (change.status === 'untracked') return 'Untracked';
+  if (change.status === 'conflicted') return 'Conflicted';
+  const staged = !!change.indexStatus && change.indexStatus !== ' ' && change.indexStatus !== '?';
+  const unstaged = !!change.worktreeStatus && change.worktreeStatus !== ' ' && change.worktreeStatus !== '?';
+  if (staged && unstaged) return 'Staged + unstaged';
+  return staged ? 'Staged' : 'Unstaged';
+}
+
+/** Where the commits were compared, in words: "origin/feat", "any remote branch", "main". */
+function wtUnpushedBase(unpushed) {
+  if (!unpushed) return '';
+  if (unpushed.kind === 'upstream' || unpushed.kind === 'local') return unpushed.base;
+  if (unpushed.kind === 'remotes') return 'any remote branch';
+  return '';
+}
+
+/**
+ * Whether the worktree can go without losing work, as { safe, lines }: what
+ * is uncommitted, what is not pushed, and what removing it does to each.
+ */
+function wtChangesVerdict(info) {
+  const lines = [];
+  const files = info.changesTotal ?? (info.changes || []).length;
+  const unpushed = info.unpushed || { kind: 'none', total: 0 };
+  const commits = unpushed.total || 0;
+  if (info.operation) lines.push(`A ${info.operation} is in progress here.`);
+  if (files) lines.push(`${wtPlural(files, 'uncommitted file')}: removing the worktree loses ${files === 1 ? 'it' : 'them'}.`);
+  if (commits) {
+    const these = commits === 1 ? 'it' : 'them';
+    if (unpushed.kind === 'local') {
+      lines.push(`${wtPlural(commits, 'commit')} not in ${unpushed.base} (the repository has no remote).${info.detached ? ` On no branch: removing the worktree leaves ${these} only in git's reflog.` : ` The branch ${info.branch} keeps ${these} unless you delete it.`}`);
+    } else if (info.detached) {
+      lines.push(`${wtPlural(commits, 'commit')} on no branch and no remote: removing the worktree leaves ${these} only in git's reflog.`);
+    } else {
+      const where = unpushed.kind === 'upstream' ? `pushed to ${unpushed.base}` : 'on any remote (the branch has no upstream)';
+      lines.push(`${wtPlural(commits, 'commit')} not ${where}. Removing the worktree keeps the branch ${info.branch}; deleting the branch too loses ${these}.`);
+    }
+  }
+  const safe = !files && !commits && !info.operation;
+  if (safe) {
+    if (unpushed.kind === 'none') lines.push('Nothing uncommitted. There is no remote to check the commits against.');
+    else if (unpushed.kind === 'local') lines.push(`Nothing uncommitted, and every commit is in ${unpushed.base}: removing it loses no work.`);
+    else lines.push(`Nothing uncommitted, and every commit is on ${unpushed.kind === 'upstream' ? unpushed.base : 'a remote branch'}: removing it loses no work.`);
+  }
+  if (info.behind) lines.push(`${wtPlural(info.behind, 'commit')} behind ${unpushed.base || 'its upstream'}.`);
+  return { safe, lines };
+}
+
+function wtStatsText(stats) {
+  if (!stats || (!stats.insertions && !stats.deletions)) return '';
+  return `+${stats.insertions || 0} −${stats.deletions || 0}`;
+}
+
+function wtChangeRowHtml(change, index) {
+  const name = pathBasename(change.path) || change.path;
+  const slash = change.path.lastIndexOf('/');
+  const dir = slash > 0 ? change.path.slice(0, slash) : '';
+  const icon = typeof fileIconHtml === 'function' ? fileIconHtml(name) : '';
+  const renamed = change.oldPath ? `${change.oldPath} → ${change.path}` : change.path;
+  return `
+    <button type="button" class="wt-ch-file" data-file="${index}" aria-expanded="false" title="${wtAttr(`${renamed}\n${wtChangeState(change)}`)}">
+      <span class="wt-ch-chevron">${PICONS.chevronRight(10)}</span>
+      <span class="git-file-code ${wtAttr(change.status)}">${escapeHtml(wtChangeLetter(change))}</span>
+      ${icon}
+      <span class="wt-ch-name mono">${escapeHtml(name)}</span>
+      <span class="wt-ch-dir">${escapeHtml(dir)}</span>
+      <span class="wt-ch-state">${escapeHtml(wtChangeState(change))}</span>
+    </button>
+    <div class="wt-ch-diff" data-diff="${index}" hidden></div>`;
+}
+
+function wtChangesSectionHtml(info) {
+  const changes = info.changes || [];
+  const total = info.changesTotal ?? changes.length;
+  const meta = [total ? wtPlural(total, 'file') : '', wtStatsText(info.stats)].filter(Boolean).join(' · ');
+  const list = changes.length
+    ? `<div class="wt-ch-list">${changes.map(wtChangeRowHtml).join('')}</div>${total > changes.length ? `<div class="add-project-hint wt-hint">The first ${changes.length} of ${total} are listed.</div>` : ''}`
+    : '<div class="wt-ch-empty">Nothing to commit: the working tree is clean.</div>';
+  return `
+    <section class="wt-ch-section">
+      <div class="wt-ch-head"><span class="wt-ch-title">Uncommitted changes</span><span class="wt-ch-meta">${escapeHtml(meta)}</span></div>
+      ${list}
+    </section>`;
+}
+
+function wtCommitRowHtml(commit) {
+  const when = commit.time ? formatDate(new Date(commit.time)) : '';
+  const stat = [commit.files ? wtPlural(commit.files, 'file') : '', wtStatsText(commit)].filter(Boolean).join(' ');
+  const title = [commit.hash, commit.time ? new Date(commit.time).toLocaleString() : '', commit.author].filter(Boolean).join('\n');
+  return `
+    <div class="wt-ch-commit" title="${wtAttr(title)}">
+      <span class="wt-ch-hash mono">${escapeHtml(commit.shortHash || String(commit.hash || '').slice(0, 7))}</span>
+      <span class="wt-ch-subject">${escapeHtml(commit.subject || '(no message)')}</span>
+      <span class="wt-ch-commit-meta">${escapeHtml([commit.author, when, stat].filter(Boolean).join(' · '))}</span>
+    </div>`;
+}
+
+function wtCommitsSectionHtml(info) {
+  const unpushed = info.unpushed || { kind: 'none', total: 0, commits: [] };
+  const base = wtUnpushedBase(unpushed);
+  let meta = '';
+  let empty = '';
+  if (unpushed.kind === 'none') {
+    meta = 'no remote';
+    empty = 'There is no remote to compare with.';
+  } else {
+    meta = unpushed.total ? `${unpushed.total} not on ${base}` : `all on ${base}`;
+    if (unpushed.kind === 'upstream') empty = `Everything is pushed to ${base}.`;
+    else if (unpushed.kind === 'remotes') empty = 'No upstream branch, but every commit is on a remote branch.';
+    else empty = `No remote. Every commit is in ${base}.`;
+  }
+  if (info.behind) meta += ` · ${info.behind} behind`;
+  const commits = unpushed.commits || [];
+  const list = commits.length
+    ? `<div class="wt-ch-list">${commits.map(wtCommitRowHtml).join('')}</div>${unpushed.truncated ? `<div class="add-project-hint wt-hint">The latest ${commits.length} of ${unpushed.total} are listed.</div>` : ''}`
+    : `<div class="wt-ch-empty">${escapeHtml(empty)}</div>`;
+  return `
+    <section class="wt-ch-section">
+      <div class="wt-ch-head"><span class="wt-ch-title">Unpushed commits</span><span class="wt-ch-meta">${escapeHtml(meta)}</span></div>
+      ${list}
+    </section>`;
+}
+
+function wtChangesBodyHtml(info) {
+  const verdict = wtChangesVerdict(info);
+  const where = info.detached ? `detached at ${info.head}` : `${info.branch}${info.head ? ` · ${info.head}` : ''}`;
+  return `
+    <div class="wt-ch-where mono">${escapeHtml(where)}${info.lastCommit?.subject ? ` <span class="wt-ch-last">${escapeHtml(info.lastCommit.subject)}</span>` : ''}</div>
+    <div class="wt-ch-verdict ${verdict.safe ? 'is-safe' : 'is-warn'}">${verdict.lines.map(line => `<div>${escapeHtml(line)}</div>`).join('')}</div>
+    ${wtChangesSectionHtml(info)}
+    ${wtCommitsSectionHtml(info)}`;
+}
+
+/** A unified diff as lines, the Git tab's way when it is loaded. */
+function wtDiffHtml(diff) {
+  if (!diff) return '<div class="wt-ch-empty">No textual diff is available.</div>';
+  if (typeof gitDiffLines === 'function') return `<pre class="git-diff">${gitDiffLines(diff)}</pre>`;
+  return `<pre class="git-diff">${escapeHtml(diff)}</pre>`;
+}
+
+/**
+ * The panel the git-graph button opens: the worktree's uncommitted files (a
+ * click shows a file's diff) and its unpushed commits, with what removing it
+ * would lose. Remove… goes on to the usual remove dialog.
+ */
+function wtChangesDialog(project, repo, wt) {
+  const folder = wtFolderFor(project, wt);
+  return wtWithDialog(project, () => new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'add-project-overlay';
+    const dialog = document.createElement('div');
+    dialog.className = 'add-project-dialog ws-prompt wt-dialog wt-dialog--changes';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', `Uncommitted files and unpushed commits of ${wtLabel(wt)}`);
+    dialog.innerHTML = `
+      <div class="wt-ch-top">
+        <h3>${WT_ICONS.gitGraph(15)}<span>${escapeHtml(wtLabel(wt))}</span></h3>
+        <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="reload" title="Read again">${PICONS.refresh(13)}</button>
+      </div>
+      <div class="add-project-hint mono wt-dialog-path" title="${wtAttr(wt.path)}">${escapeHtml(wtShortPath(wt.path))}</div>
+      <div class="wt-ch-body"><div class="git-loading"><span class="git-loading-dot"></span>Reading the worktree…</div></div>
+      <div class="add-project-actions wt-ch-actions">
+        ${wt.isMain ? '' : '<button type="button" class="add-project-cancel-btn wt-ch-remove" data-act="remove">Remove worktree…</button>'}
+        ${folder ? '<button type="button" class="add-project-cancel-btn" data-act="git-tab" title="Stage and commit there">Open in the Git tab</button>' : ''}
+        <button type="button" class="add-project-add-btn" data-act="close">Close</button>
+      </div>`;
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    const bodyEl = dialog.querySelector('.wt-ch-body');
+    const diffs = new Map(); // file path → { diff } | { error }
+    let info = null;
+    let request = 0;
+
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      finish(null);
+    };
+    function finish(next) {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey, true);
+      resolve(next);
+    }
+
+    const showDiff = async (button, slot, change) => {
+      const open = button.getAttribute('aria-expanded') !== 'true';
+      button.setAttribute('aria-expanded', String(open));
+      button.classList.toggle('open', open);
+      slot.hidden = !open;
+      if (!open) return;
+      const cached = diffs.get(change.path);
+      if (cached) {
+        slot.innerHTML = cached.error ? `<div class="wt-ch-empty">${escapeHtml(cached.error)}</div>` : wtDiffHtml(cached.diff);
+        return;
+      }
+      slot.innerHTML = '<div class="wt-ch-empty">Loading diff…</div>';
+      const mine = request;
+      const result = await wtApi('getWorktreeFileDiff', project.id, wt.path, change.path);
+      if (mine !== request) return;
+      const entry = result?.ok ? { diff: `${result.diff || ''}`, truncated: !!result.truncated } : { error: result?.error || 'Could not load this diff.' };
+      diffs.set(change.path, entry);
+      if (!slot.hidden) slot.innerHTML = entry.error ? `<div class="wt-ch-empty">${escapeHtml(entry.error)}</div>` : wtDiffHtml(entry.diff);
+    };
+
+    const load = async () => {
+      const mine = ++request;
+      diffs.clear();
+      if (info) bodyEl.classList.add('is-busy');
+      const result = await wtApi('getWorktreeChanges', project.id, wt.path);
+      if (mine !== request || !overlay.isConnected) return;
+      bodyEl.classList.remove('is-busy');
+      if (!result?.ok) {
+        bodyEl.innerHTML = `<div class="wt-dialog-error">${escapeHtml(result?.error || 'Could not read the worktree.')}</div>`;
+        return;
+      }
+      info = result;
+      bodyEl.innerHTML = wtChangesBodyHtml(info);
+      bodyEl.querySelectorAll('.wt-ch-file').forEach((button) => {
+        const index = Number(button.dataset.file);
+        const change = info.changes[index];
+        const slot = bodyEl.querySelector(`.wt-ch-diff[data-diff="${index}"]`);
+        if (change && slot) button.onclick = () => showDiff(button, slot, change);
+      });
+    };
+
+    dialog.querySelector('[data-act="reload"]').onclick = () => load();
+    dialog.querySelector('[data-act="close"]').onclick = () => finish(null);
+    const remove = dialog.querySelector('[data-act="remove"]');
+    if (remove) remove.onclick = () => finish('remove');
+    const gitTab = dialog.querySelector('[data-act="git-tab"]');
+    if (gitTab) gitTab.onclick = () => finish('git-tab');
+    document.addEventListener('keydown', onKey, true);
+    dialog.querySelector('[data-act="close"]').focus();
+    load();
+  })).then((next) => {
+    if (next === 'remove') return wtRemoveDialog(project, repo, wt);
+    if (next === 'git-tab') return wtOpenInGitTab(project, folder);
+    // The list may have been read before the last change; catch up quietly.
+    return wtReload(project);
+  });
+}
+
 // A worktree made outside the app (a terminal, Claude, Codex) shows up when
 // the window comes back.
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -1378,5 +1656,6 @@ if (typeof module !== 'undefined' && module.exports) {
     wtLabel, wtSortWorktrees, wtMatches, wtVisibleRepositories, wtSessionsByWorktree,
     wtRowHtml, wtRowPath, wtBadgesHtml, wtStatusHtml, wtListHtml, wtRowMenuItems, wtRepoMenuItems,
     wtMergedListHtml, wtPreviewTemplate, wtRefFolderName, wtStartPointOptions, wtAttr,
+    wtChangesButtonHtml, wtChangesVerdict, wtChangesBodyHtml, wtChangeState,
   };
 }

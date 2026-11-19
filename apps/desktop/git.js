@@ -337,6 +337,64 @@ async function lastCommit(dir) {
 }
 
 /** The repository's shared .git directory, absolute, from any of its worktrees. */
+const UNPUSHED_LIST_LIMIT = 200;
+
+/** One commit of `git log --format=%x1e%H%x00%h%x00%an%x00%at%x00%s --shortstat`. */
+function parseLogWithStat(output) {
+  return String(output || '').split('\x1e').filter(chunk => chunk.trim()).map((chunk) => {
+    const newline = chunk.indexOf('\n');
+    const head = newline === -1 ? chunk : chunk.slice(0, newline);
+    const rest = newline === -1 ? '' : chunk.slice(newline + 1);
+    const [hash, shortHash, author, seconds, subject] = head.split('\0');
+    const files = Number(rest.match(/(\d+) files? changed/)?.[1] || 0);
+    return { hash, shortHash, author, time: Number(seconds) * 1000, subject: subject || '', files, ...parseShortStat(rest) };
+  });
+}
+
+/**
+ * The commits checked out in dir that no remote has, for deciding whether a
+ * worktree can go: { kind, base, total, commits, truncated }.
+ *
+ * kind 'upstream': the branch has an upstream; the commits it is ahead by.
+ * kind 'remotes': no upstream (a new branch, a detached head); the commits on
+ * no remote-tracking branch. kind 'local': the repository has no remote at
+ * all; the commits not in `fallbackBase` (the main worktree's branch), when
+ * given. kind 'none': nothing to compare with.
+ */
+async function unpushedCommits(dir, { fallbackBase = '', limit = UNPUSHED_LIST_LIMIT } = {}) {
+  const empty = (kind, base = '') => ({ kind, base, total: 0, commits: [], truncated: false });
+  // A repository without a commit yet has nothing to push.
+  try { await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], dir); } catch { return empty('none'); }
+  let upstream = '';
+  try { upstream = await run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], dir); } catch {}
+  const remotes = (await runOr(['remote'], dir, '')).split('\n').map(name => name.trim()).filter(Boolean);
+  let range;
+  let kind;
+  let base = '';
+  if (upstream) {
+    kind = 'upstream';
+    base = upstream;
+    range = ['@{upstream}..HEAD'];
+  } else if (remotes.length) {
+    kind = 'remotes';
+    range = ['HEAD', '--not', '--remotes'];
+  } else if (fallbackBase && !fallbackBase.startsWith('-')) {
+    kind = 'local';
+    base = fallbackBase;
+    range = ['HEAD', '--not', `refs/heads/${fallbackBase}`];
+  } else {
+    return empty('none');
+  }
+  const max = Math.max(1, Math.min(UNPUSHED_LIST_LIMIT, Number(limit) || UNPUSHED_LIST_LIMIT));
+  const [count, log] = await Promise.all([
+    runOr(['rev-list', '--count', ...range, '--'], dir, '0'),
+    runOr(['log', `-${max}`, '--no-color', '--format=%x1e%H%x00%h%x00%an%x00%at%x00%s', '--shortstat', ...range, '--'], dir, ''),
+  ]);
+  const commits = parseLogWithStat(log);
+  const total = Math.max(Number(count.trim()) || 0, commits.length);
+  return { kind, base, total, commits, truncated: total > commits.length };
+}
+
 async function gitCommonDir(dir) {
   const out = await run(['rev-parse', '--git-common-dir'], dir);
   return path.resolve(dir, out);
@@ -1062,7 +1120,7 @@ module.exports = {
   run, runRaw, version, isGitRepo, repoRoot, branchExists,
   parseWorktreeList, worktreeList, worktreeLock, worktreeUnlock, worktreeMove, worktreePrune, worktreeRepair,
   deleteBranch, isUnmergedBranchError, isValidBranchName, listBranches, mergedBranches, defaultBranch, lastCommit,
-  worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status,
+  worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status, unpushedCommits, parseLogWithStat,
   parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths, readEditableFile, saveEditedFile,
   tagExists, toGitPath, safeRelativePath,
   logWithParents, forEachRef, stashList, remoteList, configListIncludes,
