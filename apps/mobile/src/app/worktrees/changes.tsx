@@ -90,7 +90,8 @@ export default function WorktreeChangesScreen() {
 
           {info.isMain ? null : (
             <Pressable
-              onPress={() => router.push({ pathname: '/worktrees/remove', params: { projectId, path: info.path } })}
+              // In its place: once removed, Back goes to the list, not to this worktree that is gone.
+              onPress={() => router.replace({ pathname: '/worktrees/remove', params: { projectId, path: info.path } })}
               style={({ pressed }) => [styles.remove, pressed && styles.pressed]}
               accessibilityRole="button"
             >
