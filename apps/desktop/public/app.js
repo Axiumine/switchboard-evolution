@@ -5,7 +5,6 @@ const sidebarContent = document.getElementById('sidebar-content');
 const plansContent = document.getElementById('plans-content');
 const placeholder = document.getElementById('placeholder');
 const archiveToggle = document.getElementById('archive-toggle');
-const starToggle = document.getElementById('star-toggle');
 const searchInput = document.getElementById('search-input');
 const terminalHeader = document.getElementById('terminal-header');
 const terminalHeaderName = document.getElementById('terminal-header-name');
@@ -13,8 +12,6 @@ const terminalHeaderId = document.getElementById('terminal-header-id');
 const terminalHeaderStatus = document.getElementById('terminal-header-status');
 const terminalHeaderShell = document.getElementById('terminal-header-shell');
 const terminalStopBtn = document.getElementById('terminal-stop-btn');
-const runningToggle = document.getElementById('running-toggle');
-const todayToggle = document.getElementById('today-toggle');
 const planViewer = document.getElementById('plan-viewer');
 const planPanel = new ViewerPanel(planViewer, {
   copyPath: true, copyContent: true,
@@ -83,9 +80,9 @@ function saveExpandedSlugs() {
   sessionStorage.setItem('expandedSlugs', JSON.stringify(expanded));
 }
 let showArchived = false;
-let showStarredOnly = false;
-let showRunningOnly = false;
-let showTodayOnly = false;
+// The Sessions tab's status, pinned and order combos and its "Group by folders"
+// box (session-list.js), kept across restarts.
+let sessionListPrefs = loadSessionListPrefs(localStorage);
 let cachedProjects = [];
 let cachedAllProjects = [];
 // Projects tab (projects-view.js): project → tracks → sessions, from
@@ -621,28 +618,35 @@ archiveToggle.addEventListener('click', () => {
   refreshSidebar({ resort: true });
 });
 
-// --- Star filter toggle ---
-starToggle.addEventListener('click', () => {
-  showStarredOnly = !showStarredOnly;
-  if (showStarredOnly) { showRunningOnly = false; runningToggle.classList.remove('active'); }
-  starToggle.classList.toggle('active', showStarredOnly);
-  refreshSidebar({ resort: true });
-});
+// --- Session list combos: status, pinned, order, and "Group by folders" ---
+const sessionStatusSelect = document.getElementById('session-status-select');
+const sessionPinnedSelect = document.getElementById('session-pinned-select');
+const sessionOrderSelect = document.getElementById('session-order-select');
+const groupFoldersToggle = document.getElementById('group-folders-toggle');
 
-// --- Running filter toggle ---
-runningToggle.addEventListener('click', () => {
-  showRunningOnly = !showRunningOnly;
-  if (showRunningOnly) { showStarredOnly = false; starToggle.classList.remove('active'); }
-  runningToggle.classList.toggle('active', showRunningOnly);
-  refreshSidebar({ resort: true });
-});
+/** Show the saved choices in the controls; a filter that hides sessions lights its combo. */
+function syncSessionListControls() {
+  sessionStatusSelect.value = sessionListPrefs.status;
+  sessionPinnedSelect.value = sessionListPrefs.pinned;
+  sessionOrderSelect.value = sessionListPrefs.order;
+  groupFoldersToggle.checked = sessionListPrefs.groupByFolders;
+  sessionStatusSelect.classList.toggle('is-on', sessionListPrefs.status !== 'all');
+  sessionPinnedSelect.classList.toggle('is-on', sessionListPrefs.pinned !== 'all');
+}
 
-// --- Today filter toggle ---
-todayToggle.addEventListener('click', () => {
-  showTodayOnly = !showTodayOnly;
-  todayToggle.classList.toggle('active', showTodayOnly);
+/** A choice changed: keep it, and sort again, as the buttons these replace did. */
+function changeSessionListPref(key, value) {
+  sessionListPrefs = { ...sessionListPrefs, [key]: value };
+  saveSessionListPrefs(localStorage, sessionListPrefs);
+  syncSessionListControls();
   refreshSidebar({ resort: true });
-});
+}
+
+sessionStatusSelect.addEventListener('change', () => changeSessionListPref('status', sessionStatusSelect.value));
+sessionPinnedSelect.addEventListener('change', () => changeSessionListPref('pinned', sessionPinnedSelect.value));
+sessionOrderSelect.addEventListener('change', () => changeSessionListPref('order', sessionOrderSelect.value));
+groupFoldersToggle.addEventListener('change', () => changeSessionListPref('groupByFolders', groupFoldersToggle.checked));
+syncSessionListControls();
 
 // --- Re-sort button ---
 resortBtn.addEventListener('click', () => {

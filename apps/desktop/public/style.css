@@ -289,16 +289,65 @@ body { display: flex; flex-direction: column; }
 }
 .sidebar-tip-window:hover, .sidebar-tip-window:focus-visible { background: rgba(128,136,255,0.26); color: #d4d6ff; outline: none; }
 
+/* Two rows: the three combos share the first, so each shrinks with the
+   sidebar (344px at least) and cuts its text; the second holds the grouping
+   box and the buttons. */
 #session-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-filter-row {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
+
+.session-filter-select {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  padding: 0 18px 0 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  color: #c0c0d0;
+  font-family: inherit;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%237a7a90' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+/* The order combo has the longest labels. */
+#session-order-select { flex-grow: 1.6; }
+.session-filter-select:hover { border-color: rgba(255,255,255,0.12); }
+.session-filter-select:focus { border-color: rgba(120,130,255,0.5); }
+/* A filter on: its combo says so, as some sessions are out of sight. */
+.session-filter-select.is-on { border-color: rgba(120,130,255,0.55); color: #c8ccff; }
+
+#group-folders-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: #a0a0b4;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+#group-folders-label input { margin: 0; accent-color: #8088ff; cursor: pointer; }
 
 #loading-status {
   font-size: 11px;
   color: #8888a0;
-  margin-left: auto;
   white-space: nowrap;
 }
 
@@ -311,7 +360,8 @@ body { display: flex; flex-direction: column; }
   animation: loading-pulse 1.2s ease-in-out infinite;
 }
 
-#star-toggle, #archive-toggle, #running-toggle, #today-toggle {
+#archive-toggle {
+  margin-left: auto;
   background: transparent;
   border: 1px solid rgba(255,255,255,0.08);
   color: #7a7a90;
@@ -330,34 +380,16 @@ body { display: flex; flex-direction: column; }
   justify-content: center;
 }
 
-#star-toggle:hover, #archive-toggle:hover, #running-toggle:hover, #today-toggle:hover {
+#archive-toggle:hover {
   background: rgba(255,255,255,0.04);
   border-color: rgba(255,255,255,0.12);
   color: #888;
-}
-
-#star-toggle.active {
-  background: rgba(245,190,60,0.1);
-  border-color: rgba(245,190,60,0.25);
-  color: #f5be3c;
 }
 
 #archive-toggle.active {
   background: rgba(120,130,255,0.1);
   border-color: rgba(120,130,255,0.25);
   color: #8088ff;
-}
-
-#running-toggle.active {
-  background: rgba(62,207,90,0.1);
-  border-color: rgba(62,207,90,0.25);
-  color: #3ecf5a;
-}
-
-#today-toggle.active {
-  background: rgba(80,180,255,0.1);
-  border-color: rgba(80,180,255,0.25);
-  color: #50b4ff;
 }
 
 /* ---- Search ---- */
@@ -977,6 +1009,19 @@ body { display: flex; flex-direction: column; }
   align-items: stretch;
   gap: 3px;
 }
+
+/* The flat list's second line: which folder the session lives in. */
+.session-folder,
+.slug-group-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: #707088;
+}
+.slug-group-folder { flex: 0 1 auto; }
+.session-folder { margin-top: -1px; }
 
 .session-header,
 .session-footer {

@@ -212,16 +212,17 @@ function showGridView() {
   const sessionIds = [];
   // Walk sidebar items to get sessions in display order, grouped by project
   const sidebarItems = sidebarContent.querySelectorAll('.session-item[data-session-id]');
-  let currentProjectPath = null;
+  // The flat list can come back to a folder after another one: one heading each.
+  const headed = new Set();
   for (const item of sidebarItems) {
     const sid = item.dataset.sessionId;
     if (!openSet.has(sid)) continue;
     // Determine project path for this session
     const session = sessionMap.get(sid);
     const projectPath = session ? session.projectPath : null;
-    // Add project heading when project changes
-    if (projectPath && projectPath !== currentProjectPath) {
-      currentProjectPath = projectPath;
+    // Add the project's heading the first time it comes up
+    if (projectPath && !headed.has(projectPath)) {
+      headed.add(projectPath);
       const heading = document.createElement('div');
       heading.className = 'grid-project-heading';
       heading.dataset.projectPath = projectPath;

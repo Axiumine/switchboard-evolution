@@ -1,10 +1,9 @@
 // --- Sidebar rendering ---
 // Depends on globals: sidebarContent, openSessions, activeSessionId, activePtyIds,
 // pendingSessions, sessionMap, sortedOrder, searchMatchIds,
-// searchMatchProjectPaths, showStarredOnly, showRunningOnly, showTodayOnly,
-// visibleSessionCount, sessionMaxAgeDays, attentionSessions, responseReadySessions,
+// searchMatchProjectPaths, sessionListPrefs, visibleSessionCount, sessionMaxAgeDays, attentionSessions, responseReadySessions,
 // sessionBusyState, cachedProjects, cachedAllProjects, gridCards, gridViewActive (app.js)
-// Depends on: cleanDisplayName, formatDate, escapeHtml (utils.js), ICONS (icons.js),
+// Depends on: session-list.js (the filters, orders and flat list), cleanDisplayName, formatDate, escapeHtml (utils.js), ICONS (icons.js),
 // showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
 // showJsonlViewer, forkSession, openSession, loadProjects, markUnread,
@@ -31,7 +30,7 @@ function folderId(projectPath) {
   return 'project-' + projectPath.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-function buildSlugGroup(slug, sessions) {
+function buildSlugGroup(slug, sessions, labelOf = () => '') {
   const group = document.createElement('div');
   const id = slugId(slug);
   const expanded = getExpandedSlugs().has(id);
@@ -66,6 +65,15 @@ function buildSlugGroup(slug, sessions) {
   const meta = document.createElement('div');
   meta.className = 'slug-group-meta';
   meta.innerHTML = `<span class="slug-group-dot${hasRunning ? ' running' : ''}"></span><span class="slug-group-count">${sessions.length} sessions</span> ${escapeHtml(timeStr)}`;
+  // In the flat list the group says where it lives, as its rows do.
+  const groupFolder = labelOf(mostRecent);
+  if (groupFolder) {
+    const folderEl = document.createElement('span');
+    folderEl.className = 'slug-group-folder';
+    folderEl.textContent = groupFolder;
+    folderEl.title = groupFolder;
+    meta.appendChild(folderEl);
+  }
 
   const archiveSlugBtn = document.createElement('button');
   archiveSlugBtn.className = 'slug-group-archive-btn';
@@ -95,7 +103,7 @@ function buildSlugGroup(slug, sessions) {
   if (promoted.length > 0) {
     group.classList.add('has-promoted');
     for (const session of promoted) {
-      sessionsContainer.appendChild(buildSessionItem(session));
+      sessionsContainer.appendChild(buildSessionItem(session, { folderLabel: labelOf(session) }));
     }
     if (rest.length > 0) {
       const moreBtn = document.createElement('div');
@@ -107,7 +115,7 @@ function buildSlugGroup(slug, sessions) {
       olderDiv.className = 'slug-group-older';
       olderDiv.id = 'sgo-' + id;
       for (const session of rest) {
-        olderDiv.appendChild(buildSessionItem(session));
+        olderDiv.appendChild(buildSessionItem(session, { folderLabel: labelOf(session) }));
       }
 
       sessionsContainer.appendChild(moreBtn);
@@ -115,7 +123,7 @@ function buildSlugGroup(slug, sessions) {
     }
   } else {
     for (const session of sessions) {
-      sessionsContainer.appendChild(buildSessionItem(session));
+      sessionsContainer.appendChild(buildSessionItem(session, { folderLabel: labelOf(session) }));
     }
   }
 
@@ -126,37 +134,24 @@ function buildSlugGroup(slug, sessions) {
 
 // Process a list of sessions: filter, sort, slug-group, order, and truncate.
 // `project` needs `.sessions`, a `.projectPath` used as the order key, and an
-// optional `._projectMatchedOnly`. The Projects tab passes a synthetic key
-// ("project:<id>") and its own previous order list.
+// optional `._projectMatchedOnly`. The flat list passes a synthetic folder
+// (flatSessionsFolder) keyed FLAT_SESSIONS_KEY, whose `.folderLabels` tell each
+// row where it lives.
 // Returns { filtered, visible, older, sortOrderEntry } or null if the group
 // should be skipped.
 function processProjectSessions(project, resort, previousOrder = sortedOrder) {
-  let filtered = project.sessions;
-  if (showStarredOnly) filtered = filtered.filter(s => s.starred);
-  if (showRunningOnly) filtered = filtered.filter(s => activePtyIds.has(s.sessionId));
-  if (showTodayOnly) {
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    filtered = filtered.filter(s => {
-      if (!s.modified) return false;
-      const d = new Date(s.modified);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === todayStr;
-    });
-  }
-  const anyFilterActive = showStarredOnly || showRunningOnly || showTodayOnly || searchMatchIds !== null;
+  const prefs = sessionListPrefs;
+  let filtered = filterSessionsByPrefs(project.sessions, prefs, {
+    isRunning: isSessionRunning,
+    needsInput: id => attentionSessions.has(id),
+  });
+  const anyFilterActive = sessionFiltersActive(prefs) || searchMatchIds !== null;
   if (filtered.length === 0 && !project._projectMatchedOnly && (project.sessions.length > 0 || anyFilterActive)) return null;
 
-  // Sort
-  filtered = [...filtered].sort((a, b) => {
-    const aRunning = isSessionRunning(a.sessionId);
-    const bRunning = isSessionRunning(b.sessionId);
-    const aPri = (a.starred && aRunning ? 3 : aRunning ? 2 : a.starred ? 1 : 0);
-    const bPri = (b.starred && bRunning ? 3 : bRunning ? 2 : b.starred ? 1 : 0);
-    if (aPri !== bPri) return bPri - aPri;
-    return new Date(b.modified) - new Date(a.modified);
-  });
+  filtered = sortSessionsByOrder(filtered, prefs.order, isSessionRunning);
 
   // Slug grouping
+  const labelOf = session => project.folderLabels?.get(session.sessionId) || '';
   const slugMap = new Map();
   const ungrouped = [];
   for (const session of filtered) {
@@ -170,59 +165,30 @@ function processProjectSessions(project, resort, previousOrder = sortedOrder) {
   const allItems = [];
   for (const session of ungrouped) {
     const isRunning = isSessionRunning(session.sessionId);
-    allItems.push({ sortTime: new Date(session.modified).getTime(), pinned: !!session.starred, running: isRunning, element: buildSessionItem(session) });
+    allItems.push({ sortTime: new Date(session.modified).getTime(), pinned: !!session.starred, running: isRunning, element: buildSessionItem(session, { folderLabel: labelOf(session) }) });
   }
   for (const [slug, sessions] of slugMap) {
     const mostRecentTime = Math.max(...sessions.map(s => new Date(s.modified).getTime()));
     const hasRunning = sessions.some(s => isSessionRunning(s.sessionId));
     const hasPinned = sessions.some(s => s.starred);
-    const element = sessions.length === 1 ? buildSessionItem(sessions[0]) : buildSlugGroup(slug, sessions);
+    const element = sessions.length === 1 ? buildSessionItem(sessions[0], { folderLabel: labelOf(sessions[0]) }) : buildSlugGroup(slug, sessions, labelOf);
     allItems.push({ sortTime: mostRecentTime, pinned: hasPinned, running: hasRunning, element });
   }
 
-  // Sort render items
+  // Sort render items: the chosen order, or the places rows already had
   const prevEntry = previousOrder.find(e => e.projectPath === project.projectPath);
-  if (resort || !prevEntry) {
-    allItems.sort((a, b) => {
-      const aPri = (a.pinned && a.running ? 3 : a.running ? 2 : a.pinned ? 1 : 0);
-      const bPri = (b.pinned && b.running ? 3 : b.running ? 2 : b.pinned ? 1 : 0);
-      if (aPri !== bPri) return bPri - aPri;
-      return b.sortTime - a.sortTime;
-    });
-  } else {
-    const orderIndex = new Map(prevEntry.itemIds.map((id, i) => [id, i]));
-    allItems.sort((a, b) => {
-      const aPos = orderIndex.get(a.element.id);
-      const bPos = orderIndex.get(b.element.id);
-      if (aPos !== undefined && bPos !== undefined) return aPos - bPos;
-      if (aPos === undefined && bPos !== undefined) return -1;
-      if (aPos !== undefined && bPos === undefined) return 1;
-      return b.sortTime - a.sortTime;
-    });
-  }
+  const ordered = orderRenderItems(allItems, { order: prefs.order, resort, previousIds: prevEntry?.itemIds });
 
-  // Truncate
-  let visible = [];
-  let older = [];
-  if (searchMatchIds !== null || showStarredOnly || showRunningOnly || showTodayOnly) {
-    visible = allItems;
-  } else {
-    let count = 0;
-    const ageCutoff = Date.now() - sessionMaxAgeDays * 86400000;
-    for (const item of allItems) {
-      if (item.running || item.pinned || (count < visibleSessionCount && item.sortTime >= ageCutoff)) {
-        visible.push(item);
-        count++;
-      } else {
-        older.push(item);
-      }
-    }
-    if (visible.length === 0 && older.length > 0) { visible = older; older = []; }
-  }
+  // Truncate: a search or a filter shows everything it matches
+  const { visible, older } = truncateRenderItems(ordered, {
+    showAll: anyFilterActive,
+    visibleCount: visibleSessionCount,
+    maxAgeDays: sessionMaxAgeDays,
+  });
 
   return {
     filtered, visible, older,
-    sortOrderEntry: { projectPath: project.projectPath, itemIds: allItems.map(item => item.element.id) },
+    sortOrderEntry: { projectPath: project.projectPath, itemIds: ordered.map(item => item.element.id) },
   };
 }
 
@@ -303,6 +269,7 @@ function preserveSidebarDomState(fromEl, toEl) {
 }
 
 function renderProjects(projects, resort) {
+  if (!sessionListPrefs.groupByFolders) return renderFlatSessions(projects, resort);
   const newSidebar = document.createElement('div');
 
   // Sort project groups using sortedOrder as source of truth
@@ -403,7 +370,7 @@ function renderProjects(projects, resort) {
     // Auto-collapse if most recent session is older than threshold, or project matched with no sessions
     if (project._projectMatchedOnly) {
       header.classList.add('collapsed');
-    } else if (searchMatchIds === null && !showStarredOnly && !showRunningOnly) {
+    } else if (searchMatchIds === null && !sessionFiltersActive(sessionListPrefs)) {
       const mostRecent = filtered[0]?.modified;
       if (mostRecent && (Date.now() - new Date(mostRecent)) > sessionMaxAgeDays * 86400000) {
         header.classList.add('collapsed');
@@ -452,7 +419,7 @@ function renderProjects(projects, resort) {
       wtSessionsList.className = 'worktree-sessions';
 
       // Auto-collapse worktree if stale
-      if (searchMatchIds === null && !showStarredOnly && !showRunningOnly) {
+      if (searchMatchIds === null && !sessionFiltersActive(sessionListPrefs)) {
         const mostRecent = wtResult.filtered[0]?.modified;
         if (mostRecent && (Date.now() - new Date(mostRecent)) > sessionMaxAgeDays * 86400000) {
           wtHeader.classList.add('collapsed');
@@ -467,6 +434,31 @@ function renderProjects(projects, resort) {
     newSidebar.appendChild(group);
   }
 
+  commitSidebar(newSidebar, projects, newSortedOrder, shown);
+}
+
+// "Group by folders" off: one list of every folder's sessions, worktrees
+// included, each row naming its folder. It is ordered and cut as one list, and
+// keeps its order under one key like a folder does.
+function renderFlatSessions(projects, resort) {
+  const newSidebar = document.createElement('div');
+  const labelOf = folderPath => sessionFolderLabel(folderPath, typeof projectRootLabel === 'function' ? projectRootLabel(folderPath) : null);
+  const result = processProjectSessions(flatSessionsFolder(projects, labelOf), resort);
+  const newSortedOrder = [];
+  const shown = [];
+  if (result) {
+    newSortedOrder.push(result.sortOrderEntry);
+    shown.push(...result.filtered);
+    const list = buildSessionsList('flat', result.visible, result.older);
+    list.classList.add('flat-sessions');
+    newSidebar.appendChild(list);
+  }
+  commitSidebar(newSidebar, projects, newSortedOrder, shown);
+}
+
+// Put a built sidebar on screen, and remember what it showed: the order for
+// the next render, and the sessions a search found.
+function commitSidebar(newSidebar, projects, newSortedOrder, shown) {
   // Re-apply active state
   if (activeSessionId) {
     const activeItem = newSidebar.querySelector(`[data-session-id="${activeSessionId}"]`);
@@ -798,7 +790,8 @@ async function toggleSessionStar(session) {
   refreshSidebar({ resort: true, reason: 'sessions' });
 }
 
-function buildSessionItem(session) {
+// `folderLabel`: set in the flat list, where no folder header says where the row lives.
+function buildSessionItem(session, { folderLabel = '' } = {}) {
   const item = document.createElement('div');
   item.className = 'session-item';
   item.id = 'si-' + session.sessionId;
@@ -930,7 +923,15 @@ function buildSessionItem(session) {
   }
 
   footer.append(metaEl, actions);
-  row.append(header, footer);
+  if (folderLabel) {
+    const folderEl = document.createElement('div');
+    folderEl.className = 'session-folder';
+    folderEl.textContent = folderLabel;
+    folderEl.title = session.projectPath || folderLabel;
+    row.append(header, folderEl, footer);
+  } else {
+    row.append(header, footer);
+  }
   item.appendChild(row);
 
   return item;
