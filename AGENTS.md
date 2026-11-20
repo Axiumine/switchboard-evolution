@@ -10,10 +10,11 @@ packages/shared  modules both apps use, copied into them by scripts/sync-shared.
 
 The desktop app started from Switchboard (doctly/switchboard), with its own features on top, and the mobile app from switchboard-mobile.
 
-- Upstream `main` is recorded in the history as merged into `apps/desktop` (merge of e594fa9).
-- `scripts/upstream-sync.sh` brings in later upstream commits with a subtree merge (`git merge -X subtree=apps/desktop`). The weekly `.github/workflows/upstream-sync.yml` runs it and opens a pull request, or an issue when there are conflicts.
-- Changes for Doctly go as pull requests from the fork vivi7/switchboard, whose `main` stays identical to upstream; see the README, "Upstream".
-- switchboard-mobile has no link in the history: its commits are carried over with `git am --directory=apps/mobile`.
+- Branches: `master` is Switchboard Evolution, the default branch, where all work is committed and both apps are built from. `main` is an exact copy of doctly/switchboard `main`, in upstream's layout: never commit to it, the upstream sync moves it.
+- On `master`, upstream `main` is recorded in the history as merged into `apps/desktop` (merge of e594fa9).
+- `scripts/upstream-sync.sh`, run on `master`, brings in later upstream commits with a subtree merge (`git merge -X subtree=apps/desktop`) and moves `main` to upstream. The weekly `.github/workflows/upstream-sync.yml` runs it and opens a pull request to `master`, or an issue when there are conflicts.
+- Changes for Doctly go as pull requests from the fork vivi7/switchboard (remote `fork`), on branches made from `main`; see the README, "Upstream".
+- This repository is the only place both apps are developed. The old repositories (the fork's `master` and switchboard-mobile) are archives: nothing is carried over from them any more.
 
 ## Rules
 

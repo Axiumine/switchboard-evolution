@@ -42,9 +42,14 @@ docs/            the parity list for the coming redesign, screenshots, the compa
 scripts/         sync-shared.mjs, upstream-sync.sh
 ```
 
+## Branches
+
+- **`master`** is Switchboard Evolution. All development happens here and both apps are built from it; it is the default branch.
+- **`main`** is an exact copy of upstream [doctly/switchboard](https://github.com/doctly/switchboard) `main`, in upstream's own layout (the desktop app at the root). Nothing is committed to it by hand: the [Upstream sync](.github/workflows/upstream-sync.yml) moves it forward. Changes offered to Doctly start from it (see [Upstream](#upstream)).
+
 ## Build and run
 
-There are no published releases yet: build from source.
+There are no published releases yet: build from source, on `master`.
 
 ```bash
 # desktop
@@ -75,23 +80,24 @@ npm run sync-shared  # copy packages/shared into both apps
 
 `apps/desktop` is derived from [doctly/switchboard](https://github.com/doctly/switchboard). This repository keeps a real link with it:
 
-- **History.** Upstream `main` is recorded as merged into `apps/desktop`, so git knows the common base.
-- **Staying in step.** Once a week the [Upstream sync](.github/workflows/upstream-sync.yml) workflow merges the new upstream commits into `apps/desktop` with a subtree merge. A clean merge opens a pull request; a merge with conflicts opens an issue listing the files. To do it by hand: `scripts/upstream-sync.sh` (it stops at the conflicts for you to resolve).
-- **Giving back.** Changes go to Doctly as pull requests from the fork [vivi7/switchboard](https://github.com/vivi7/switchboard). Its `main` stays identical to upstream.
+- **History.** On `master`, upstream `main` is recorded as merged into `apps/desktop`, so git knows the common base.
+- **Staying in step.** Once a week the [Upstream sync](.github/workflows/upstream-sync.yml) workflow moves `main` to upstream's latest commit and merges the new upstream commits into `apps/desktop` on `master` with a subtree merge. A clean merge opens a pull request to `master`; a merge with conflicts opens an issue listing the files. To do it by hand, on `master`: `scripts/upstream-sync.sh` (it moves `main` too, and stops at the conflicts for you to resolve), then `git push origin master main`.
+- **Giving back.** Changes go to Doctly as pull requests from the fork [vivi7/switchboard](https://github.com/vivi7/switchboard), since GitHub takes pull requests only from a fork. The branches start from `main` in this repository; the fork's own `main` stays identical to upstream.
 
   Merged upstream: [#98](https://github.com/doctly/switchboard/pull/98), [#99](https://github.com/doctly/switchboard/pull/99), [#109](https://github.com/doctly/switchboard/pull/109). Open: [#105](https://github.com/doctly/switchboard/pull/105), [#106](https://github.com/doctly/switchboard/pull/106), [#107](https://github.com/doctly/switchboard/pull/107), [#108](https://github.com/doctly/switchboard/pull/108), [#110](https://github.com/doctly/switchboard/pull/110), [#111](https://github.com/doctly/switchboard/pull/111), [#112](https://github.com/doctly/switchboard/pull/112), [#113](https://github.com/doctly/switchboard/pull/113).
 
-To offer a change upstream:
+To offer a change upstream, in this repository:
 
 ```bash
-# in this repository: the commits that touch the desktop app, as patches relative to apps/desktop
-git format-patch --relative=apps/desktop -o /tmp/upstream-patches <first>^..<last> -- apps/desktop
+git remote add fork https://github.com/vivi7/switchboard.git   # once
+git switch -c feat/my-change main
 
-# in a clone of the fork, on a branch from upstream main
-gh repo sync vivi7/switchboard -b main
-git switch -c feat/my-change origin/main
-git am -3 /tmp/upstream-patches/*.patch   # leave out Switchboard Evolution's name and icons
-gh pr create -R doctly/switchboard
+# the commits of master that touch the desktop app, as patches relative to apps/desktop;
+# leave out Switchboard Evolution's name and icons
+git format-patch --relative=apps/desktop --stdout <first>^..<last> -- apps/desktop | git am -3
+
+git push fork feat/my-change
+gh pr create -R doctly/switchboard --head vivi7:feat/my-change
 ```
 
 ## License
