@@ -1,4 +1,4 @@
-> **Switchboard Evolution note.** This README still describes Switchboard, which this app is derived from. It will be rewritten for Switchboard Evolution (switchboard-e, formerly OmniboardV).
+> **Switchboard Evolution note.** This README is upstream Switchboard's, which this app is derived from: for Switchboard Evolution, start from the [README at the root of the repository](../../README.md). The release downloads and the Slack community linked below are Doctly's, for the official app. This page will be rewritten for Switchboard Evolution.
 
 # Switchboard
 
