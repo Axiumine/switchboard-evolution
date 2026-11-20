@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.7.0 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.8.0 (November 2026).
 
 ## At a glance
 
@@ -28,13 +28,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 13 Nov | OmniboardV 1.5.0 to 1.6.5 | An app of its own: own name, app id and icon. It installs next to the official Switchboard. |
 | 16 Nov | **Switchboard Evolution** 1.6.6 | The final name, and this monorepo with the desktop and the mobile app. |
 | 20 Nov | Switchboard Evolution 1.7.0 | One version for the desktop and the phone app, and the repository goes public. |
+| 20 Nov | Switchboard Evolution 1.8.0 | A Note for each project, text size in the editor, the RAM of each session on its row, and tabs in a project's window. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.7.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.8.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
@@ -85,7 +86,7 @@ What "an app of its own" means:
 - A project-wide **Search** view (case, whole word, regex, include and exclude globs). **Replace** works in one file or all files, with a preview, and keeps open editor edits safe.
 - Find and replace in the editor (CodeMirror). The editor bundles only the languages it highlights: 1.67 MB down to 0.98 MB.
 - Multi-select with one-step trash; Expand All and Collapse All.
-- In the viewer toolbar: Share (the macOS share menu), Reveal in Finder, Open in default app.
+- In the viewer toolbar: Share (the macOS share menu), Reveal in Finder, Open in default app, and A− / A+ for the text size of the editor and the Markdown preview (on the phone too).
 
 ### 5. Projects and sessions
 
@@ -95,17 +96,19 @@ What "an app of its own" means:
 - Rename from the session menu; a live terminal keeps its name and star across refreshes.
 - Attached folders can be detached from the Overview card (with an offer to remove the worktree) and trusted for Claude Code once.
 - At start, the project of the reopened session opens.
+- A **Note** for each project (its `note.md`, made when first opened), from the project's header and menu: the file editor in a panel floating over the app, moved and resized, that opens again where it was left and saves itself as you type. It can move to a window of its own (on the phone: a DeX or tablet window).
 
 ### 6. Task Manager and resources
 
 - A Task Manager with the RAM each session and task uses, and the processes inside them, with Kill and Force kill. Memory and disk rings show the space each project takes.
 - RAM and disk in the status bar, turning amber and then red near their limits.
+- Each live session's RAM on its row, under its star and archive button, amber from 1 GB and red from 2 GB as in the Task Manager.
 
 ### 7. Windows
 
 - One strip of sidebar tabs: Projects, Sessions, Plans, Agent Files, Stats, Task Manager, Settings.
 - Stats and the Task Manager open in windows of their own, with a pin that keeps them on top.
-- Every project tab (Overview, Plan, Files, Git, Settings) can open in a window of its own. Open windows come back at the next start.
+- Every project tab (Overview, Plan, Files, Git, Settings) can open in a window of its own, whose header has the other tabs to move it to one of them (on the phone too). Open windows come back at the next start.
 
 ### 8. Under the hood
 

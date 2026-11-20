@@ -49,7 +49,7 @@ scripts/         sync-shared.mjs, upstream-sync.sh
 
 ## Build and run
 
-The desktop and the phone app share one version, 1.7.0 today, tagged `v1.7.0`. There are no published releases yet: build from source, on `master`.
+The desktop and the phone app share one version, 1.8.0 today, tagged `v1.8.0` when it is released. There are no published releases yet: build from source, on `master`.
 
 ```bash
 # desktop
