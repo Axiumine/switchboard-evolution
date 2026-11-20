@@ -1,54 +1,54 @@
 # Releasing
 
-There are two ways to make a build:
+There are three ways to make a build:
 
-- **A tag**: CI builds an Android APK and an iOS IPA to install by hand, and puts them in a draft GitHub release. This page starts there.
+- **A tag**: GitHub Actions builds the desktop app (macOS, Windows, Linux) and the Android APK, and puts them in a draft GitHub release. This page starts there.
 - **A script on your computer**: it builds for Google Play or the App Store and uploads the build there. See [From your computer, to the stores](#from-your-computer-to-the-stores).
-- **An APK built on your computer**, without EAS or an Expo account: see [An APK from your computer](#an-apk-from-your-computer).
+- **An APK built on your computer**, without EAS or an Expo account: see [An APK from your computer](#an-apk-from-your-computer). The desktop app builds on your computer with `npm run build:mac` (or `build:win`, `build:linux`) in `apps/desktop`.
 
-Push a tag. The tag is the version and the instruction:
+Local builds are made by hand, whenever you want one; only a tag starts the builds on GitHub.
+
+## A tag
+
+Both apps carry one version: `apps/desktop/package.json`, `apps/mobile/package.json` and `apps/mobile/app.json`. A release is the commit that numbers them, tagged with that number:
 
 ```bash
 git tag v1.2.3 && git push origin v1.2.3
 ```
 
-`1.2.3` becomes `expo.version` in the build (in the repository, app.json holds the current version). The build number belongs to EAS (`appVersionSource: remote` with `autoIncrement`), so it is never part of the tag.
+The **Release** workflow (`.github/workflows/release.yml`, at the root of the repository) checks that the tag is the version the apps carry, and stops before any build when it is not. It runs the tests, the typecheck and the lint, then builds:
 
-When the builds finish, a **draft** GitHub release holds the Android APK and the iOS IPA. Publishing it is up to you, on GitHub.
+| | What | Signed |
+| --- | --- | --- |
+| macOS | dmg and zip, Apple silicon (arm64) and Intel (x64) | ad hoc, without an Apple Developer ID |
+| Windows | installer, x64 and arm64 | no |
+| Linux | AppImage, deb and pacman, x64 | no |
+| Android | APK, arm64 | with your key, from the repository's secrets |
 
-## Tags
+When every build has finished, a **draft** GitHub release holds them all. Publishing it is up to you, on GitHub. If one build fails, no release is made; run the workflow again from the failed run once it is fixed.
 
-| Tag | Android | iOS | Tests |
-| --- | --- | --- | --- |
-| `v1.2.3` | APK | IPA | yes |
-| `v1.2.3-android` | APK | — | yes |
-| `v1.2.3-ios` | — | IPA | yes |
-| `v1.2.3-notest` | APK | IPA | skipped |
-| `v1.2.3-android-notest` | APK | — | skipped |
-| `v1.2.3-ios-notest` | — | IPA | skipped |
+There is no iOS build: without a paid Apple Developer account there is nothing to sign it with. [From your computer, to the stores](#from-your-computer-to-the-stores) makes one when there is.
 
-Any other tag is refused before a build starts. Each workflow also runs from the Actions tab: **Build mobile** (both platforms or one) and **Build Android** / **Build iOS** on their own. A run without a tag keeps its builds as workflow artifacts instead of a release.
+From the Actions tab, **Release** also runs on a branch: it builds without a release, and the builds stay as workflow artifacts.
 
-## How each platform builds
-
-- **Android** builds on [EAS](https://expo.dev/eas), with the `preview` profile in `eas.json`: an APK for internal distribution, signed with a key EAS keeps. The workflow waits for the build and downloads the APK.
-- **iOS** builds on a GitHub macOS runner: `npx expo prebuild` generates the native project, and `xcodebuild` archives it **without signing**. A free Apple ID cannot sign for distribution, and EAS needs a paid Apple Developer account for a build that installs on a phone.
+The APK is made as [An APK from your computer](#an-apk-from-your-computer) makes it: `expo prebuild` and Gradle, no EAS and no Expo account. Its version code is the number of commits, so a newer APK installs over an older one, and over one built on your computer from an older commit.
 
 ## One-time setup (Android)
 
-On your computer, in this repository:
+The workflow signs the APK with the key `npm run build:apk` made on your computer, in `~/.config/switchboard-mobile/`, so an APK from a release and one built at home install over each other. Add that key to the GitHub repository as two Actions secrets:
 
-1. `npx eas-cli@latest login` with your Expo account.
-2. `npx eas-cli@latest init`. It creates the EAS project and writes its `projectId` and `owner` into `app.json`: commit that.
-3. `npx eas-cli@latest build --platform android --profile preview`. Answer the prompts once (let EAS create the signing key). Later builds reuse it without asking.
-4. Create an access token at expo.dev › Account settings › Access tokens, and add it to the GitHub repository as the Actions secret `EXPO_TOKEN`.
+```bash
+base64 -i ~/.config/switchboard-mobile/android-apk.keystore | gh secret set ANDROID_KEYSTORE_BASE64
+gh secret set ANDROID_KEYSTORE_PASSWORD < ~/.config/switchboard-mobile/android-apk.password
+```
 
-iOS needs no setup.
+Without them the Android build stops with an error, and no release is made.
 
 ## Installing
 
 - **Android**: download the APK on the phone and open it; allow installs from that source when asked. A newer APK installs over the old one and keeps the pairing.
-- **iPhone**: install the IPA with [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io), which sign it with your Apple ID. With a free Apple ID the app runs for 7 days; then install it again (AltStore can refresh it for you). On the phone, trust your Apple ID once under Settings › General › VPN & Device Management.
+- **macOS**: the app is not signed with an Apple Developer ID. The first time, open it with right-click › Open, or run `xattr -dr com.apple.quarantine "/Applications/Switchboard Evolution.app"`.
+- **Windows**: the installer is not signed. On the SmartScreen warning, choose More info › Run anyway.
 
 ## From your computer, to the stores
 
@@ -63,7 +63,7 @@ Each one runs the tests, builds with `eas build --local` (the `production` profi
 
 Nothing reaches users by itself. On Google Play the build is a draft, rolled out from Play Console. On iOS it lands in TestFlight; sending it for review is done in App Store Connect.
 
-Both commands are interactive, so the first time EAS asks for what it is missing (signing keys, store logins) and keeps it for next time. The signing keys live on EAS, so builds made here and in CI are signed alike.
+Both commands are interactive, so the first time EAS asks for what it is missing (signing keys, store logins) and keeps it for next time. The signing keys live on EAS.
 
 ### What each needs
 
@@ -93,6 +93,6 @@ npm run build:apk -- 1.2.3 --install
 
 This builds an APK on your computer, with no EAS and no Expo account. `npx expo prebuild` generates the native project from `app.json`, and Gradle builds a release APK into `dist/`. With `--install`, the script installs it on the phone connected with USB; without it, copy the APK to the phone and open it there. The version works as in a tag. The version code is the number of commits, so a newer APK installs over an older one.
 
-The APK is signed with a key of your own, made the first time in `~/.config/switchboard-mobile/`. Keep a copy of that folder: an update must be signed with the same key. The APKs from CI and the stores are signed with other keys, so to switch from those to this one, uninstall the app first.
+The APK is signed with a key of your own, made the first time in `~/.config/switchboard-mobile/`. Keep a copy of that folder: an update must be signed with the same key. The APK of a GitHub release is signed with this key too (see the [one-time setup](#one-time-setup-android)), so the two install over each other. The stores sign with other keys, so to switch from a store build to this one, uninstall the app first.
 
 It needs JDK 17 and the Android SDK, as the Google Play script does. The APK is for arm64 phones, which is nearly all of them; for others, set `ANDROID_ABIS` (for example `ANDROID_ABIS=armeabi-v7a,arm64-v8a`).

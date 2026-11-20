@@ -17,8 +17,10 @@
 #
 # The signing key is made the first time, in ~/.config/switchboard-mobile/
 # (outside the repository): keep a copy of it. An update must be signed with
-# the same key, and the APKs from CI and the stores are signed with other keys,
-# so switching from one to the other means uninstalling the app first.
+# the same key. The Release workflow signs with this key too, from the
+# repository's secrets (it puts it where this script looks, through
+# XDG_CONFIG_HOME), so its APK and this one install over each other; the
+# stores sign with other keys, so switching to one means uninstalling first.
 #
 # Needs JDK 17 and the Android SDK (ANDROID_HOME).
 source "$(dirname "$0")/release-common.sh"

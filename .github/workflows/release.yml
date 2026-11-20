@@ -1,0 +1,255 @@
+name: Release
+
+# A version tag builds both apps and puts the builds in a draft GitHub release:
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# - macOS: a dmg and a zip for Apple silicon and for Intel, signed ad hoc
+#   (no Apple Developer ID), as a build made on a Mac with npm run build:mac.
+# - Windows: an installer for x64 and for arm64, unsigned.
+# - Linux: an AppImage, a deb and a pacman package, x64.
+# - Android: an APK made as scripts/build-apk.sh makes it on a Mac (expo
+#   prebuild and Gradle, no EAS), signed with the key in the
+#   ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets.
+# - No iOS: without an Apple Developer account there is nothing to sign it.
+#
+# The tag must be the version both apps already carry (the two package.json
+# and app.json): the release is the commit that numbers them, so a tag that
+# does not match stops before any build. The tests, the typecheck and the
+# lint run first; a build starts only when they pass. The release stays a
+# draft until it is published on GitHub. Local builds are untouched: they are
+# made by hand, when wanted (apps/desktop: npm run build:mac, apps/mobile:
+# npm run build:apk).
+#
+# Run from the Actions tab, it builds the branch it is given and keeps the
+# builds as workflow artifacts, without a release.
+#
+# One-time setup, for the APK (apps/mobile/docs/releasing.md): the Actions
+# secrets ANDROID_KEYSTORE_BASE64 (the keystore, in base64) and
+# ANDROID_KEYSTORE_PASSWORD (its password, also the key's).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: version and tests
+    # On a Mac, where the desktop's tests are written and run.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The tag is the version of both apps
+        id: version
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          version=$(node -p 'require("./apps/desktop/package.json").version')
+          mobile=$(node -p 'require("./apps/mobile/package.json").version')
+          app=$(node -p 'require("./apps/mobile/app.json").expo.version')
+          if [ "$mobile" != "$version" ] || [ "$app" != "$version" ]; then
+            echo "::error::The apps carry different versions: desktop $version, mobile package.json $mobile, app.json $app."
+            exit 1
+          fi
+          if [ -n "$TAG" ]; then
+            if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag $TAG is not v<MAJOR>.<MINOR>.<PATCH>."
+              exit 1
+            fi
+            if [ "$TAG" != "v$version" ]; then
+              echo "::error::Tag $TAG does not match the version the apps carry ($version). Tag the commit that numbers them v$version."
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            apps/mobile/package-lock.json
+
+      # The desktop's install fetches Electron and rebuilds better-sqlite3 for
+      # it: its database tests run under Electron as Node.
+      - name: Install
+        run: |
+          npm ci --prefix apps/desktop
+          npm ci --prefix apps/mobile
+
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+
+  desktop:
+    name: desktop · ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            args: --mac --arm64 --x64
+          - name: Windows
+            os: windows-latest
+            args: --win --x64 --arm64
+          - name: Linux
+            os: ubuntu-latest
+            args: --linux --x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # The pacman package is made with bsdtar.
+      - name: Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+
+      # postinstall rebuilds the native modules (better-sqlite3, node-pty)
+      # for Electron; electron-builder rebuilds them again for each arch.
+      - run: npm ci
+
+      - run: npm run bundle
+
+      - name: Build
+        env:
+          ARGS: ${{ matrix.args }}
+          # No Apple Developer ID: the app is signed ad hoc (identity "-" in
+          # package.json), as on a Mac without one.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ github.token }}
+        run: npx electron-builder $ARGS --publish never
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.name }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/*.pacman
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      # All of the history: the version code is the number of commits, as in
+      # a local build, so a newer APK installs over an older one.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::The ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets are missing. See the one-time setup in apps/mobile/docs/releasing.md."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: npm ci
+
+      # Where scripts/build-apk.sh looks for the key, so it signs with it
+      # rather than making a new one.
+      - name: Put the signing key in place
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keys="$RUNNER_TEMP/config/switchboard-mobile"
+          mkdir -p "$keys"
+          chmod 700 "$keys"
+          printf '%s' "$KEYSTORE" | base64 -d > "$keys/android-apk.keystore"
+          (umask 077 && printf '%s' "$PASSWORD" > "$keys/android-apk.password")
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/config" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          export JAVA_HOME_17="$JAVA_HOME"
+          bash scripts/build-apk.sh "$VERSION"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: apps/mobile/dist/*.apk
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: [check, desktop, android]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.check.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<NOTES
+          Switchboard Evolution ${VERSION}, the desktop app and the phone app.
+
+          - **macOS**: the dmg for Apple silicon (arm64) or Intel (x64). The app is not signed with an Apple Developer ID: the first time, open it with right-click › Open, or run \`xattr -dr com.apple.quarantine "/Applications/Switchboard Evolution.app"\`.
+          - **Windows**: the installer for x64 or arm64. It is not signed: on the SmartScreen warning choose More info › Run anyway.
+          - **Linux**: the AppImage, the deb or the pacman package.
+          - **Android**: install the APK on the phone (allow installs from this source when asked). It installs over an APK built on your computer with the same key.
+          NOTES
+          gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
+            --title "Switchboard Evolution $VERSION" --notes-file notes.md dist/*

@@ -5,8 +5,7 @@
 # `eas build --local` (the `production` profile in eas.json), then
 # `eas submit` uploads it. Both commands run interactively, so the first time
 # EAS asks for what it is missing (signing keys, store logins) and keeps it.
-# The signing keys live on EAS, so a build made here and one made in CI are
-# signed alike. See docs/releasing.md.
+# The store signing keys live on EAS. See docs/releasing.md.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
