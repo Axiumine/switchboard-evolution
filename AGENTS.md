@@ -15,6 +15,7 @@ The desktop app started from Switchboard (doctly/switchboard), with its own feat
 - `scripts/upstream-sync.sh`, run on `master`, brings in later upstream commits with a subtree merge (`git merge -X subtree=apps/desktop`) and moves `main` to upstream. The weekly `.github/workflows/upstream-sync.yml` runs it and opens a pull request to `master`, or an issue when there are conflicts.
 - Changes for Doctly go as pull requests from the fork vivi7/switchboard (remote `fork`), on branches made from `main`; see the README, "Upstream".
 - This repository is the only place both apps are developed. The old repositories (the fork's `master` and switchboard-mobile) are archives: nothing is carried over from them any more.
+- Both apps share one version: `apps/desktop/package.json`, `apps/mobile/package.json` and `apps/mobile/app.json` (and the two `package-lock.json`) always carry the same number, and a release tags `vX.Y.Z` on `master`.
 
 ## Rules
 

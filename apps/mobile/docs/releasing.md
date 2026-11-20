@@ -12,7 +12,7 @@ Push a tag. The tag is the version and the instruction:
 git tag v1.2.3 && git push origin v1.2.3
 ```
 
-`1.2.3` becomes `expo.version` in the build (app.json in the repository keeps its placeholder). The build number belongs to EAS (`appVersionSource: remote` with `autoIncrement`), so it is never part of the tag.
+`1.2.3` becomes `expo.version` in the build (in the repository, app.json holds the current version). The build number belongs to EAS (`appVersionSource: remote` with `autoIncrement`), so it is never part of the tag.
 
 When the builds finish, a **draft** GitHub release holds the Android APK and the iOS IPA. Publishing it is up to you, on GitHub.
 

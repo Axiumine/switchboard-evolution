@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.6.6 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.7.0 (November 2026).
 
 ## At a glance
 
@@ -27,13 +27,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 1–4 Nov | Fork 1.x | Phone access, Internet tunnels, a version of its own, kept in step with the mobile app. |
 | 13 Nov | OmniboardV 1.5.0 to 1.6.5 | An app of its own: own name, app id and icon. It installs next to the official Switchboard. |
 | 16 Nov | **Switchboard Evolution** 1.6.6 | The final name, and this monorepo with the desktop and the mobile app. |
+| 20 Nov | Switchboard Evolution 1.7.0 | One version for the desktop and the phone app, and the repository goes public. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own, far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.7.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
