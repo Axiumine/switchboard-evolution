@@ -10,11 +10,11 @@ import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import type { Project } from '@/projects/model';
 import { useOpenSession } from '@/projects/open-session';
-import { relativeTime, sessionTitle, type Session } from '@/sessions/model';
+import { relativeTime, type Session } from '@/sessions/model';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import {
-  FILTERS, folderFor, plural, prunedText, rowPath, shortPath, SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeTime,
+  FILTERS, folderFor, plural, prunedText, rowPath, runningSessionChoices, shortPath, SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeTime,
   type Badge, type PrunePreview, type SortOrder, type Worktree, type WorktreeFilter, type WorktreeRepository,
 } from '@/worktrees/model';
 import {
@@ -25,10 +25,11 @@ import { useTabScroll } from '../useTabScroll';
 
 type Harness = { id: string; label: string; enabled: boolean };
 
-/** Which sheet is open: a worktree's, its sessions', a repository's, which repository, the order or the filter. */
+/** Which sheet is open: a worktree's, a new session's, its running sessions', a repository's, which repository, the order or the filter. */
 type Menu =
   | { kind: 'row'; repo: WorktreeRepository; wt: Worktree }
   | { kind: 'session'; wt: Worktree }
+  | { kind: 'running'; wt: Worktree }
   | { kind: 'repo'; repo: WorktreeRepository }
   | { kind: 'pick'; then: 'merged' | 'prune' }
   | { kind: 'sort' }
@@ -81,6 +82,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   const order: SortOrder = settings?.sortOrder || 'default';
   const collapsed = settings?.collapsedGroups || [];
   const running = useRunningByWorktree(repositories);
+  const liveStates = useConnection((s) => s.live);
   const groups = useMemo(() => visibleRepositories(repositories || [], query, order, filter, running), [repositories, query, order, filter, running]);
   const usable = (repositories || []).filter((repo) => !repo.error);
   const clis = (harnesses.data || []).filter((h) => h.enabled);
@@ -183,10 +185,14 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
 
   const openChanges = (wt: Worktree) => router.push({ pathname: '/worktrees/changes', params: { projectId: pid, path: wt.path } });
 
+  /** The sessions running in a worktree, from its "N running": a tap opens one. */
+  const runningOptions = (wt: Worktree): SheetOption[] => runningSessionChoices(running.get(wt.path) || [], liveStates)
+    .map((choice) => ({ label: choice.title, hint: choice.hint, onPress: () => openSession(choice.session) }));
+
   const rowOptions = (repo: WorktreeRepository, wt: Worktree): SheetOption[] => {
     const options: SheetOption[] = [];
-    for (const session of running.get(wt.path) || []) {
-      options.push({ label: `Open “${sessionTitle(session)}”`, hint: 'running here', onPress: () => openSession(session) });
+    for (const choice of runningSessionChoices(running.get(wt.path) || [], liveStates)) {
+      options.push({ label: `Open “${choice.title}”`, hint: choice.hint, onPress: () => openSession(choice.session) });
     }
     if (wt.exists) options.push({ label: 'New session…', hint: 'Claude, Codex or a terminal here', onPress: () => setMenu({ kind: 'session', wt }) });
     if (canChanges && canShowChanges(wt)) options.push({ label: 'Uncommitted and unpushed…', hint: 'what removing it would lose', onPress: () => openChanges(wt) });
@@ -230,6 +236,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
 
   const menuTitle = !menu ? '' : menu.kind === 'row' ? worktreeLabel(menu.wt)
     : menu.kind === 'session' ? `New session in ${worktreeLabel(menu.wt)}`
+    : menu.kind === 'running' ? `Open a session running in ${worktreeLabel(menu.wt)}`
     : menu.kind === 'repo' ? menu.repo.name
     : menu.kind === 'pick' ? 'Repository'
     : menu.kind === 'filter' ? 'Show worktrees'
@@ -238,6 +245,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
     if (!menu) return [];
     if (menu.kind === 'row') return rowOptions(menu.repo, menu.wt);
     if (menu.kind === 'session') return sessionOptions(menu.wt);
+    if (menu.kind === 'running') return runningOptions(menu.wt);
     if (menu.kind === 'repo') return repoOptions(menu.repo);
     if (menu.kind === 'pick') {
       const then = menu.then;
@@ -366,6 +374,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
               live={running.get(wt.path) || []}
               onPress={() => setMenu({ kind: 'row', repo, wt })}
               onSession={() => setMenu({ kind: 'session', wt })}
+              onRunning={() => setMenu({ kind: 'running', wt })}
               onChanges={canChanges && canShowChanges(wt) ? () => openChanges(wt) : undefined}
             />
           ))}
@@ -383,7 +392,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
         refreshControl={pull}
       >
         {body}
-        {repositories?.length ? <Text style={styles.footer}>Tap a worktree for its actions; the git button shows what is not committed or pushed, + starts a session in it. Pull down to read them again.</Text> : null}
+        {repositories?.length ? <Text style={styles.footer}>Tap a worktree for its actions; “running” lists its sessions to open one, the git button shows what is not committed or pushed, + starts a session in it. Pull down to read them again.</Text> : null}
       </ScrollView>
 
       <Sheet visible={!!menu} title={menuTitle} options={menuOptions()} onClose={() => setMenu(null)} />
@@ -400,8 +409,10 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   );
 }
 
-function WorktreeRow({ wt, order, path, live, onPress, onSession, onChanges }: {
+function WorktreeRow({ wt, order, path, live, onPress, onSession, onRunning, onChanges }: {
   wt: Worktree; order: SortOrder; path: string; live: Session[]; onPress: () => void; onSession: () => void;
+  /** Lists the sessions running here, to open one. */
+  onRunning: () => void;
   /** Opens the worktree's uncommitted files and unpushed commits; none from an older desktop. */
   onChanges?: () => void;
 }) {
@@ -443,7 +454,18 @@ function WorktreeRow({ wt, order, path, live, onPress, onSession, onChanges }: {
         {status.length || live.length ? (
           <View style={styles.rowStatus}>
             {status.map((s) => <Text key={s.text} style={[styles.statusText, { color: s.color }]}>{s.text}</Text>)}
-            {live.length ? <View style={styles.live}><Text style={styles.liveText}>{live.length} running</Text></View> : null}
+            {live.length ? (
+              <Pressable
+                onPress={onRunning}
+                hitSlop={8}
+                style={({ pressed }) => [styles.live, pressed && styles.livePressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`${live.length} running, open one`}
+              >
+                <Text style={styles.liveText}>{live.length} running</Text>
+                <Ionicons name="chevron-down" size={11} color={colors.running} />
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
         {wt.locked && wt.lockReason ? <Text style={styles.lockReason} numberOfLines={1}>Locked: {wt.lockReason}</Text> : null}
@@ -557,7 +579,8 @@ const styles = StyleSheet.create({
   lockReason: { color: colors.attention, fontSize: 11.5, marginTop: 2 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
   badgeText: { fontSize: 10.5, fontWeight: '600' },
-  live: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8, backgroundColor: 'rgba(76,175,143,0.16)' },
+  live: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(76,175,143,0.35)', backgroundColor: 'rgba(76,175,143,0.16)' },
+  livePressed: { backgroundColor: 'rgba(76,175,143,0.3)' },
   liveText: { color: colors.running, fontSize: 11, fontWeight: '600' },
   rowButton: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   pressed: { backgroundColor: colors.surface },

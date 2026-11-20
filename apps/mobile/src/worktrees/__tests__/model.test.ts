@@ -3,7 +3,7 @@ import { expect, test } from '@jest/globals';
 import type { LiveState, Session } from '@/sessions/model';
 import {
   baseChoices, createSpec, createdText, existingChoices, FILTERS, filterMatches, findWorktree, folderFor, formRef, mergedChoices, parentFolder, patternsList, patternsText,
-  previewTemplate, prunedText, refFolderName, remoteLocalName, removeReady, rowPath, sessionsByWorktree, shortPath, sortWorktrees, startPointChoices,
+  previewTemplate, prunedText, refFolderName, remoteLocalName, removeReady, rowPath, runningSessionChoices, sessionActivity, sessionsByWorktree, shortPath, sortWorktrees, startPointChoices,
   SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches, worktreeTime,
   type Branches, type CreateForm, type Worktree, type WorktreeRepository,
 } from '../model';
@@ -257,4 +257,25 @@ test('a worktree is found by its path or the one the project stored, and matched
   expect(folderFor([{ path: '/w/app' }], alpha)).toBeNull();
   expect(parentFolder('/w/app.worktrees/beta/')).toBe('/w/app.worktrees');
   expect(parentFolder('/w')).toBe('/');
+});
+
+test('the sessions running in a worktree, the ones that need you first, with their CLI, state and time', () => {
+  const now = Date.parse('2026-11-20T12:00:00Z');
+  const sessions: Session[] = [
+    { sessionId: 'a', projectPath: '/w/a', name: 'Fix the cart', runtime: 'claude', modified: '2026-11-20T11:55:00Z' },
+    { sessionId: 'b', projectPath: '/w/a', name: 'Review', runtime: 'codex', modified: '2026-11-20T10:00:00Z' },
+    { sessionId: 'c', projectPath: '/w/a', type: 'terminal', modified: '2026-11-20T11:59:00Z' },
+  ];
+  const live = {
+    a: { ...running, busy: true },
+    b: { ...running, attention: true },
+    c: running,
+  };
+  const choices = runningSessionChoices(sessions, live, now);
+  expect(choices.map((c) => c.title)).toEqual(['Review', 'Fix the cart', 'Terminal']);
+  expect(choices[0].hint).toMatch(/^Codex · Needs you · /);
+  expect(choices[1].hint).toMatch(/^Claude · Working · /);
+  expect(choices[2].hint).toMatch(/^Terminal · Open · /);
+  expect(sessionActivity(undefined)).toBe('Open');
+  expect(sessionActivity({ ...running, starting: true })).toBe('Starting');
 });

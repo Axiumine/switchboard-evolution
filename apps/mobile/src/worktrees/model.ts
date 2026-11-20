@@ -4,7 +4,7 @@
 // runs on the computer (worktrees.js), through the channels remote-worktrees.js
 // lets a phone call; this file only shapes what comes back and what goes out.
 
-import type { LiveState, Session } from '@/sessions/model';
+import { cliLabel, relativeTime, sessionTitle, type LiveState, type Session } from '@/sessions/model';
 
 export type WorktreeKind = 'main' | 'switchboard' | 'claude' | 'codex' | 'classic' | 'other';
 
@@ -332,6 +332,34 @@ export function sessionsByWorktree(repositories: WorktreeRepository[], sessions:
     byPath.get(home[1])!.push(session);
   }
   return byPath;
+}
+
+/** What a running session is doing, in the words of the desktop's list. */
+export function sessionActivity(state: LiveState | undefined): string {
+  if (state?.attention) return 'Needs you';
+  if (state?.starting) return 'Starting';
+  if (state?.busy) return 'Working';
+  return 'Open';
+}
+
+const ACTIVITY_ORDER = ['Needs you', 'Working', 'Starting', 'Open'];
+
+export type RunningChoice = { session: Session; title: string; hint: string };
+
+/**
+ * The sessions running in a worktree, as the desktop lists them from the row's
+ * "N running": the ones that need you first, then the newest; each with its
+ * CLI, what it is doing and when it last spoke.
+ */
+export function runningSessionChoices(sessions: Session[], live: Record<string, LiveState>, now = Date.now()): RunningChoice[] {
+  const rank = (session: Session) => ACTIVITY_ORDER.indexOf(sessionActivity(live[session.sessionId]));
+  return [...sessions]
+    .sort((a, b) => rank(a) - rank(b) || String(b.modified || '').localeCompare(String(a.modified || '')))
+    .map((session) => {
+      const when = session.modified || session.created;
+      const hint = [cliLabel(session), sessionActivity(live[session.sessionId]), when ? relativeTime(when, now) : ''].filter(Boolean).join(' · ');
+      return { session, title: sessionTitle(session), hint };
+    });
 }
 
 export type Badge = { label: string; tone: 'kind' | 'project' | 'plain' | 'locked' | 'missing'; help: string };
