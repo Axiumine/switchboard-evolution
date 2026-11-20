@@ -25,6 +25,7 @@ The desktop app started from Switchboard (doctly/switchboard), with its own feat
 - Keep the mobile app's TypeScript types in step with the desktop's remote API (`apps/desktop/remote-api.js`) and the protocol version checked in the `hello` handshake.
 - Some names are data or protocol values and stay as they are until a change moves them on purpose: the `~/.switchboard` data folder, `SWITCHBOARD_DATA_DIR`, the `'switchboard'` worktree kind, `usage.switchboard`, and the `<!-- switchboard:managed -->` block in project files. Pairing links use `switchboard-e://` (since 1.6.6); the phone app still reads the old `switchboard://` ones.
 - Run the desktop against a data folder of its own, never the real one: `npm run electron-dev` in `apps/desktop` (it sets `SWITCHBOARD_DATA_DIR=~/.switchboard-dev`, which also keeps it apart from an installed Switchboard Evolution).
+- Every Mac and Linux build carries herdr-core, which keeps sessions running when the app quits (`apps/desktop/scripts/after-pack-herdr.js`, pinned in `HC_VERSION`). A herdr-core installed on the computer still comes first; the one in the app is the fallback. Before a release, and whenever you touch the desktop build, check https://releases.herdr.dev/core/latest.json: when it names a newer version (every build also says so, as a warning in GitHub Actions), update `HC_VERSION`, then check that the new app picks up the sessions an older herdr-core kept running before you release it.
 
 ## Commands
 

@@ -12,6 +12,11 @@
 //
 // A build that cannot get it stops, rather than ship an app that loses its
 // sessions. SWITCHBOARD_SKIP_HC=1 builds without it, on purpose.
+//
+// Each build also asks releases.herdr.dev for its latest herdr-core and says
+// so when it is newer than HC_VERSION (a warning in GitHub Actions): then
+// update HC_VERSION (AGENTS.md, "Rules"). A herdr-core installed on the Mac
+// still comes before the one in the app (hc-engine.js locateHc).
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -45,6 +50,31 @@ function cacheRoot() {
   return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'switchboard-e', 'hc');
 }
 
+/** True when version `a` ('0.1.22') is newer than `b`. */
+function isNewerVersion(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+}
+
+/** The latest herdr-core on releases.herdr.dev, or null when it cannot be read: it never stops a build. */
+async function latestHerdrCore() {
+  try {
+    const res = await fetch(`${RELEASES}/core/latest.json`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    const { version } = await res.json();
+    return typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+// Asked once per build, not once per packed arch.
+let latestAsked = null;
+
 async function download(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
@@ -77,8 +107,8 @@ async function fetchHerdrCore(target, { version = HC_VERSION, cache = cacheRoot(
   return out;
 }
 
-/** Copy herdr-core into the packed app; `fetchBinary` is fetchHerdrCore, replaced in tests. */
-async function afterPack(context, { fetchBinary = fetchHerdrCore, env = process.env, log = console.log } = {}) {
+/** Copy herdr-core into the packed app; `fetchBinary` and `latest` are replaced in tests. */
+async function afterPack(context, { fetchBinary = fetchHerdrCore, latest, env = process.env, log = console.log } = {}) {
   const platform = context.electronPlatformName;
   const arch = ARCH_NAMES[context.arch] || String(context.arch);
   if (env.SWITCHBOARD_SKIP_HC === '1') {
@@ -102,9 +132,14 @@ async function afterPack(context, { fetchBinary = fetchHerdrCore, env = process.
   fs.copyFileSync(bin, dest);
   fs.chmodSync(dest, 0o755);
   log(`  • herdr-core ${HC_VERSION} (${target}) in ${path.relative(context.appOutDir, dest)}`);
+  const newest = await (latest ? latest() : (latestAsked ||= latestHerdrCore()));
+  if (newest && isNewerVersion(newest, HC_VERSION)) {
+    const message = `herdr-core ${newest} is out, the app carries ${HC_VERSION}: update HC_VERSION in apps/desktop/scripts/after-pack-herdr.js`;
+    log(env.GITHUB_ACTIONS === 'true' ? `::warning::${message}` : `  • ${message}`);
+  }
   return dest;
 }
 
 module.exports = afterPack;
 module.exports.default = afterPack;
-Object.assign(module.exports, { afterPack, herdrTarget, resourcesDir, fetchHerdrCore, HC_VERSION });
+Object.assign(module.exports, { afterPack, herdrTarget, resourcesDir, fetchHerdrCore, isNewerVersion, latestHerdrCore, HC_VERSION });

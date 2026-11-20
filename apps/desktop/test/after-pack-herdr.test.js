@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { afterPack, herdrTarget, resourcesDir } = require('../scripts/after-pack-herdr');
+const { afterPack, herdrTarget, resourcesDir, isNewerVersion, HC_VERSION } = require('../scripts/after-pack-herdr');
 
 function packed(platform, arch) {
   const appOutDir = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-'));
@@ -33,7 +33,7 @@ test('resourcesDir is where process.resourcesPath points in the packed app', () 
 test('afterPack puts the arch\'s herdr-core in the app as bin/herdr-core, executable', async () => {
   const { context, appOutDir, bin } = packed('darwin', 3);
   const asked = [];
-  const dest = await afterPack(context, { fetchBinary: async (target) => { asked.push(target); return bin; }, env: {}, log: () => {} });
+  const dest = await afterPack(context, { fetchBinary: async (target) => { asked.push(target); return bin; }, latest: async () => null, env: {}, log: () => {} });
   assert.deepEqual(asked, ['macos-aarch64']);
   assert.equal(dest, path.join(appOutDir, 'Switchboard Evolution.app', 'Contents', 'Resources', 'bin', 'herdr-core'));
   assert.equal(fs.statSync(dest).mode & 0o111, 0o111);
@@ -51,4 +51,26 @@ test('afterPack leaves Windows without herdr-core', async () => {
   let fetched = false;
   assert.equal(await afterPack(context, { fetchBinary: async () => { fetched = true; }, env: {}, log: () => {} }), null);
   assert.equal(fetched, false);
+});
+
+test('isNewerVersion compares herdr-core versions number by number', () => {
+  assert.equal(isNewerVersion('0.1.22', '0.1.21'), true);
+  assert.equal(isNewerVersion('0.2.0', '0.1.99'), true);
+  assert.equal(isNewerVersion('0.1.10', '0.1.9'), true);
+  assert.equal(isNewerVersion('0.1.21', '0.1.21'), false);
+  assert.equal(isNewerVersion('0.1.20', '0.1.21'), false);
+});
+
+test('afterPack says when releases.herdr.dev has a newer herdr-core, as a warning in GitHub Actions', async () => {
+  const { context, bin } = packed('darwin', 3);
+  const lines = [];
+  const options = { fetchBinary: async () => bin, latest: async () => '9.9.9', log: (line) => lines.push(line) };
+  await afterPack(context, { ...options, env: {} });
+  await afterPack(context, { ...options, env: { GITHUB_ACTIONS: 'true' } });
+  assert.match(lines.find(l => l.includes('9.9.9')), new RegExp(`herdr-core 9\\.9\\.9 is out, the app carries ${HC_VERSION.replace(/\./g, '\\.')}`));
+  assert.ok(lines.some(l => l.startsWith('::warning::herdr-core 9.9.9 is out')));
+  lines.length = 0;
+  await afterPack(context, { ...options, latest: async () => HC_VERSION, env: {} });
+  await afterPack(context, { ...options, latest: async () => null, env: {} });
+  assert.equal(lines.filter(l => l.includes('is out')).length, 0);
 });
