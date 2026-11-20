@@ -2,6 +2,8 @@
 // Manages the global and project settings viewer UI.
 
 (function () {
+  // Where the app's source, releases and issues are (Settings › Updates).
+  const SWITCHBOARD_REPOSITORY_URL = 'https://github.com/vivi7/switchboard-evolution';
   const settingsViewer = document.getElementById('settings-viewer');
   const settingsViewerTitle = document.getElementById('settings-viewer-title');
   const settingsViewerBody = document.getElementById('settings-viewer-body');
@@ -362,6 +364,15 @@
             <button class="settings-check-updates-btn" id="sv-check-updates-btn">Check for Updates</button>
           </div>
         </div>
+        <div class="settings-field">
+          <div class="settings-field-info">
+            <span class="settings-label">Source code</span>
+            <div class="settings-description">Switchboard Evolution on GitHub: the desktop and the phone app, releases and issues.</div>
+          </div>
+          <div class="settings-field-control">
+            <button class="settings-check-updates-btn" id="sv-github-btn" title="${SWITCHBOARD_REPOSITORY_URL}">Open on GitHub</button>
+          </div>
+        </div>
       </div>` : ''}
 
       <div class="settings-btn-row">
@@ -529,6 +540,9 @@
     settingsViewerBody.querySelector('#sv-cancel-btn').addEventListener('click', () => {
       closeSettingsViewer();
     });
+
+    const githubBtn = settingsViewerBody.querySelector('#sv-github-btn');
+    if (githubBtn) githubBtn.addEventListener('click', () => window.api.openExternal(SWITCHBOARD_REPOSITORY_URL));
 
     // Check for updates button + current version + inline status
     const checkUpdatesBtn = settingsViewerBody.querySelector('#sv-check-updates-btn');

@@ -1,9 +1,15 @@
+import Constants from 'expo-constants';
+import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { RoutePicker } from '@/components/RoutePicker';
 import { useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
+
+const REPOSITORY = 'https://github.com/vivi7/switchboard-evolution';
+/** This app's version as it was built (app.json's, embedded in the build). */
+const MOBILE_VERSION = Constants.expoConfig?.version ?? null;
 
 function describe(status: ReturnType<typeof useConnection.getState>['status']): string {
   switch (status.state) {
@@ -17,7 +23,9 @@ function describe(status: ReturnType<typeof useConnection.getState>['status']): 
 
 /**
  * The Settings tab: the paired computer with its dot (green while connected),
- * the way it is reached (local network, Cloudflare, ngrok), and forgetting it.
+ * the way it is reached (local network, Cloudflare, ngrok), the versions of
+ * the paired Switchboard Evolution and of this app side by side, the source
+ * code on GitHub, and forgetting the computer.
  */
 export default function SettingsScreen() {
   const desktop = useConnection((s) => s.desktop);
@@ -48,7 +56,28 @@ export default function SettingsScreen() {
         <Text style={styles.status} selectable>{describe(status)}</Text>
       </View>
       <RoutePicker internet={desktop.internet} value={desktop.route ?? 'lan'} onChange={setRoute} style={styles.card} />
-      {hello ? <Row label="Switchboard Evolution" value={`version ${hello.appVersion}`} /> : null}
+      <View style={styles.versions}>
+        <View style={styles.half}>
+          <Text style={styles.label}>Paired Switchboard Evolution</Text>
+          {hello
+            ? <Text style={styles.value} selectable>{`version ${hello.appVersion}`}</Text>
+            : <Text style={[styles.value, styles.faint]}>not connected</Text>}
+        </View>
+        <View style={styles.divider} />
+        <View style={styles.half}>
+          <Text style={styles.label}>This Switchboard Mobile</Text>
+          <Text style={styles.value} selectable>{MOBILE_VERSION ? `version ${MOBILE_VERSION}` : 'unknown'}</Text>
+        </View>
+      </View>
+      <Pressable
+        onPress={() => { Linking.openURL(REPOSITORY).catch(() => {}); }}
+        style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+        accessibilityRole="link"
+        accessibilityLabel="Source code on GitHub"
+      >
+        <Text style={styles.label}>Source code</Text>
+        <Text style={[styles.value, styles.link]}>github.com/vivi7/switchboard-evolution</Text>
+      </Pressable>
       {hello ? <Row label="This phone on the computer" value={hello.device.name} /> : null}
       <Row label="Addresses" value={`${desktop.addresses.join(', ')} (port ${desktop.port})`} />
       <Row label="Paired" value={new Date(desktop.pairedAt).toLocaleString()} />
@@ -87,6 +116,13 @@ const styles = StyleSheet.create({
   status: { color: colors.textDim, fontSize: 13 },
   label: { color: colors.textFaint, fontSize: 12 },
   value: { color: colors.text, fontSize: 15 },
+  faint: { color: colors.textFaint },
+  link: { color: colors.accent },
+  pressed: { opacity: 0.7 },
+  // One card, two halves: the computer's version and this app's.
+  versions: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 10, padding: spacing.md, gap: spacing.md },
+  half: { flex: 1, minWidth: 0, gap: 3 },
+  divider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: colors.border },
   button: { backgroundColor: colors.surface, borderRadius: 10, padding: spacing.md, alignItems: 'center', marginTop: spacing.sm },
   buttonText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
 });
