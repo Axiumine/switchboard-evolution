@@ -6,6 +6,8 @@ name: Release
 #
 # - macOS: a dmg and a zip for Apple silicon and for Intel, signed ad hoc
 #   (no Apple Developer ID), as a build made on a Mac with npm run build:mac.
+#   Every Mac and Linux app carries herdr-core (scripts/after-pack-herdr.js),
+#   which keeps sessions running when the app quits.
 # - Windows: an installer for x64 and for arm64, unsigned.
 # - Linux: an AppImage, a deb and a pacman package, x64.
 # - Android: an APK made as scripts/build-apk.sh makes it on a Mac (expo
@@ -105,8 +107,10 @@ jobs:
           - name: macOS
             os: macos-latest
             args: --mac --arm64 --x64
+          # windows-latest has Visual Studio 2026, which the node-gyp that
+          # rebuilds node-pty does not find yet.
           - name: Windows
-            os: windows-latest
+            os: windows-2022
             args: --win --x64 --arm64
           - name: Linux
             os: ubuntu-latest
@@ -145,6 +149,22 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ github.token }}
         run: npx electron-builder $ARGS --publish never
+
+      # scripts/after-pack-herdr.js puts herdr-core in each Mac and Linux app,
+      # or stops the build; an app without it would lose its sessions on quit.
+      - name: herdr-core is in the app
+        if: runner.os != 'Windows'
+        run: |
+          shopt -s nullglob
+          apps=(dist/mac*/*.app/Contents/Resources dist/linux-unpacked/resources)
+          [ ${#apps[@]} -gt 0 ] || { echo "::error::No packed app found in dist."; exit 1; }
+          for resources in "${apps[@]}"; do
+            if [ ! -x "$resources/bin/herdr-core" ]; then
+              echo "::error::$resources/bin/herdr-core is missing."
+              exit 1
+            fi
+            echo "$resources/bin/herdr-core"
+          done
 
       - uses: actions/upload-artifact@v7
         with:

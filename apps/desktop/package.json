@@ -4,6 +4,7 @@
   "version": "1.8.0",
   "private": true,
   "description": "Switchboard Evolution: a desktop app for running and managing coding-agent sessions across projects",
+  "homepage": "https://github.com/vivi7/switchboard-evolution",
   "author": "Vincenzo Favara",
   "license": "MIT",
   "main": "main.js",
@@ -92,6 +93,7 @@
       "node_modules/node-pty/**"
     ],
     "publish": null,
+    "afterPack": "scripts/after-pack-herdr.js",
     "mac": {
       "target": [
         {
@@ -138,6 +140,7 @@
       "icon": "build/icons",
       "category": "Development",
       "executableName": "switchboard-e",
+      "maintainer": "vivi7 <vivi7@users.noreply.github.com>",
       "artifactName": "Switchboard-Evolution-${version}-${arch}.${ext}"
     },
     "pacman": {

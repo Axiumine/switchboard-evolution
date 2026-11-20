@@ -20,9 +20,9 @@ The **Release** workflow (`.github/workflows/release.yml`, at the root of the re
 
 | | What | Signed |
 | --- | --- | --- |
-| macOS | dmg and zip, Apple silicon (arm64) and Intel (x64) | ad hoc, without an Apple Developer ID |
+| macOS | dmg and zip, Apple silicon (arm64) and Intel (x64), with herdr-core | ad hoc, without an Apple Developer ID |
 | Windows | installer, x64 and arm64 | no |
-| Linux | AppImage, deb and pacman, x64 | no |
+| Linux | AppImage, deb and pacman, x64, with herdr-core | no |
 | Android | APK, arm64 | with your key, from the repository's secrets |
 
 When every build has finished, a **draft** GitHub release holds them all. Publishing it is up to you, on GitHub. If one build fails, no release is made; run the workflow again from the failed run once it is fixed.
