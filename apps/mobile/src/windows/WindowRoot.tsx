@@ -2,6 +2,7 @@ import '@/remote/random';
 
 import { QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -9,12 +10,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import ProcessesScreen from '@/app/(tabs)/processes';
 import StatsScreen from '@/app/(tabs)/stats';
+import { NoteEditor } from '@/components/notes/NoteEditor';
 import { useProject } from '@/projects/queries';
 import { queryClient } from '@/remote/query';
 import { colors } from '@/theme';
 import { ProjectWindow } from '@/windows/ProjectWindow';
-import { parseWindowSpec, windowTitle, type WindowSpec } from '@/windows/window-spec';
+import { parseWindowSpec, windowTitle, type WindowSpec, type WindowTab } from '@/windows/window-spec';
 import { WindowNavigation } from '@/windows/WindowNavigation';
+import { WindowTabs } from '@/windows/WindowTabs';
 
 /**
  * The root of a window of its own (modules/switchboard-window's
@@ -39,11 +42,18 @@ export function WindowRoot({ window }: { window?: string }) {
 }
 
 function Window({ spec }: { spec: WindowSpec }) {
-  const { project } = useProject(spec.kind === 'project' ? spec.projectId : undefined);
+  const { project } = useProject(spec.kind === 'project' || spec.kind === 'note' ? spec.projectId : undefined);
+  // A project's window can change tab in place: the one it was opened with is where it starts.
+  const [tab, setTab] = useState<WindowTab>(spec.kind === 'project' ? spec.tab : 'overview');
+  const shown: WindowSpec = spec.kind === 'project' ? { ...spec, tab } : spec;
   return (
-    <WindowNavigation title={windowTitle(spec, project?.name)}>
+    <WindowNavigation
+      title={windowTitle(shown, project?.name)}
+      tabs={spec.kind === 'project' ? <WindowTabs active={tab} onChange={setTab} /> : undefined}
+    >
       <View style={styles.fill}>
-        {spec.kind === 'project' ? <ProjectWindow projectId={spec.projectId} tab={spec.tab} /> : null}
+        {spec.kind === 'project' ? <ProjectWindow projectId={spec.projectId} tab={tab} onTab={setTab} /> : null}
+        {spec.kind === 'note' ? <NoteEditor projectId={spec.projectId} /> : null}
         {spec.kind === 'stats' ? <StatsScreen /> : null}
         {spec.kind === 'processes' ? <ProcessesScreen /> : null}
       </View>

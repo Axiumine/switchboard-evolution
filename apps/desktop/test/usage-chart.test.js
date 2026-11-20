@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   COLORS, formatBytes, formatDisk, formatPercent, memoryTotals, assignColors, memorySlices,
-  diskLevel, diskSlices, donutPaths, resourceStatus, ramLevel,
+  diskLevel, diskSlices, donutPaths, resourceStatus, ramLevel, memoryLevel, sessionMemory,
 } = require('../public/usage-chart');
 
 const GB = 1024 ** 3;
@@ -184,4 +184,19 @@ test('the status bar turns amber, then red, near the limits', () => {
   assert.deepEqual([tight.ramLevel, tight.diskLevel], ['mid', 'high']);
   assert.match(tight.title, /memory running low/);
   assert.match(tight.title, /disk almost full/);
+});
+
+test('memoryLevel turns amber from 1 GB and red from 2 GB, as the Task Manager bars', () => {
+  assert.equal(memoryLevel(0), 'low');
+  assert.equal(memoryLevel(GB - 1), 'low');
+  assert.equal(memoryLevel(GB), 'mid');
+  assert.equal(memoryLevel(2 * GB - 1), 'mid');
+  assert.equal(memoryLevel(2 * GB), 'high');
+});
+
+test('sessionMemory keeps the live sessions by id and leaves tasks out', () => {
+  const byId = sessionMemory(usage({ owners: [owner('a', 2), owner('b', 1, { kind: 'task' }), owner('c', 0.5), { kind: 'session', id: 'd' }] }));
+  assert.deepEqual([...byId.entries()], [['a', 2 * GB], ['c', 0.5 * GB]]);
+  assert.equal(sessionMemory(null).size, 0);
+  assert.equal(sessionMemory({}).size, 0);
 });

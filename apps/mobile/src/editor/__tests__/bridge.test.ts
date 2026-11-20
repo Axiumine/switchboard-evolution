@@ -30,14 +30,16 @@ describe('a call to the editor page', () => {
     expect(runInPage(call('load', 'x', 'y', undefined)).calls).toEqual([{ fn: 'load', args: ['x', 'y', undefined] }]);
     expect(runInPage(call('setEditable', true)).calls).toEqual([{ fn: 'setEditable', args: [true] }]);
     expect(runInPage(call('cursors', 'next')).calls).toEqual([{ fn: 'cursors', args: ['next'] }]);
+    expect(runInPage(call('setFontSize', 14)).calls).toEqual([{ fn: 'setFontSize', args: [14] }]);
     expect(runInPage(call('saved', 'a\nb')).calls).toEqual([{ fn: 'saved', args: ['a\nb'] }]);
     expect(runInPage(call('load', 'x', 'a.js', { line: null, wrap: false, base: 'old' })).calls).toEqual([{ fn: 'load', args: ['x', 'a.js', { line: null, wrap: false, base: 'old' }] }]);
   });
 });
 
 describe('a message from the editor page', () => {
-  it('reads the four kinds', () => {
+  it('reads the five kinds', () => {
     expect(parseMessage('{"type":"ready"}')).toEqual({ type: 'ready' });
+    expect(parseMessage('{"type":"changed"}')).toEqual({ type: 'changed' });
     expect(parseMessage('{"type":"loaded","extra":1}')).toEqual({ type: 'loaded' });
     expect(parseMessage('{"type":"state","dirty":true,"canUndo":true,"canRedo":false,"cursors":3}')).toEqual({ type: 'state', dirty: true, canUndo: true, canRedo: false, cursors: 3 });
     // A count that is missing or wrong is one cursor.

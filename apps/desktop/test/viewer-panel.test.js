@@ -4,9 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function setup() {
+function setup(options = {}) {
   const element = () => ({
-    style: {}, children: [], textContent: '',
+    style: { setProperty(name, value) { this[name] = value; } }, children: [], textContent: '',
     classList: { add() {}, remove() {}, toggle() {} },
     addEventListener(type, callback) { this[type] = callback; },
     setAttribute(name, value) { this[name] = value; },
@@ -15,28 +15,45 @@ function setup() {
     replaceChildren(...children) { this.children = children; },
   });
   const toolbar = { setTitle(title) { this.titleEl.textContent = title; }, setPath() {}, setWrapMode() {}, setPreviewMode() {} };
-  for (const key of ['el', 'titleEl', 'previewBtn', 'wrapBtn', 'saveBtn', 'gotoLineBtn', 'copyContentBtn', 'openExternalBtn', 'revealBtn', 'shareBtn']) toolbar[key] = element();
+  for (const key of ['el', 'titleEl', 'previewBtn', 'wrapBtn', 'saveBtn', 'gotoLineBtn', 'copyContentBtn', 'openExternalBtn', 'revealBtn', 'shareBtn', 'fontSmallerBtn', 'fontLargerBtn']) toolbar[key] = element();
+  toolbar.flashSave = () => { toolbar.flashes = (toolbar.flashes || 0) + 1; };
   const revoked = [];
   let nextUrl = 0;
   let saved = 0;
   const revealed = [];
   const alerts = [];
   const api = { watchFile() {}, unwatchFile() {}, revealFile: filePath => revealed.push(filePath) };
+  const stored = new Map();
+  const listeners = {};
   const context = vm.createContext({
-    document: { createElement: element }, localStorage: { getItem() { return null; } },
-    Uint8Array, Blob, atob, setTimeout, alert: message => alerts.push(message),
+    document: { createElement: element },
+    localStorage: { getItem: key => (stored.has(key) ? stored.get(key) : null), setItem: (key, value) => stored.set(key, String(value)) },
+    Uint8Array, Blob, atob, setTimeout, clearTimeout, alert: message => alerts.push(message),
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
     URL: { createObjectURL: () => `blob:${++nextUrl}`, revokeObjectURL: url => revoked.push(url) },
-    window: { api, JsoncParser: require('jsonc-parser'), createViewerToolbar: () => toolbar, createEditableViewer: (_el, content) => ({
-      state: { doc: { toString: () => content, length: content.length } },
-      dispatch({ changes }) { if (changes) { content = changes.insert; this.state.doc.length = content.length; } },
-      destroy() { this.destroyed = true; },
-    }) },
+    window: {
+      api, JsoncParser: require('jsonc-parser'), createViewerToolbar: () => toolbar,
+      addEventListener(type, callback) { (listeners[type] ||= []).push(callback); },
+      dispatchEvent(event) { for (const callback of listeners[event.type] || []) callback(event); },
+      createEditableViewer: (_el, content, _name, { onChange } = {}) => ({
+        state: { doc: { toString: () => content, length: content.length } },
+        // Like CodeMirror: every change of the text, typed or loaded, is an update.
+        dispatch({ changes }) { if (changes) { content = changes.insert; this.state.doc.length = content.length; onChange?.(); } },
+        requestMeasure() { this.measured = (this.measured || 0) + 1; },
+        destroy() { this.destroyed = true; },
+      }),
+    },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/json-reader.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/viewer-panel.js'), 'utf8'), context);
-  const panel = new context.window.ViewerPanel(element(), { language: 'auto', onSave: async () => { saved++; return { ok: true }; } });
+  const writes = [];
+  const panel = new context.window.ViewerPanel(element(), {
+    language: 'auto',
+    onSave: async (filePath, content) => { saved++; writes.push([filePath, content]); return { ok: true }; },
+    ...options,
+  });
   const media = { previewType: 'image', mimeType: 'image/png', base64: 'AAEC' };
-  return { panel, toolbar, revoked, api, media, revealed, alerts, saved: () => saved };
+  return { panel, toolbar, revoked, api, media, revealed, alerts, saved: () => saved, writes, stored, context };
 }
 
 test('the toolbar opens the shown file in its default app and reports failures', async () => {
@@ -286,4 +303,58 @@ test('the share button hands the shown file to the share menu, media included, a
   assert.deepEqual(alerts, ['The file does not exist']);
   panel.open('Nothing', '', '');
   assert.equal(toolbar.shareBtn.style.display, 'none');
+});
+
+test('A− and A+ size the text one pixel a step, within bounds, remembered for every editor', async () => {
+  const { panel, toolbar, stored, context } = setup();
+  panel.open('Notes', '/notes.md', '# Notes');
+  assert.equal(panel.container.style['--viewer-font-step'], '0');
+  await toolbar.fontLargerBtn.click();
+  await toolbar.fontLargerBtn.click();
+  assert.equal(panel.container.style['--viewer-font-step'], '2');
+  assert.equal(stored.get('viewerFontStep'), '2');
+  assert.ok(panel.editorView.measured >= 2);
+  for (let i = 0; i < 30; i++) await toolbar.fontSmallerBtn.click();
+  assert.equal(panel.container.style['--viewer-font-step'], '-4');
+  assert.equal(toolbar.fontSmallerBtn.disabled, true);
+  assert.equal(toolbar.fontLargerBtn.disabled, false);
+  // Another editor opened later starts at the size chosen.
+  const other = new context.window.ViewerPanel(toolbar.el, { language: 'auto' });
+  assert.equal(other.container.style['--viewer-font-step'], '-4');
+});
+
+test('with autosave an edit is saved once the typing stops, quietly, and never a loaded text', async () => {
+  const { panel, toolbar, writes } = setup({ autosaveMs: 5 });
+  panel.open('Note', '/note.md', '# Note');
+  assert.equal(panel.isDirty(), false);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(writes, []);
+  panel.editorView.dispatch({ changes: { from: 0, to: 6, insert: '# Note\nfirst' } });
+  panel.editorView.dispatch({ changes: { from: 0, to: 12, insert: '# Note\nfirst line' } });
+  assert.equal(panel.isDirty(), true);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(writes, [['/note.md', '# Note\nfirst line']]);
+  assert.equal(panel.isDirty(), false);
+  assert.equal(toolbar.flashes, undefined);
+});
+
+test('flush writes what is not saved yet at once, and nothing when it is saved', async () => {
+  const { panel, writes } = setup({ autosaveMs: 60_000 });
+  panel.open('Note', '/note.md', 'a');
+  await panel.flush();
+  assert.deepEqual(writes, []);
+  panel.editorView.dispatch({ changes: { from: 0, to: 1, insert: 'ab' } });
+  await panel.flush();
+  assert.deepEqual(writes, [['/note.md', 'ab']]);
+});
+
+test('without autosave an edit waits for Save, which still flashes', async () => {
+  const { panel, toolbar, writes } = setup();
+  panel.open('Code', '/app.js', 'a');
+  panel.editorView.dispatch({ changes: { from: 0, to: 1, insert: 'ab' } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(writes, []);
+  await panel._save();
+  assert.deepEqual(writes, [['/app.js', 'ab']]);
+  assert.equal(toolbar.flashes, 1);
 });

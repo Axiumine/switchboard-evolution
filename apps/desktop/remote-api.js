@@ -135,7 +135,7 @@ allow('get-project-plan', [isId]);
 allow('set-plan-item', [isId, isPlanFile, isLine, isBool, isString(2000)], { local: true });
 allow('edit-plan-item', [isId, isPlanFile, isLine, isItemText, isString(2000)], { local: true });
 allow('append-plan-item', [isId, isPlanFile, isItemText]);
-allow('create-project-file', [isId, oneOf('plan.md', 'plan-tracker.md', 'todos.md', 'memory.md'), optional(isString(2_000_000))]);
+allow('create-project-file', [isId, oneOf('plan.md', 'plan-tracker.md', 'todos.md', 'memory.md', 'note.md'), optional(isString(2_000_000))]);
 allow('save-project-brief', [isId, isString(2_000_000)]);
 
 // Files, inside a project's folders only (remote-files.js), and Claude's plans to read and save.

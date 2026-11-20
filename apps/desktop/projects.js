@@ -122,7 +122,8 @@ function foldersSection(folderPaths) {
 // parsed. Neither is read at the start of a session; the rules say to open
 // them only when the user brings the plan or the todos up. None of these
 // files is created up front: the agent makes them when it first needs them.
-const PROJECT_FILES = ['plan.md', 'plan-tracker.md', 'todos.md', 'memory.md'];
+// note.md is the user's own notes pad (the Note button), made when first opened.
+const PROJECT_FILES = ['plan.md', 'plan-tracker.md', 'todos.md', 'memory.md', 'note.md'];
 
 /** The one block Switchboard owns: title, folder, rules, attached folders. */
 function managedBlock(name, root, folderPaths = []) {

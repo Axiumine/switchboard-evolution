@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 import type { Rename } from '@/components/project/actions';
@@ -10,19 +10,22 @@ import { SettingsTab } from '@/components/project/tabs/SettingsTab';
 import { TextPrompt } from '@/components/TextPrompt';
 import { act, useMinute, useProject, useProjectPlan } from '@/projects/queries';
 import { colors } from '@/theme';
-import { openWindow } from '@/windows/open';
-import type { WindowTab } from '@/windows/window-spec';
+import { WINDOW_TABS, type WindowTab } from '@/windows/window-spec';
 
 /**
- * One tab of a project in a window of its own, as the project page shows it
- * (src/app/project/[id]/index.tsx), without the other tabs. What it opens
- * (a session, a file's screen) opens in the main window, as on the desktop.
+ * A tab of a project in a window of its own, as the project page shows it
+ * (src/app/project/[id]/index.tsx), with no tab bar: the window's header has
+ * the strip that changes `tab` (WindowTabs). A tab is built when first shown
+ * and kept, as the project page keeps its tabs. What it opens (a session, a
+ * file's screen) opens in the main window, as on the desktop.
  */
-export function ProjectWindow({ projectId, tab }: { projectId: string; tab: WindowTab }) {
+export function ProjectWindow({ projectId, tab, onTab }: { projectId: string; tab: WindowTab; onTab: (tab: WindowTab) => void }) {
   const { project, isLoading, refetch } = useProject(projectId);
   const plan = useProjectPlan(projectId);
   const now = useMinute();
   const [rename, setRename] = useState<Rename | null>(null);
+  const [visited, setVisited] = useState<WindowTab[]>([tab]);
+  if (!visited.includes(tab)) setVisited([...visited, tab]);
   const refresh = useCallback(() => Promise.all([refetch(), plan.refetch()]), [refetch, plan]);
   const run = async (method: string, params: unknown[], after?: () => void) => {
     try { await act(method, params); after?.(); } catch (err: any) { Alert.alert('That did not work', err.message); }
@@ -33,18 +36,20 @@ export function ProjectWindow({ projectId, tab }: { projectId: string; tab: Wind
     return <View style={styles.center}>{isLoading ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.empty}>This project is gone.</Text>}</View>;
   }
 
-  const body = {
+  const bodies: Record<WindowTab, ReactNode> = {
     overview: <OverviewTab project={project} now={now} run={run} onRename={setRename} onRefresh={refresh} />,
     plan: <PlanTab project={project} plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
     files: <FilesTab project={project} />,
-    git: <GitTab project={project} active />,
-    // Another tab chosen from here opens in a window of its own too.
-    settings: <SettingsTab project={project} now={now} run={run} onSelectTab={(next) => { if (next !== 'session') openWindow({ kind: 'project', projectId, tab: next }, project.name); }} />,
-  }[tab];
+    git: <GitTab project={project} active={tab === 'git'} />,
+    // Another tab chosen from here shows in this window; Session stays in the main one.
+    settings: <SettingsTab project={project} now={now} run={run} onSelectTab={(next) => { if (next !== 'session') onTab(next); }} />,
+  };
 
   return (
     <View style={styles.fill}>
-      {body}
+      {WINDOW_TABS.filter((key) => key === tab || visited.includes(key)).map((key) => (
+        <View key={key} style={[styles.fill, key !== tab && styles.hidden]}>{bodies[key]}</View>
+      ))}
       <TextPrompt
         visible={!!rename}
         title={rename?.kind === 'new-track' ? 'New track' : 'Rename'}
@@ -64,6 +69,7 @@ export function ProjectWindow({ projectId, tab }: { projectId: string; tab: Wind
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  hidden: { display: 'none' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { color: colors.textFaint },
 });

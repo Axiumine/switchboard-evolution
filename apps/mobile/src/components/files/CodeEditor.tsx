@@ -4,6 +4,7 @@ import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } fro
 
 import { call, parseMessage, type CursorAction, type EditorState } from '@/editor/bridge';
 import { EDITOR_HTML } from '@/editor/editor-html.generated';
+import { useEditorFont } from '@/editor/font';
 import { colors } from '@/theme';
 
 // react-native-webview types its class as WebView<P = undefined>, which makes
@@ -33,27 +34,36 @@ export type CodeEditorHandle = {
  * `line` marks a line and opens the file scrolled to it. A new `text` (the
  * saved file read back) shows that text and starts its history again. With
  * `base`, what differs from it is marked in the text as it is edited.
+ * The text size is the one all editors share (useEditorFont), or `fontSize`.
+ * `onChange` is called at every edit (not on a load), for autosave's timer:
+ * `onState` only hears of the first edit, as dirty does not change after it.
  */
-export function CodeEditor({ text, filename, editable, line, wrap = false, base, onState, ref }: {
+export function CodeEditor({ text, filename, editable, line, wrap = false, base, fontSize, onState, onChange, ref }: {
   text: string;
   filename: string;
   editable: boolean;
   line?: number;
   wrap?: boolean;
   base?: string;
+  fontSize?: number;
   onState?: (state: EditorState) => void;
+  onChange?: () => void;
   ref?: Ref<CodeEditorHandle>;
 }) {
   const webRef = useRef<WebViewHandle>(null);
   const ready = useRef(false);
   // The page's state as calls: sent again whenever the page (re)starts.
-  const shown = useRef({ load: '', editable: '' });
+  const shown = useRef({ load: '', editable: '', fontSize: '' });
   const texts = useRef(new Map<number, (text: string) => void>());
   const nextId = useRef(1);
   const onStateRef = useRef(onState);
+  const onChangeRef = useRef(onChange);
+  const sharedSize = useEditorFont((s) => s.size);
+  const size = fontSize ?? sharedSize;
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => { onStateRef.current = onState; }, [onState]);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
   // Before the page is ready a call is dropped: undo, redo and the rest only
   // come after a file is shown, and the file and the mode go with `ready`.
@@ -69,6 +79,10 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, base,
     shown.current.editable = call('setEditable', editable);
     run(shown.current.editable);
   }, [editable, run]);
+  useEffect(() => {
+    shown.current.fontSize = call('setFontSize', size);
+    run(shown.current.fontSize);
+  }, [size, run]);
 
   useImperativeHandle(ref, () => ({
     getText: () => new Promise<string>((resolve, reject) => {
@@ -93,9 +107,11 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, base,
     if (message.type === 'ready') {
       // The first start, or the page loaded again: it starts empty either way.
       ready.current = true;
-      webRef.current?.injectJavaScript(shown.current.load + shown.current.editable);
+      webRef.current?.injectJavaScript(shown.current.fontSize + shown.current.load + shown.current.editable);
     } else if (message.type === 'loaded') {
       setLoaded(true);
+    } else if (message.type === 'changed') {
+      onChangeRef.current?.();
     } else if (message.type === 'state') {
       onStateRef.current?.({ dirty: message.dirty, canUndo: message.canUndo, canRedo: message.canRedo, cursors: message.cursors });
     } else if (message.type === 'text') {

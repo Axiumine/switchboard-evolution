@@ -1629,10 +1629,49 @@ function renderDefaultStatus() {
 const statusBarResources = document.getElementById('status-bar-resources');
 const RESOURCE_STATUS_MS = 15000;
 
+// --- What each live session uses, on its row ---
+// From the same measurement: the memory of every process a live session
+// started, under its star and archive button (sidebar.js, projects-view.js
+// buildSessionRow), amber from 1 GB and red from 2 GB as in the Task
+// Manager. A session with nothing running shows nothing.
+let sessionMemoryById = new Map();
+
+/** A row's memory figure, empty until the next measurement fills it. */
+function sessionMemoryElement(sessionId) {
+  const el = document.createElement('span');
+  el.className = 'session-ram';
+  el.dataset.sessionId = sessionId;
+  el.hidden = true;
+  return el;
+}
+
+/** Show the last measurement in `el`; its parent knows whether to make room for it (has-ram). */
+function paintSessionMemory(el) {
+  const bytes = sessionMemoryById.get(el.dataset.sessionId);
+  const shown = Number.isFinite(bytes) && bytes > 0;
+  el.hidden = !shown;
+  el.parentElement?.classList.toggle('has-ram', shown);
+  if (!shown) {
+    el.textContent = '';
+    el.removeAttribute('title');
+    return;
+  }
+  const text = UsageChart.formatBytes(bytes);
+  el.className = `session-ram session-ram--${UsageChart.memoryLevel(bytes)}`;
+  el.textContent = text;
+  el.title = `Memory used by this session's processes: ${text}`;
+}
+
 async function refreshResourceStatus() {
-  if (!statusBarResources || PROJECT_WINDOW || document.hidden) return;
+  if (document.hidden) return;
+  // A project's window shows session rows too, but no status bar.
+  const showStatus = !!statusBarResources && !PROJECT_WINDOW;
   try {
-    const status = UsageChart.resourceStatus(await window.api.getProcessUsage());
+    const usage = await window.api.getProcessUsage();
+    sessionMemoryById = UsageChart.sessionMemory(usage);
+    document.querySelectorAll('.session-ram[data-session-id]').forEach(paintSessionMemory);
+    if (!showStatus) return;
+    const status = UsageChart.resourceStatus(usage);
     // Each part in amber or red when it gets close to its limit.
     const parts = [[status.ram, status.ramLevel], [status.disk, status.diskLevel]].filter(([text]) => text);
     const nodes = [];
@@ -1648,10 +1687,10 @@ async function refreshResourceStatus() {
   } catch {}
 }
 
+refreshResourceStatus();
+setInterval(refreshResourceStatus, RESOURCE_STATUS_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshResourceStatus(); });
 if (statusBarResources && !PROJECT_WINDOW) {
-  refreshResourceStatus();
-  setInterval(refreshResourceStatus, RESOURCE_STATUS_MS);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshResourceStatus(); });
   statusBarResources.addEventListener('click', () => openProcessViewer());
   statusBarResources.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;

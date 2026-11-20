@@ -811,7 +811,8 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   const row = document.createElement('div');
   row.className = 'session-row';
 
-  // Title and star share the top line; status and actions sit below.
+  // Title and star share the top line; the folder and the memory a live
+  // session uses the middle one; status and actions sit below.
   const pin = document.createElement('button');
   pin.className = 'session-pin' + (session.starred ? ' pinned' : '');
   pin.type = 'button';
@@ -923,15 +924,22 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   }
 
   footer.append(metaEl, actions);
+  // The middle line: the folder or project, and at its right, under the
+  // star, what the live session uses (app.js paintSessionMemory). Without a
+  // folder the line shows only while there is a figure.
+  const middle = document.createElement('div');
+  middle.className = 'session-middle' + (folderLabel ? '' : ' session-middle--bare');
   if (folderLabel) {
     const folderEl = document.createElement('div');
     folderEl.className = 'session-folder';
     folderEl.textContent = folderLabel;
     folderEl.title = session.projectPath || folderLabel;
-    row.append(header, folderEl, footer);
-  } else {
-    row.append(header, footer);
+    middle.append(folderEl);
   }
+  const ram = sessionMemoryElement(session.sessionId);
+  middle.append(ram);
+  paintSessionMemory(ram);
+  row.append(header, middle, footer);
   item.appendChild(row);
 
   return item;

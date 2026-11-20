@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('api', {
   openToolWindow: (kind) => ipcRenderer.invoke('open-tool-window', kind),
   // A project's tab in a window of its own, and what that window asks the main window to do.
   openProjectWindow: (projectId, tab) => ipcRenderer.invoke('open-project-window', projectId, tab),
+  focusProjectWindow: (projectId, tab) => ipcRenderer.invoke('focus-project-window', projectId, tab),
+  switchProjectWindowTab: (tab) => ipcRenderer.invoke('switch-project-window-tab', tab),
   openGitCompareWindow: (projectId, repoPath, hashes, labels, subjects) => ipcRenderer.invoke('open-git-compare-window', projectId, repoPath, hashes, labels, subjects),
   openGitFileWindow: (projectId, repoPath, file) => ipcRenderer.invoke('open-git-file-window', projectId, repoPath, file),
   runInMainWindow: (name, args) => ipcRenderer.invoke('project-window-run', name, args),

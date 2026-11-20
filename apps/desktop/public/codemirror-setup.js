@@ -516,7 +516,12 @@ function multipleCursors() {
 // copying takes every selection.
 const focusableText = EditorView.contentAttributes.of({ tabindex: '0' });
 
-function createPlanEditor(parent) {
+/** Calls `onChange` after every edit of the text (typing, undo, a reload), not on cursor moves. */
+function docChangeListener(onChange) {
+  return onChange ? EditorView.updateListener.of((update) => { if (update.docChanged) onChange(update); }) : [];
+}
+
+function createPlanEditor(parent, { onChange } = {}) {
   const wrapCompartment = new Compartment();
   const state = EditorState.create({
     doc: '',
@@ -546,6 +551,7 @@ function createPlanEditor(parent) {
       syntaxHighlighting(markdownExtras),
       appThemePatch,
       wrapCompartment.of(EditorView.lineWrapping),
+      docChangeListener(onChange),
     ],
   });
 
@@ -638,7 +644,7 @@ function createReadOnlyViewer(parent, content, filename) {
 
 // ── Editable File Viewer (for file panel) ───────────────────────────
 
-function createEditableViewer(parent, content, filename, { wrap = false } = {}) {
+function createEditableViewer(parent, content, filename, { wrap = false, onChange } = {}) {
   const langExt = getLanguageExt(filename);
   const wrapCompartment = new Compartment();
 
@@ -670,6 +676,7 @@ function createEditableViewer(parent, content, filename, { wrap = false } = {}) 
       syntaxHighlighting(markdownExtras),
       appThemePatch,
       wrapCompartment.of(wrap ? EditorView.lineWrapping : []),
+      docChangeListener(onChange),
     ],
   });
 

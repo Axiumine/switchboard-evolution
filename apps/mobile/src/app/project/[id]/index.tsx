@@ -16,6 +16,7 @@ import { STATE_COLORS } from '@/components/SessionRow';
 import { useProjectTab } from '@/components/project/useProjectTab';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
+import { openNote } from '@/notes/panel';
 import { PROJECT_TABS, type ProjectTab } from '@/projects/tabs';
 import { removeProject, toggleProjectDone } from '@/projects/flows';
 import { ProjectSessionContext } from '@/projects/open-session';
@@ -70,6 +71,7 @@ export default function ProjectScreen() {
     { label: 'New session…', onPress: () => router.push({ pathname: '/new', params: { target: `p:${project.id}` } }) },
     { label: 'Rename…', onPress: () => setRename({ kind: 'project', id: project.id, name: project.name }) },
     { label: 'New track…', onPress: () => setRename({ kind: 'new-track', id: project.id, name: '' }) },
+    { label: 'Note', onPress: () => { openNote(project.id); } },
     { label: 'Attach a folder…', onPress: () => router.push({ pathname: '/folders', params: { projectId: project.id } }) },
     ...(project.status === 'done' ? [] : snoozed
       ? [{ label: 'Wake now', onPress: () => run('update-project', [project.id, { snoozedUntil: null }]) }]
@@ -104,9 +106,15 @@ export default function ProjectScreen() {
       <Stack.Screen
         options={{
           title: project.name,
-          headerRight: () => (tab === 'session'
-            ? <HeaderButton icon="ellipsis-horizontal" accessibilityLabel="Session actions" onPress={() => setSessionActions(true)} />
-            : <HeaderButton icon="ellipsis-horizontal" accessibilityLabel="Project actions" onPress={() => setActions(true)} />),
+          // The note button is on every tab, beside the ⋯ (the desktop has it beside Tasks).
+          headerRight: () => (
+            <View style={styles.headerButtons}>
+              <HeaderButton icon="reader-outline" accessibilityLabel="Note" onPress={() => { openNote(project.id); }} />
+              {tab === 'session'
+                ? <HeaderButton icon="ellipsis-horizontal" accessibilityLabel="Session actions" onPress={() => setSessionActions(true)} />
+                : <HeaderButton icon="ellipsis-horizontal" accessibilityLabel="Project actions" onPress={() => setActions(true)} />}
+            </View>
+          ),
         }}
       />
       <ProjectTabBar
@@ -154,6 +162,7 @@ export default function ProjectScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  headerButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pane: { flex: 1 },
   hidden: { display: 'none' },
   empty: { color: colors.textFaint, fontSize: 13, paddingVertical: 8 },

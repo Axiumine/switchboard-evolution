@@ -13,11 +13,39 @@
  *   - Open in default app: always shown
  *   - Share: macOS share menu, shown while a file is open
  *   - Reveal in Finder/Explorer: shown while a file is open
+ *   - Smaller / larger text: always shown for text, just before Preview
+ *   - Open in a window of its own: shown if onPopOut is provided
  *   - Close: shown if onClose is provided
  *   - Copy path/content: shown if opted in
  *
+ * With `autosaveMs`, an edit is saved that long after the typing stops
+ * (the Note's pad); Save and Cmd/Ctrl+S still work as everywhere else.
+ *
  * Depends on: viewer-toolbar.js, codemirror-bundle.js
  */
+
+// The text size of every editor and Markdown preview, as steps of one pixel
+// from their own size. One value for all of them, remembered, and followed by
+// every open editor, in this window and in the others.
+const VIEWER_FONT_STEP_KEY = 'viewerFontStep';
+const VIEWER_FONT_STEP_MIN = -4;
+const VIEWER_FONT_STEP_MAX = 12;
+const VIEWER_FONT_STEP_EVENT = 'viewer-font-step';
+
+function clampViewerFontStep(step) {
+  const n = Math.round(Number(step));
+  return Number.isFinite(n) ? Math.min(VIEWER_FONT_STEP_MAX, Math.max(VIEWER_FONT_STEP_MIN, n)) : 0;
+}
+
+function readViewerFontStep() {
+  try { return clampViewerFontStep(localStorage.getItem(VIEWER_FONT_STEP_KEY) || 0); } catch { return 0; }
+}
+
+function setViewerFontStep(step) {
+  const value = clampViewerFontStep(step);
+  try { localStorage.setItem(VIEWER_FONT_STEP_KEY, String(value)); } catch {}
+  window.dispatchEvent(new CustomEvent(VIEWER_FONT_STEP_EVENT, { detail: value }));
+}
 
 class ViewerPanel {
   /**
@@ -25,6 +53,8 @@ class ViewerPanel {
    * @param {Object} opts
    * @param {Function}  opts.onSave       - async (filePath, content) => result
    * @param {Function}  opts.onClose      - () => void
+   * @param {Function}  opts.onPopOut     - () => void, opens the file in a window of its own
+   * @param {number}    opts.autosaveMs   - save this long after the last edit (off when not given)
    * @param {boolean}   opts.copyPath     - Show copy-path button
    * @param {boolean}   opts.copyContent  - Show copy-content button
    * @param {string}    opts.language     - 'markdown' or 'auto' (default 'markdown')
@@ -41,6 +71,9 @@ class ViewerPanel {
     this.wrapMode = false;
     this._watchedPath = null;
     this._saving = false;
+    // The text as last read from or written to disk: what an edit differs from.
+    this._savedContent = null;
+    this._autosaveTimer = null;
     this.previewType = 'text';
     this._objectUrl = null;
     this._openVersion = 0;
@@ -58,6 +91,8 @@ class ViewerPanel {
       openExternal: true,
       share: window.api.platform === 'darwin',
       reveal: true,
+      fontSize: true,
+      popOut: !!opts.onPopOut,
       close: !!opts.onClose,
     });
     container.insertBefore(this.toolbar.el, container.firstChild);
@@ -78,6 +113,13 @@ class ViewerPanel {
 
     // Wire toolbar events
     this._wireEvents();
+
+    this._applyFontStep(readViewerFontStep());
+    window.addEventListener(VIEWER_FONT_STEP_EVENT, (e) => this._applyFontStep(e.detail));
+    // Another window changed it (localStorage is shared by the app's windows).
+    window.addEventListener('storage', (e) => {
+      if (e.key === VIEWER_FONT_STEP_KEY) this._applyFontStep(readViewerFontStep());
+    });
 
     // Listen for Cmd/Ctrl+S from CM editors
     container.addEventListener('cm-save', () => this._save());
@@ -130,6 +172,18 @@ class ViewerPanel {
       });
     }
 
+    if (toolbar.fontSmallerBtn) {
+      toolbar.fontSmallerBtn.addEventListener('click', () => setViewerFontStep(readViewerFontStep() - 1));
+    }
+
+    if (toolbar.fontLargerBtn) {
+      toolbar.fontLargerBtn.addEventListener('click', () => setViewerFontStep(readViewerFontStep() + 1));
+    }
+
+    if (toolbar.popOutBtn && opts.onPopOut) {
+      toolbar.popOutBtn.addEventListener('click', () => opts.onPopOut());
+    }
+
     if (toolbar.closeBtn && opts.onClose) {
       toolbar.closeBtn.addEventListener('click', () => opts.onClose());
     }
@@ -148,6 +202,17 @@ class ViewerPanel {
         toolbar.flashCopyContent();
       });
     }
+  }
+
+  /** Size the editor's text and the preview's: a step of one pixel from their own size. */
+  _applyFontStep(step) {
+    const value = clampViewerFontStep(step);
+    this.container.style.setProperty('--viewer-font-step', String(value));
+    const { fontSmallerBtn, fontLargerBtn } = this.toolbar;
+    if (fontSmallerBtn) fontSmallerBtn.disabled = value <= VIEWER_FONT_STEP_MIN;
+    if (fontLargerBtn) fontLargerBtn.disabled = value >= VIEWER_FONT_STEP_MAX;
+    // CodeMirror measures its lines again for the new size.
+    if (this.editorView) this.editorView.requestMeasure();
   }
 
   /**
@@ -177,7 +242,7 @@ class ViewerPanel {
     if (this.toolbar.previewBtn) {
       this.toolbar.previewBtn.style.display = !isMedia && (isMd || isHtml || isJson) ? '' : 'none';
     }
-    for (const key of ['wrapBtn', 'gotoLineBtn', 'saveBtn', 'copyContentBtn']) {
+    for (const key of ['wrapBtn', 'gotoLineBtn', 'saveBtn', 'copyContentBtn', 'fontSmallerBtn', 'fontLargerBtn']) {
       if (this.toolbar[key]) this.toolbar[key].style.display = isMedia ? 'none' : '';
     }
 
@@ -214,6 +279,8 @@ class ViewerPanel {
     }
 
     // Create or update editor
+    clearTimeout(this._autosaveTimer);
+    this._savedContent = content;
     if (!this.editorView) {
       this._createEditor(content, filePath);
     } else {
@@ -265,18 +332,39 @@ class ViewerPanel {
   }
 
   _createEditor(content, filePath) {
+    const onChange = () => this._edited();
     if (this.opts.language === 'auto') {
       this.editorView = window.createEditableViewer(
-        this.editorEl, content, filePath, { wrap: this.wrapMode },
+        this.editorEl, content, filePath, { wrap: this.wrapMode, onChange },
       );
     } else {
-      this.editorView = window.createPlanEditor(this.editorEl);
+      this.editorView = window.createPlanEditor(this.editorEl, { onChange });
       if (content) {
         this.editorView.dispatch({
           changes: { from: 0, to: this.editorView.state.doc.length, insert: content },
         });
       }
     }
+  }
+
+  /** The text differs from what is on disk. */
+  isDirty() {
+    return !!this.editorView && !!this.filePath && this._savedContent !== null && this.getContent() !== this._savedContent;
+  }
+
+  /** After an edit: with autosave, save once the typing has stopped. */
+  _edited() {
+    if (!this.opts.autosaveMs || !this.opts.onSave) return;
+    clearTimeout(this._autosaveTimer);
+    this._autosaveTimer = setTimeout(() => {
+      if (this.isDirty()) this._save({ quiet: true });
+    }, this.opts.autosaveMs);
+  }
+
+  /** Save now what is not saved yet (closing, moving to a window): resolves when it is written. */
+  async flush() {
+    clearTimeout(this._autosaveTimer);
+    if (this.isDirty()) await this._save({ quiet: true });
   }
 
   _togglePreview() {
@@ -430,14 +518,18 @@ class ViewerPanel {
     this.toolbar.setWrapMode(this.wrapMode);
   }
 
-  async _save() {
+  async _save({ quiet = false } = {}) {
     if (!this.opts.onSave || !this.filePath || this._isMedia()) return;
+    clearTimeout(this._autosaveTimer);
     this._saving = true;
     const content = this.getContent();
+    const filePath = this.filePath;
     try {
-      const result = await this.opts.onSave(this.filePath, content);
+      const result = await this.opts.onSave(filePath, content);
       if (result && result.ok !== false) {
-        this.toolbar.flashSave();
+        if (this.filePath === filePath && typeof this._savedContent === 'string') this._savedContent = content;
+        // An autosave says nothing: the button flashing every few seconds would only distract.
+        if (!quiet) this.toolbar.flashSave();
       }
     } finally {
       setTimeout(() => { this._saving = false; }, 500);
@@ -494,6 +586,8 @@ class ViewerPanel {
 
   destroy() {
     this._unwatchFile();
+    clearTimeout(this._autosaveTimer);
+    this._savedContent = null;
     this._openVersion++;
     this._destroyEditor();
     this._clearPreview();
@@ -541,6 +635,7 @@ class ViewerPanel {
 
     const newContent = result.content;
     const currentContent = this.getContent();
+    this._savedContent = newContent;
     if (newContent === currentContent) return;
 
     if (this.editorView) {

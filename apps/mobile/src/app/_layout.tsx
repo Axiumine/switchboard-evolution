@@ -8,6 +8,7 @@ import { KeyboardProvider, useKeyboardState } from 'react-native-keyboard-contro
 
 import { AttentionToast } from '@/components/AttentionToast';
 import { DownloadBar } from '@/components/files/DownloadBar';
+import { NoteFloating } from '@/components/notes/NoteFloating';
 import { SyncBar } from '@/components/SyncBar';
 import { useDownload } from '@/files/download';
 import { AppStack as Stack } from '@/layout/AppStack';
@@ -72,6 +73,8 @@ export default function RootLayout() {
         </WithDownloadBar>
         <AttentionToast />
         <SyncBar />
+        {/* Over every screen, and kept through navigation. */}
+        <NoteFloating />
       </QueryClientProvider>
     </KeyboardProvider>
   );

@@ -9,6 +9,12 @@ describe('a window spec', () => {
     expect(parseWindowSpec('{"kind":"processes"}')).toEqual({ kind: 'processes' });
   });
 
+  it('reads a project\'s note back, which needs the project', () => {
+    expect(parseWindowSpec(JSON.stringify({ kind: 'note', projectId: 'p1' }))).toEqual({ kind: 'note', projectId: 'p1' });
+    expect(parseWindowSpec('{"kind":"note"}')).toBeNull();
+    expect(parseWindowSpec('{"kind":"note","projectId":""}')).toBeNull();
+  });
+
   it('is nothing for what it does not know: no window then, rather than a broken one', () => {
     expect(parseWindowSpec(undefined)).toBeNull();
     expect(parseWindowSpec('not json')).toBeNull();
@@ -24,6 +30,8 @@ describe('a window spec', () => {
   it('is titled as the desktop titles its windows', () => {
     expect(windowTitle({ kind: 'project', projectId: 'p1', tab: 'files' }, 'Demo')).toBe('Demo · Files');
     expect(windowTitle({ kind: 'project', projectId: 'p1', tab: 'files' }, undefined)).toBe('Files');
+    expect(windowTitle({ kind: 'note', projectId: 'p1' }, 'Demo')).toBe('Demo · Note');
+    expect(windowTitle({ kind: 'note', projectId: 'p1' })).toBe('Note');
     expect(windowTitle({ kind: 'stats' })).toBe('Stats');
     expect(windowTitle({ kind: 'processes' })).toBe('Task Manager');
   });

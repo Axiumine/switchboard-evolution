@@ -1734,9 +1734,12 @@ function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inacti
 // a window without the sidebar and the terminals (public/project-window.js).
 // A session it opens goes to the main window, which has the terminals. One
 // window per project and tab; each tab remembers its window's place and size,
-// and whether it stays on top. They close with the main window.
-const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'files', 'git', 'settings']);
+// and whether it stays on top. They close with the main window. A tab's
+// window can move to another tab (switch-project-window-tab). 'note' is the
+// project's note.md (public/note-panel.js), in a smaller window.
+const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'files', 'git', 'settings', 'note']);
 const PROJECT_WINDOW_SPEC = { title: 'Switchboard', width: 1000, height: 760, minWidth: 520, minHeight: 360, onTop: false };
+const NOTE_WINDOW_SPEC = { title: 'Note', width: 560, height: 640, minWidth: 340, minHeight: 260, onTop: false };
 // What a project window asks the main window to do (app.js runFromProjectWindow).
 const PROJECT_WINDOW_RUN = new Set(['openSession', 'showSession', 'launchNewSession', 'openRawTerminalSession']);
 // The events a project's page lives on. Terminal output, notices and the
@@ -1762,11 +1765,13 @@ function openProjectWindow(projectId, tab, { bounds, inactive = false } = {}) {
   }
   const kind = `project-${tab}`;
   const sameKind = [...projectWindows.keys()].filter(k => k.endsWith(`\n${tab}`)).length;
-  const win = createPageWindow(kind, PROJECT_WINDOW_SPEC, { offset: 24 * sameKind, bounds, inactive });
+  const spec = tab === 'note' ? NOTE_WINDOW_SPEC : PROJECT_WINDOW_SPEC;
+  const win = createPageWindow(kind, spec, { offset: 24 * sameKind, bounds, inactive });
   projectWindows.set(key, win);
   win.loadFile(path.join(__dirname, 'public', 'index.html'), { query: { projectWindow: projectId, tab } });
   win.on('closed', () => {
-    if (projectWindows.get(key) === win) projectWindows.delete(key);
+    // Under the tab it shows now, which may not be the one it opened on.
+    for (const [k, w] of projectWindows) if (w === win) projectWindows.delete(k);
     rememberOpenWindows();
   });
   rememberOpenWindows();
@@ -1909,6 +1914,38 @@ function toolWindowKindOf(webContents) {
 
 ipcMain.handle('open-tool-window', (_event, kind) => { openToolWindow(String(kind)); return true; });
 ipcMain.handle('open-project-window', (_event, projectId, tab) => openProjectWindow(projectId, tab));
+
+// The project's tab already in a window of its own comes forward: true, or
+// false when there is none (the Note opens floating then).
+ipcMain.handle('focus-project-window', (_event, projectId, tab) => {
+  if (typeof projectId !== 'string' || !PROJECT_WINDOW_TABS.has(tab)) return false;
+  const win = projectWindows.get(`${projectId}\n${tab}`);
+  if (!win || win.isDestroyed()) return false;
+  bringForward(win);
+  return true;
+});
+
+// A tab's window moving to another tab from the strip in its header. When
+// that tab has a window already, that one comes forward and this one stays.
+ipcMain.handle('switch-project-window-tab', (event, tab) => {
+  if (!PROJECT_WINDOW_TABS.has(tab) || tab === 'note') return { switched: false };
+  const entry = [...projectWindows].find(([, win]) => !win.isDestroyed() && win.webContents === event.sender);
+  if (!entry) return { switched: false };
+  const [key, win] = entry;
+  const [projectId, current] = key.split('\n');
+  if (current === 'note') return { switched: false };
+  const target = `${projectId}\n${tab}`;
+  if (target === key) return { switched: true };
+  const other = projectWindows.get(target);
+  if (other && !other.isDestroyed()) {
+    bringForward(other);
+    return { switched: false };
+  }
+  projectWindows.delete(key);
+  projectWindows.set(target, win);
+  rememberOpenWindows();
+  return { switched: true };
+});
 
 // A project window opening a session: the main window does it and comes forward.
 ipcMain.handle('project-window-run', (event, name, args) => {

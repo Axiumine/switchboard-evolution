@@ -24,8 +24,10 @@ const HIT_SLOP = { top: 4, bottom: 4, left: 4, right: 4 };
  * A button for a screen header. `chip` is an icon on a quiet square (secondary
  * actions); `primary` is the accent pill with icon and label (the screen's main action).
  */
-export function HeaderButton({ icon, label, onPress, accessibilityLabel, disabled, variant = 'chip' }: {
-  icon: keyof typeof Ionicons.glyphMap;
+export function HeaderButton({ icon, text, label, onPress, accessibilityLabel, disabled, variant = 'chip' }: {
+  icon?: keyof typeof Ionicons.glyphMap;
+  /** Letters on a chip instead of an icon (A− and A+). */
+  text?: string;
   label?: string;
   onPress: () => void;
   accessibilityLabel: string;
@@ -43,7 +45,7 @@ export function HeaderButton({ icon, label, onPress, accessibilityLabel, disable
       accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [primary ? styles.primary : styles.chip, pressed && styles.pressed, disabled && styles.disabled]}
     >
-      <Ionicons name={icon} size={primary ? 16 : 20} color={primary ? colors.accent : colors.text} />
+      {text ? <Text style={styles.text}>{text}</Text> : icon ? <Ionicons name={icon} size={primary ? 16 : 20} color={primary ? colors.accent : colors.text} /> : null}
       {primary && label ? <Text style={styles.label}>{label}</Text> : null}
     </Pressable>
   );
@@ -55,6 +57,7 @@ const styles = StyleSheet.create({
     height: VISIBLE, borderRadius: 18, paddingStart: 11, paddingEnd: 14, flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: 'rgba(128,136,255,0.14)',
   },
+  text: { color: colors.text, fontSize: 15, fontWeight: '600' },
   label: { color: colors.accent, fontSize: 15, fontWeight: '600' },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.4 },

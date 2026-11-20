@@ -148,6 +148,26 @@
   }
 
   /**
+   * The colour band of what one session or task uses, as the Task Manager's
+   * bars draw it: 'mid' (amber) from 1 GB, 'high' (red) from 2 GB.
+   */
+  function memoryLevel(bytes) {
+    if (bytes >= 2 * GB) return 'high';
+    if (bytes >= GB) return 'mid';
+    return 'low';
+  }
+
+  /** What each live session uses, by session id, from a measurement (get-process-usage). */
+  function sessionMemory(data) {
+    const out = new Map();
+    for (const owner of data?.owners || []) {
+      if (owner?.kind !== 'session' || !owner.id || !Number.isFinite(owner.rssBytes)) continue;
+      out.set(owner.id, (out.get(owner.id) || 0) + owner.rssBytes);
+    }
+    return out;
+  }
+
+  /**
    * How close the memory in use is to what is installed: 'mid' (amber) from
    * 90%, 'high' (red) from 95%. 'low' when a desktop too old to measure it.
    */
@@ -334,6 +354,8 @@
     assignColors,
     memorySlices,
     ramLevel,
+    memoryLevel,
+    sessionMemory,
     diskLevel,
     diskSlices,
     donutPaths,

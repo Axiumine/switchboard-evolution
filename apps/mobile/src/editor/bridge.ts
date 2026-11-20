@@ -13,10 +13,11 @@ export type CursorAction = 'next' | 'all' | 'above' | 'below' | 'one';
 export type EditorMessage =
   | { type: 'ready' }
   | { type: 'loaded' }
+  | { type: 'changed' }
   | ({ type: 'state' } & EditorState)
   | { type: 'text'; id: number; text: string };
 
-export type EditorCall = 'load' | 'setEditable' | 'revert' | 'saved' | 'undo' | 'redo' | 'getText' | 'cursors';
+export type EditorCall = 'load' | 'setEditable' | 'setFontSize' | 'revert' | 'saved' | 'undo' | 'redo' | 'getText' | 'cursors';
 
 /**
  * The script that calls window.sb[fn](...args) in the page. Each argument
@@ -36,6 +37,7 @@ export function parseMessage(data: string): EditorMessage | null {
   switch (message.type) {
     case 'ready':
     case 'loaded':
+    case 'changed':
       return { type: message.type };
     case 'state':
       if (typeof message.dirty !== 'boolean' || typeof message.canUndo !== 'boolean' || typeof message.canRedo !== 'boolean') return null;

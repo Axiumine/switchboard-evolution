@@ -39,8 +39,11 @@ function windowNavigation(setOptions: (options: HeaderOptions) => void) {
   };
 }
 
-/** `children` under the header their screen asks for, `title` until it asks. */
-export function WindowNavigation({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * `children` under the header their screen asks for, `title` until it asks.
+ * `tabs` sit in the header after the title, before the screen's buttons.
+ */
+export function WindowNavigation({ title, tabs, children }: { title: string; tabs?: ReactNode; children: ReactNode }) {
   const insets = useSafeAreaInsets();
   const [options, setOptions] = useState<HeaderOptions>({});
   const navigation = useMemo(() => windowNavigation((next) => setOptions((now) => ({ ...now, ...next }))), []);
@@ -52,7 +55,8 @@ export function WindowNavigation({ title, children }: { title: string; children:
         <FocusedRouteKeyContext.Provider value={ROUTE.key}>
         <View style={styles.screen}>
           <View style={[styles.header, { paddingTop: insets.top }]}>
-            <Text style={styles.title} numberOfLines={1}>{options.title || title}</Text>
+            <Text style={[styles.title, !tabs && styles.titleFills]} numberOfLines={1}>{options.title || title}</Text>
+            {tabs}
             {options.headerRight ? <View style={styles.right}>{options.headerRight()}</View> : null}
           </View>
           <View style={styles.body}>{children}</View>
@@ -67,7 +71,8 @@ export function WindowNavigation({ title, children }: { title: string; children:
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 52, paddingHorizontal: spacing.lg, backgroundColor: colors.surface },
-  title: { flex: 1, color: colors.text, fontSize: 17, fontWeight: '600' },
+  title: { flexShrink: 1, color: colors.text, fontSize: 17, fontWeight: '600' },
+  titleFills: { flex: 1 },
   right: { flexDirection: 'row', alignItems: 'center' },
   body: { flex: 1 },
 });

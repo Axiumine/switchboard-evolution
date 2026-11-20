@@ -275,6 +275,8 @@ const PICONS = {
   folder: (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>`,
   file: (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>`,
   branch: (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
+  // A sticky note with a folded corner: the project's note.md.
+  note: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M7 8h10"/><path d="M7 12h6"/></svg>`,
   pencil: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
   check: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
   trash: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`,
@@ -629,13 +631,17 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
     btn.onclick = (e) => { e.stopPropagation(); if (dismissible) dismissSession(id); else toggleArchiveSession(session); };
     row.appendChild(btn);
   }
-  // The star, at the right of the row as on the Sessions tab.
+  // The star, at the right of the title's line, as on the Sessions tab.
   const pin = document.createElement('button');
   pin.type = 'button';
   pin.className = 'pane-pin';
   paintPaneStar(pin, session);
   pin.onclick = (e) => { e.stopPropagation(); if (hoverPreview) hideSessionHoverPreview(id); toggleSessionStar(session); };
   row.appendChild(pin);
+  // Under the star and the archive button: what the live session uses (app.js).
+  const ram = sessionMemoryElement(id);
+  row.appendChild(ram);
+  paintSessionMemory(ram);
   row.onclick = () => { if (hoverPreview) hideSessionHoverPreview(id); openSession(session); };
   row.oncontextmenu = (e) => {
     e.preventDefault();
@@ -1743,6 +1749,7 @@ function renderOverview() {
           </div>
         </div>
         <div class="ws-actions">
+          <button type="button" class="ws-btn" id="ws-note" title="The project's notes (note.md), in a panel over the app">${PICONS.note(12)}<span>Note</span></button>
           <button type="button" class="ws-btn project-task-btn" id="ws-tasks" data-project-id="${project.id}" data-project-path="${escapeHtml(project.root)}" data-project-paths="${escapeHtml(taskPseudoProject(project).projectPaths.join('\n'))}">${PICONS.play(12)}<span>Tasks</span><span class="project-task-count ws-badge" ${running ? '' : 'style="display:none"'}>${running || ''}</span></button>
           ${scheduleButtonHtml(project, 'ws-schedules')}
           <button type="button" class="ws-btn ws-btn--primary" id="ws-new">${PICONS.plus(12)}<span>New session</span>${PICONS.chevronDown(11)}</button>
@@ -1763,7 +1770,8 @@ function renderOverview() {
 
   const body = projectViewer.querySelector('#ws-body');
   // The Session tab's content is the terminal area, laid out under the header by CSS.
-  if (tabName === 'session') body.replaceChildren();
+  if (PROJECT_WINDOW && PROJECT_WINDOW.tab === 'note') renderNoteWindow(project, body);
+  else if (tabName === 'session') body.replaceChildren();
   else if (tabName === 'settings') renderSettings(project, body);
   else if (tabName === 'files') renderFilesTab(project, body);
   else if (tabName === 'plan') renderPlanTab(project, body);
@@ -1774,6 +1782,9 @@ function renderOverview() {
 
   if (PROJECT_WINDOW) {
     setupWindowPin(projectViewer.querySelector('#tool-window-pin'));
+    projectViewer.querySelectorAll('[data-window-tab]').forEach(btn => {
+      btn.onclick = () => switchProjectWindowTab(project, btn.dataset.windowTab);
+    });
   } else {
     projectViewer.querySelectorAll('.ws-tab:not([disabled])').forEach(tab => {
       tab.onclick = () => showProjectTab(project, tab.dataset.tab);
@@ -1783,6 +1794,7 @@ function renderOverview() {
     });
     projectViewer.querySelector('#ws-new').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);
     projectViewer.querySelector('#ws-more').onclick = (e) => showContextMenu(projectMenuItems(project, { fromPage: true }), { anchor: e.currentTarget });
+    projectViewer.querySelector('#ws-note').onclick = () => openProjectNote(project);
     projectViewer.querySelector('#ws-tasks').onclick = (e) => showTaskPopover(taskPseudoProject(project), e.currentTarget);
     projectViewer.querySelector('#ws-schedules').onclick = (e) => showProjectScheduleMenu(project, e.currentTarget);
     projectViewer.querySelector('#ws-add-folder').onclick = () => attachFolderAsk(project);
@@ -1794,6 +1806,29 @@ function renderOverview() {
 // --- A tab of the project in a window of its own (project-window.js) ---
 // Every tab but Session, whose terminal stays in the main window.
 const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', files: 'Files', git: 'Git', settings: 'Settings' };
+const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'files', 'git', 'settings'];
+
+/**
+ * A tab chosen in a tab's window: the window moves to it (main.js keeps it
+ * under its new tab, to open it there again at the next start). When that
+ * tab already has a window of its own, main.js brings that one forward and
+ * this window stays as it is.
+ */
+async function switchProjectWindowTab(project, tab) {
+  if (!PROJECT_WINDOW || PROJECT_WINDOW.tab === tab || !PROJECT_WINDOW_TAB_LABELS[tab]) return;
+  let result;
+  try { result = await window.api.switchProjectWindowTab(tab); } catch { return; }
+  if (!result?.switched) return;
+  PROJECT_WINDOW.tab = tab;
+  // A reload of the window shows the tab it is on now.
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('tab', tab);
+    history.replaceState(null, '', url.href);
+  } catch {}
+  setProjectTab(project, tab);
+  renderOverview();
+}
 
 /** A tab of the strip with the button beside it that opens the tab in a window of its own. */
 function tabWithWindow(tab, tabButton) {
@@ -1803,20 +1838,29 @@ function tabWithWindow(tab, tabButton) {
 
 /** The header of a project window: the project, the tab it shows and the pin. */
 function projectWindowHeaderHtml(project, tabName) {
+  const note = PROJECT_WINDOW.tab === 'note';
   const label = PROJECT_WINDOW.compare ? 'Compare'
     : PROJECT_WINDOW.file ? (pathBasename(PROJECT_WINDOW.file.path) || PROJECT_WINDOW.file.path)
-      : (PROJECT_WINDOW_TAB_LABELS[tabName] || 'Overview');
+      : note ? 'Note'
+        : (PROJECT_WINDOW_TAB_LABELS[tabName] || 'Overview');
   document.title = `${project.name} · ${label}`;
   const state = groupState(projectSessionsAll(project));
+  // A tab's window shows the other tabs too, to move to one of them in place.
+  // A comparison, a file and the note show only what they were opened for.
+  const tabs = !note && !PROJECT_WINDOW.compare && !PROJECT_WINDOW.file;
+  const tabStrip = tabs ? `
+        <nav class="ws-window-tabs" aria-label="Tabs of ${escapeHtml(project.name)}">
+          ${PROJECT_WINDOW_TAB_ORDER.map(tab => `<button type="button" class="ws-window-tab-btn${tab === tabName ? ' active' : ''}" data-window-tab="${tab}"${tab === tabName ? ' aria-current="page"' : ''}>${escapeHtml(PROJECT_WINDOW_TAB_LABELS[tab])}</button>`).join('')}
+        </nav>` : '';
   return `
     <div class="ws-header ws-header--window">
       <div class="ws-title-row">
         ${markHtml(project, 26)}
         <div class="ws-title-line">
           <span class="ws-title">${escapeHtml(project.name)}</span>
-          <span class="ws-window-tab">${escapeHtml(label)}</span>
+          ${tabs ? '' : `<span class="ws-window-tab">${escapeHtml(label)}</span>`}
           ${state ? stateDot(state, 'proj-dot--lg') : ''}
-        </div>
+        </div>${tabStrip}
         <span class="ws-flex"></span>
         <button type="button" id="tool-window-pin" class="tool-window-btn" aria-pressed="false"></button>
       </div>
@@ -3334,6 +3378,7 @@ function projectMenuItems(project, { fromPage = false } = {}) {
     !fromPage && { label: 'Open overview', icon: PICONS.open(14), onClick: () => selectProject(project.id, { tab: 'overview' }) },
     { label: 'New session', icon: PICONS.plus(14), submenu: newSessionItems(project, null) },
     { label: 'New track…', icon: PICONS.list(14), onClick: () => promptNewTrack(project) },
+    { label: 'Note', icon: PICONS.note(14), onClick: () => openProjectNote(project) },
     { sep: true },
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameProjectFlow(project) },
     { label: 'Attach folder…', icon: PICONS.folder(14), onClick: () => attachFolderAsk(project) },

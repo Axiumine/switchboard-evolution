@@ -21,6 +21,11 @@ const SHARE_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" view
 
 const FOLDER_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>';
 
+// A− and A+: the letter A with a minus or a plus beside it.
+const FONT_SMALLER_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M2 19 7.5 5h1L14 19"/><path d="M4.4 13.5h7.2"/><path d="M16 12h6"/></svg>';
+
+const FONT_LARGER_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M2 19 7.5 5h1L14 19"/><path d="M4.4 13.5h7.2"/><path d="M16 12h6"/><path d="M19 9v6"/></svg>';
+
 const CLOSE_ICON = '<svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 512 512" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M400 145.49 366.51 112 256 222.51 145.49 112 112 145.49 222.51 256 112 366.51 145.49 400 256 289.49 366.51 400 400 366.51 289.49 256 400 145.49z"></path></svg>';
 
 /**
@@ -75,6 +80,8 @@ function toggleMarkdownPreview({ editorEl, previewEl, toggleBtn, editorView, isP
  * @param {boolean} opts.openExternal - Show open-in-default-app button
  * @param {boolean} opts.share        - Show share button
  * @param {boolean} opts.reveal       - Show reveal-in-file-manager button
+ * @param {boolean} opts.fontSize     - Show the smaller / larger text buttons
+ * @param {boolean} opts.popOut       - Show the open-in-a-window-of-its-own button
  * @param {boolean} opts.close        - Show close button
  * @param {boolean} opts.diffToggle   - Show diff mode toggle
  *
@@ -88,6 +95,8 @@ function toggleMarkdownPreview({ editorEl, previewEl, toggleBtn, editorView, isP
  *   .openExternalBtn - Open-in-default-app button (or null)
  *   .shareBtn     - Share button (or null)
  *   .revealBtn    - Reveal-in-file-manager button (or null)
+ *   .fontSmallerBtn / .fontLargerBtn - Text size buttons (or null)
+ *   .popOutBtn    - Open-in-a-window button (or null)
  *   .closeBtn     - Close button (or null)
  *   .copyPathBtn  - Copy path button (or null)
  *   .copyContentBtn - Copy content button (or null)
@@ -134,6 +143,24 @@ function createViewerToolbar(opts = {}) {
     diffToggleBtn.className = 'fp-toolbar-btn';
     diffToggleBtn.style.display = 'none';
     controlsEl.appendChild(diffToggleBtn);
+  }
+
+  // Just before the preview toggle, so they sit beside what they change.
+  let fontSmallerBtn = null;
+  let fontLargerBtn = null;
+  if (opts.fontSize) {
+    fontSmallerBtn = document.createElement('button');
+    fontSmallerBtn.className = 'fp-toolbar-btn fp-icon-btn';
+    fontSmallerBtn.innerHTML = FONT_SMALLER_ICON;
+    fontSmallerBtn.title = 'Smaller text';
+    fontSmallerBtn.setAttribute('aria-label', fontSmallerBtn.title);
+    controlsEl.appendChild(fontSmallerBtn);
+    fontLargerBtn = document.createElement('button');
+    fontLargerBtn.className = 'fp-toolbar-btn fp-icon-btn';
+    fontLargerBtn.innerHTML = FONT_LARGER_ICON;
+    fontLargerBtn.title = 'Larger text';
+    fontLargerBtn.setAttribute('aria-label', fontLargerBtn.title);
+    controlsEl.appendChild(fontLargerBtn);
   }
 
   let previewBtn = null;
@@ -213,6 +240,16 @@ function createViewerToolbar(opts = {}) {
     controlsEl.appendChild(revealBtn);
   }
 
+  let popOutBtn = null;
+  if (opts.popOut) {
+    popOutBtn = document.createElement('button');
+    popOutBtn.className = 'fp-toolbar-btn fp-icon-btn';
+    popOutBtn.title = 'Open in a window of its own';
+    popOutBtn.setAttribute('aria-label', popOutBtn.title);
+    popOutBtn.innerHTML = typeof ICONS !== 'undefined' ? ICONS.popOut(14) : OPEN_EXTERNAL_ICON;
+    controlsEl.appendChild(popOutBtn);
+  }
+
   let closeBtn = null;
   if (opts.close) {
     closeBtn = document.createElement('button');
@@ -236,6 +273,9 @@ function createViewerToolbar(opts = {}) {
     shareBtn,
     revealBtn,
     closeBtn,
+    popOutBtn,
+    fontSmallerBtn,
+    fontLargerBtn,
     copyPathBtn,
     copyContentBtn,
     diffToggleBtn,

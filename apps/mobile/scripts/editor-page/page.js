@@ -5,9 +5,12 @@
 // writes the calls); the page answers with postMessage({ type, ... }):
 //   ready                            the page can take calls
 //   loaded                           a file is shown
+//   changed                          the text was edited (typing, undo, redo), for autosave
 //   state { dirty, canUndo, canRedo, cursors }
 //                                    after every change of these
 //   text { id, text }                the answer to getText(id)
+//
+// setFontSize(px) sets the text size; it outlives load() and revert().
 //
 // load(text, filename, { base }) marks, as the text is edited, what differs
 // from `base`: the Git tab edits a changed file against its staged copy.
@@ -90,7 +93,7 @@ function languageFor(filename) {
 // Dracula's colours for the code, on the app's own background (src/theme.ts).
 
 const appTheme = Prec.highest(EditorView.theme({
-  '&': { height: '100%', backgroundColor: '#111118', color: '#d0d0e0', fontSize: '12px' },
+  '&': { height: '100%', backgroundColor: '#111118', color: '#d0d0e0' },
   '.cm-scroller': { fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: '1.5', overscrollBehavior: 'contain' },
   '.cm-content': { padding: '12px 0 40vh', caretColor: '#8088ff' },
   '.cm-line': { padding: '0 16px 0 8px' },
@@ -127,6 +130,14 @@ const post = (message) => {
 const editableCompartment = new Compartment();
 const languageCompartment = new Compartment();
 const wrapCompartment = new Compartment();
+const fontCompartment = new Compartment();
+
+/** The default size, in px: the same as FONT_DEFAULT in src/editor/font.ts. */
+const DEFAULT_FONT_SIZE = 12;
+let fontSize = DEFAULT_FONT_SIZE;
+
+// The size is its own theme (not in appTheme) so it can change without a new state.
+const fontExtension = (px) => EditorView.theme({ '&': { fontSize: `${px}px` } });
 
 let editable = false;
 let original = '';
@@ -168,6 +179,7 @@ function createState(text, filename, wrap, base) {
       multipleCursors(),
       languageCompartment.of(languageFor(filename)),
       wrapCompartment.of(wrap ? EditorView.lineWrapping : []),
+      fontCompartment.of(fontExtension(fontSize)),
       editableCompartment.of(editableExtension(editable)),
       compareWith(base),
       markField,
@@ -176,6 +188,7 @@ function createState(text, filename, wrap, base) {
       // Dirty, undo and redo change with the text, the cursors with the selection.
       EditorView.updateListener.of((update) => {
         if (update.docChanged || update.selectionSet) postState(update.state);
+        if (update.docChanged) post({ type: 'changed' });
       }),
     ],
   });
@@ -216,6 +229,13 @@ function setEditable(on) {
   view.contentDOM.focus({ preventScroll: true });
 }
 
+/** The text size in px; the page measures its lines again by itself. */
+function setFontSize(px) {
+  if (!Number.isFinite(px) || px < 1) return;
+  fontSize = px;
+  view.dispatch({ effects: fontCompartment.reconfigure(fontExtension(fontSize)) });
+}
+
 /** Back to the text as it was loaded, where the reader is now. */
 function revert() {
   const scrollTop = view.scrollDOM.scrollTop;
@@ -248,6 +268,7 @@ function saved(text) {
 window.sb = {
   load,
   setEditable,
+  setFontSize,
   revert,
   saved,
   cursors,
