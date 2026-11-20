@@ -131,7 +131,8 @@ describe('projectListRows', () => {
     const rows = projectListRows(input({ ui: { ...DEFAULT_LIST_UI, expanded: { app: true } } }));
     const drawer = rows.slice(2, rows.findIndex((r) => r.kind === 'end') + 1);
     expect(drawer.map((r) => r.kind)).toEqual(['head', ...Array(8).fill('session'), 'more', 'end']);
-    expect(drawer[0]).toMatchObject({ plus: 'project' });
+    // The project's own + is on its row, not on the first heading.
+    expect(drawer[0]).toMatchObject({ plus: null });
     expect(drawer[9]).toMatchObject({ label: '+ 2 older', listKey: 'app:time:today' });
   });
 
@@ -147,10 +148,9 @@ describe('projectListRows', () => {
     expect(rows.find((r) => r.kind === 'session')).toMatchObject({ showTrack: false });
   });
 
-  it('says an empty project has no sessions, with its +', () => {
+  it('says an empty project has no sessions', () => {
     const rows = projectListRows(input({ groups: { active: [project('empty')], snoozed: [], done: [] }, ui: { ...DEFAULT_LIST_UI, expanded: { empty: true } } }));
     expect(rows.slice(2).map((r) => r.kind)).toEqual(['none', 'end']);
-    expect(rows[2]).toMatchObject({ plus: true });
   });
 
   it('adds Archived · N at the foot of a drawer, its rows when open', () => {

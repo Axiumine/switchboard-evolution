@@ -11,14 +11,24 @@ test('each live session is listed once, under its real id', () => {
   const active = new Map([['c1', claude], ['temp-id', forked], ['real-id', forked], ['t-codex', codexStarting], ['sh1', shell]]);
 
   assert.deepEqual(sessionStates(active), [
-    { sessionId: 'c1', type: 'cli', runtime: 'claude', projectPath: '/p', projectId: 'p1', trackId: null, busy: true, attention: false, exited: false, starting: false, startedAt: 10 },
-    { sessionId: 'real-id', type: 'cli', runtime: 'claude', projectPath: '/p', projectId: null, trackId: null, busy: false, attention: true, exited: false, starting: false, startedAt: 20 },
-    { sessionId: 't-codex', type: 'cli', runtime: 'codex', projectPath: '/q', projectId: null, trackId: null, busy: false, attention: false, exited: false, starting: true, startedAt: 30 },
-    { sessionId: 'sh1', type: 'terminal', runtime: null, projectPath: '/tmp', projectId: null, trackId: null, busy: false, attention: false, exited: true, starting: false, startedAt: 40 },
+    { sessionId: 'c1', type: 'cli', runtime: 'claude', projectPath: '/p', projectId: 'p1', trackId: null, busy: true, subagents: false, attention: false, exited: false, starting: false, startedAt: 10 },
+    { sessionId: 'real-id', type: 'cli', runtime: 'claude', projectPath: '/p', projectId: null, trackId: null, busy: false, subagents: false, attention: true, exited: false, starting: false, startedAt: 20 },
+    { sessionId: 't-codex', type: 'cli', runtime: 'codex', projectPath: '/q', projectId: null, trackId: null, busy: false, subagents: false, attention: false, exited: false, starting: true, startedAt: 30 },
+    { sessionId: 'sh1', type: 'terminal', runtime: null, projectPath: '/tmp', projectId: null, trackId: null, busy: false, subagents: false, attention: false, exited: true, starting: false, startedAt: 40 },
   ]);
 });
 
 test('attention from the title counts too', () => {
   const [state] = sessionStates(new Map([['x', { runtime: 'codex', _titleAttention: true }]]));
   assert.equal(state.attention, true);
+});
+
+test('a session whose subagent works says so, and an exited one never does', () => {
+  const sessions = new Map([
+    ['a', { runtime: 'claude', _subagentsBusy: true, _openedAt: 1 }],
+    ['b', { runtime: 'claude', _subagentsBusy: true, exited: true, _openedAt: 2 }],
+  ]);
+  const [a, b] = sessionStates(sessions);
+  assert.equal(a.subagents, true);
+  assert.equal(b.subagents, false);
 });

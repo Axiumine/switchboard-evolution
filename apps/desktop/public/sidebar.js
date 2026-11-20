@@ -802,6 +802,7 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   if (attentionSessions.has(session.sessionId)) item.classList.add('needs-attention');
   if (responseReadySessions.has(session.sessionId)) item.classList.add('response-ready');
   if (sessionBusyState.get(session.sessionId)) item.classList.add('cli-busy');
+  if (typeof sessionSubagentState !== 'undefined' && sessionSubagentState.get(session.sessionId)) item.classList.add('subagent-busy');
   item.dataset.sessionId = session.sessionId;
 
   const modified = new Date(session.modified);

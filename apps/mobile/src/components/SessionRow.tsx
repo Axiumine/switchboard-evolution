@@ -9,6 +9,8 @@ import { colors, spacing } from '@/theme';
 export const STATE_COLORS: Record<RowState, string> = {
   attention: colors.attention,
   busy: colors.accent,
+  // The same grey as the sessions count on a project row: work goes on, but it is not the main agent's.
+  subagent: colors.textFaint,
   unread: colors.unread,
   running: colors.running,
   idle: 'transparent',
@@ -17,6 +19,7 @@ export const STATE_COLORS: Record<RowState, string> = {
 const STATE_LABELS: Record<RowState, string> = {
   attention: 'waiting for you',
   busy: 'working',
+  subagent: 'a subagent is working',
   unread: 'unread',
   running: 'running',
   idle: '',

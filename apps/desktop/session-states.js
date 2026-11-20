@@ -16,6 +16,8 @@ function sessionStates(activeSessions) {
       projectId: session.projectId || null,
       trackId: session.trackId || null,
       busy: !!session._cliBusy,
+      // A subagent is working while the main agent waits (main.js sweepSubagents).
+      subagents: !session.exited && !!session._subagentsBusy,
       // Waiting for the user: a permission or a question, from the title (codex)
       // or a notification (Claude). Cleared when the CLI starts working again.
       attention: !!(session._titleAttention || session._needsAttention),

@@ -12,6 +12,7 @@ const { createRemoteApi } = require('./remote-api');
 const { createRemoteServer, reachableAddresses, pairingLink } = require('./remote-server');
 const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
+const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
 const { readTranscriptSince } = require('./transcript-reader');
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
@@ -3110,6 +3111,36 @@ function startTerminalActivitySweep() {
   terminalActivityTimer = setInterval(sweepTerminalActivity, TERMINAL_ACTIVITY_INTERVAL_MS);
   terminalActivityTimer.unref?.();
 }
+
+// --- Subagents at work while the main agent waits (subagent-activity.js) ---
+// The CLI is idle while its agent waits for a subagent, so busy alone shows
+// nothing. Every few seconds, each live Claude session's subagents are read;
+// a change goes out as cli-subagent-state, to the window and to the phones.
+const SUBAGENT_SWEEP_MS = 3000;
+
+function sweepSubagents() {
+  const seen = new Set();
+  for (const [key, session] of activeSessions) {
+    if (seen.has(session)) continue;
+    seen.add(session);
+    const sessionId = session.realSessionId || key;
+    let running = false;
+    if (!session.exited && !session.isPlainTerminal && session.runtime !== 'codex') {
+      const row = getCachedSession(sessionId);
+      if (row) {
+        try { running = subagentsRunning(subagentsDirFor(transcriptPath(row))); } catch { running = false; }
+      }
+    }
+    if (running !== !!session._subagentsBusy) {
+      session._subagentsBusy = running;
+      log.debug(`[subagents] session=${sessionId} → ${running ? 'WORKING' : 'DONE'}`);
+      emit('cli-subagent-state', sessionId, running);
+    }
+  }
+}
+
+const subagentSweepTimer = setInterval(sweepSubagents, SUBAGENT_SWEEP_MS);
+subagentSweepTimer.unref?.();
 
 // Session transitions → session-transitions.js
 const sessionTransitions = require('./session-transitions');

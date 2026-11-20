@@ -14,7 +14,7 @@ function harness() {
   const events = [];
   const context = vm.createContext({
     attentionSessions: new Set(), responseReadySessions: new Set(),
-    sessionBusyState: new Map(), sessionMap: new Map(),
+    sessionBusyState: new Map(), sessionSubagentState: new Map(), sessionMap: new Map(),
     activePtyIds: new Set(), pendingSessions: new Map(), sessionEventTimes: new Map(),
     activeSessionId: null, terminalHeaderPtyTitle: null,
     windowOnScreen: true, remoteViewing: new Set(),
@@ -24,6 +24,8 @@ function harness() {
     window: { api: {
       onTerminalNotification: callback => { listeners.notice = callback; },
       onCliBusyState: callback => { listeners.busy = callback; },
+      onCliSubagentState: callback => { listeners.subagent = callback; },
+      getSessionStates: async () => [],
       onWindowVisibility: callback => { listeners.visibility = callback; },
       onRemoteViewing: callback => { listeners.remoteViewing = callback; },
       onRemoteMarkRead: callback => { listeners.remoteMarkRead = callback; },
@@ -202,4 +204,32 @@ test('a phone can mark a session read or unread', () => {
   assert.equal(state.sessionActivity(session), 'ready');
   listeners.remoteMarkRead('s1', true);
   assert.equal(state.sessionActivity(session), 'idle');
+});
+
+test('a session waiting for its subagent shows the grey spinner, and working again shows the blue one', () => {
+  const { state, add, rows, listeners } = harness();
+  const session = add('waiting');
+  listeners.subagent('waiting', true);
+  assert.equal(state.sessionActivity(session), 'subagent');
+  for (const row of rows.get('waiting')) assert.equal(row.classList.contains('subagent-busy'), true);
+  listeners.busy('waiting', true);
+  assert.equal(state.sessionActivity(session), 'running', 'the main agent at work comes first');
+  listeners.busy('waiting', false);
+  assert.equal(state.sessionActivity(session), 'subagent');
+  listeners.subagent('waiting', false);
+  for (const row of rows.get('waiting')) assert.equal(row.classList.contains('subagent-busy'), false);
+  assert.notEqual(state.sessionActivity(session), 'subagent');
+});
+
+test('needs-you comes before a working subagent, and a subagent before an unread answer', () => {
+  const { state, add, listeners } = harness();
+  const asking = add('asking');
+  listeners.subagent('asking', true);
+  state.attentionSessions.add('asking');
+  assert.equal(state.sessionActivity(asking), 'attention');
+  const done = add('done');
+  state.responseReadySessions.add('done');
+  listeners.subagent('done', true);
+  assert.equal(state.sessionActivity(done), 'subagent');
+  assert.equal(state.groupState([done, add('quiet')]), 'subagent');
 });

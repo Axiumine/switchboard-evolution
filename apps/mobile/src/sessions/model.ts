@@ -29,9 +29,11 @@ export type Folder = { folder: string; projectPath: string; sessions: Session[] 
 /**
  * A live PTY, from get-session-states and the events that follow.
  * `busySince` is when this phone saw it start working (ms); unknown when it
- * was already working when the phone connected.
+ * was already working when the phone connected. `subagents` is set while a
+ * subagent works for the session, even if its main agent waits and is not
+ * busy; an older desktop never says, which reads as false.
  */
-export type LiveState = { busy: boolean; attention: boolean; exited: boolean; starting: boolean; busySince?: number };
+export type LiveState = { busy: boolean; attention: boolean; exited: boolean; starting: boolean; busySince?: number; subagents?: boolean };
 
 /** The status combo: running is any live session that has not exited, needs input is one asking for you. */
 export type StatusFilter = 'all' | 'running' | 'needsInput' | 'notRunning';
@@ -59,7 +61,7 @@ export const SESSION_ORDERS: readonly { key: SessionOrder; label: string; short:
   { key: 'runningPinned', label: 'Running & pinned first', short: 'Running first' },
 ];
 
-export type SessionState = 'attention' | 'busy' | 'running' | 'idle';
+export type SessionState = 'attention' | 'busy' | 'subagent' | 'running' | 'idle';
 
 /**
  * Unread and needs-you marks, as the desktop window keeps them: a session that
@@ -117,11 +119,12 @@ export function relativeTime(iso: string | null | undefined, now = Date.now()): 
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== new Date(now).getFullYear() ? { year: 'numeric' } : {}) });
 }
 
-/** What a row shows: waiting for you first, then working, then just running. */
+/** What a row shows: waiting for you first, then working, then a subagent working, then just running. */
 export function sessionState(live: LiveState | undefined): SessionState {
   if (!live || live.exited) return 'idle';
   if (live.attention) return 'attention';
   if (live.busy) return 'busy';
+  if (live.subagents) return 'subagent';
   return 'running';
 }
 
@@ -132,11 +135,11 @@ export function noticesFrom(raw: unknown): Notices {
   return { ready: ids(value.ready), attention: ids(value.attention) };
 }
 
-/** Needs-you first (live, or kept by the desktop), then working, then unread, as the desktop orders them. */
+/** Needs-you first (live, or kept by the desktop), then working, then a subagent working, then unread, as the desktop orders them. */
 export function rowState(sessionId: string, live: LiveState | undefined, notices: Notices): RowState {
   const state = sessionState(live);
   if (state === 'attention' || notices.attention.has(sessionId)) return 'attention';
-  if (state === 'busy') return 'busy';
+  if (state === 'busy' || state === 'subagent') return state;
   if (notices.ready.has(sessionId)) return 'unread';
   return state;
 }
@@ -209,7 +212,7 @@ export function buildSections(
 export function liveFromStates(states: any[], previous: Record<string, LiveState> = {}): Record<string, LiveState> {
   const live: Record<string, LiveState> = {};
   for (const s of states) {
-    const state: LiveState = { busy: !!s.busy, attention: !!s.attention, exited: !!s.exited, starting: !!s.starting };
+    const state: LiveState = { busy: !!s.busy, attention: !!s.attention, exited: !!s.exited, starting: !!s.starting, subagents: !!s.subagents };
     const before = previous[s.sessionId];
     if (state.busy && before?.busy && before.busySince !== undefined) state.busySince = before.busySince;
     live[s.sessionId] = state;
@@ -229,10 +232,16 @@ export function applyLiveEvent(live: Record<string, LiveState>, event: string, a
       // Working again means the question was answered.
       return { ...live, [id]: { ...current, exited: false, busy, attention: busy ? false : current.attention, busySince } };
     }
+    case 'cli-subagent-state': {
+      const subagents = !!args[1];
+      // Nothing to clear for a session the phone does not know, and nothing to redraw when it already reads so.
+      if (live[id] ? !!current.subagents === subagents : !subagents) return live;
+      return { ...live, [id]: { ...current, subagents } };
+    }
     case 'terminal-notification':
       return args[2] === 'attention' ? { ...live, [id]: { ...current, attention: true } } : live;
     case 'process-exited':
-      return { ...live, [id]: { ...current, exited: true, busy: false, attention: false, busySince: undefined } };
+      return { ...live, [id]: { ...current, exited: true, busy: false, attention: false, busySince: undefined, subagents: false } };
     case 'session-detected':
     case 'session-forked': {
       const [oldId, newId] = args;
@@ -262,6 +271,7 @@ export function sessionSubtitle(session: Pick<Session, 'type' | 'runtime' | 'pro
   const folder = session.projectPath.split(/[\\/]/).filter(Boolean).pop();
   const doing = state === 'busy' ? (working ? `working ${working}` : 'working')
     : state === 'attention' ? 'waiting for you'
-      : state === 'idle' ? 'not running' : '';
+      : state === 'subagent' ? 'a subagent is working'
+        : state === 'idle' ? 'not running' : '';
   return [cliLabel(session), track, folder, doing].filter(Boolean).join(' · ');
 }

@@ -600,6 +600,7 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
     typeof attentionSessions !== 'undefined' && attentionSessions.has(id) ? 'needs-attention' : '',
     typeof responseReadySessions !== 'undefined' && responseReadySessions.has(id) ? 'response-ready' : '',
     typeof sessionBusyState !== 'undefined' && sessionBusyState.get(id) === true ? 'cli-busy' : '',
+    typeof sessionSubagentState !== 'undefined' && sessionSubagentState.get(id) === true ? 'subagent-busy' : '',
   ].filter(Boolean).join(' ');
   row.className = className + (id === activeSessionId ? ' here' : '') + (stateClasses ? ' ' + stateClasses : '');
   row.dataset.sessionId = id;
@@ -684,12 +685,14 @@ function sessionActivity(session) {
   // Unread is a reminder, so it must not hide live work or a request for input.
   if (attentionSessions.has(id)) return 'attention';
   if (alive && sessionBusyState.get(id) === true) return 'running';
+  // The main agent waits while a subagent works: work all the same.
+  if (alive && typeof sessionSubagentState !== 'undefined' && sessionSubagentState.get(id) === true) return 'subagent';
   if (responseReadySessions.has(id)) return 'ready';
   return alive ? 'idle' : '';
 }
 
-const GROUP_STATE_ORDER = ['attention', 'running', 'ready', 'idle'];
-const GROUP_STATE_LABEL = { running: 'Working', ready: 'Finished, not read yet', attention: 'Needs you', idle: 'Open', woke: 'Back from snooze' };
+const GROUP_STATE_ORDER = ['attention', 'running', 'subagent', 'ready', 'idle'];
+const GROUP_STATE_LABEL = { running: 'Working', subagent: 'A subagent is working', ready: 'Finished, not read yet', attention: 'Needs you', idle: 'Open', woke: 'Back from snooze' };
 // Every class a project dot can carry: the session states plus the woke marker.
 const PROJECT_DOT_STATES = [...GROUP_STATE_ORDER, 'woke'];
 
@@ -746,7 +749,7 @@ function sessionTabState(project) {
 /** Roll running / attention up onto every project row, card and session row. */
 function updateProjectStatusDots() {
   const applyState = (el, state) => {
-    const dot = el.querySelector(':scope > .proj-dot, :scope > .proj-status > .proj-dot, :scope > .tcard-h > .proj-dot');
+    const dot = el.querySelector(':scope > .proj-dot, :scope > .proj-status > .proj-dot, :scope > .proj-side > .proj-status > .proj-dot, :scope > .tcard-h > .proj-dot');
     if (!dot) return;
     applyProjectDotState(dot, state);
   };
@@ -756,7 +759,9 @@ function updateProjectStatusDots() {
   document.querySelectorAll('.proj-row[data-project-id]').forEach(row => {
     const project = findTreeProject(row.dataset.projectId);
     if (!project) return;
-    applyState(row, projectDotState(project));
+    const state = projectDotState(project);
+    applyState(row, state);
+    syncProjectSide(row, project, state);
     applyProjectSubline(row, project);
   });
   document.querySelectorAll('.tcard[data-track-key]').forEach(el => {
@@ -872,6 +877,7 @@ function updateProjectTaskIndicator(row, project) {
   badge.title = `${count} task${count === 1 ? '' : 's'} running`;
   badge.setAttribute('aria-label', badge.title);
   badge.querySelector('.proj-task-running-count').textContent = count || '';
+  if (typeof syncProjectSide === 'function') syncProjectSide(row, project);
 }
 
 /** Task events can affect several projects when they share an attached folder. */
@@ -898,10 +904,25 @@ function buildProjectRow(project) {
   row.innerHTML = `<button type="button" class="proj-expand" aria-expanded="${expanded}" aria-controls="proj-drawer-${escapeHtml(project.id)}" aria-label="${toggleLabel}" title="${toggleLabel}">${PICONS.chevronRight(11)}</button>` +
     markHtml(project, 28) +
     `<span class="proj-text"><span class="proj-name">${escapeHtml(project.name)}</span><span class="proj-sub" aria-label="${escapeHtml(projectSubline(project))}">${projectSublineHtml(project)}</span></span>` +
-    `<span class="proj-status"><span class="proj-task-indicator" role="img">${PICONS.play(10)}<span class="proj-task-running-count"></span></span>${stateDot(state)}${runningCount ? `<span class="proj-count">${runningCount}</span>` : ''}</span>` +
+    // At the right, the + for a new session, and under it the sessions at
+    // work with their dot; the + is centred when there is nothing under it.
+    `<span class="proj-side"><button type="button" class="proj-new" title="New session in the project" aria-label="New session in ${escapeHtml(project.name)}">${PICONS.plus(12)}</button>` +
+    `<span class="proj-status"><span class="proj-task-indicator" role="img">${PICONS.play(10)}<span class="proj-task-running-count"></span></span>${stateDot(state)}${runningCount ? `<span class="proj-count">${runningCount}</span>` : ''}</span></span>` +
     (searchMatchIds !== null ? `<button type="button" class="proj-exclude-btn" title="Leave out of this search" aria-label="Leave out of this search">${PICONS.x(11)}</button>` : '');
   updateProjectTaskIndicator(row, project);
+  syncProjectSide(row, project, state);
   return row;
+}
+
+// The dot states a project row shows; the others leave it out.
+const PROJECT_ROW_DOT_STATES = new Set(['running', 'subagent', 'ready', 'attention', 'idle', 'woke']);
+
+/** Whether the row has a status under its +: then the + moves up to make room. */
+function syncProjectSide(row, project, state = projectDotState(project)) {
+  const side = row.querySelector('.proj-side');
+  if (!side) return;
+  const shown = PROJECT_ROW_DOT_STATES.has(state) || !!row.querySelector('.proj-count') || runningTasksFor(project) > 0;
+  side.classList.toggle('has-status', shown);
 }
 
 /**
@@ -1076,6 +1097,8 @@ function bindProjectList() {
     row.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(projectMenuItems(project), { x: e.clientX, y: e.clientY }); };
     const toggle = row.querySelector('.proj-expand');
     if (toggle) toggle.onclick = (e) => { e.stopPropagation(); toggleProjectDrawer(project.id); };
+    const plus = row.querySelector('.proj-new');
+    if (plus) plus.onclick = (e) => { e.stopPropagation(); showNewSessionMenu(findTreeProject(project.id) || project, null, e.currentTarget); };
   });
   // Bound here rather than on the built rows: morphdom keeps the live nodes.
   projectsContent.querySelectorAll('.proj-search-session').forEach(row => {
@@ -1137,26 +1160,12 @@ function projectDrawerStats(project) {
 /**
  * The drawer under a project row: the project's sessions, grouped the way
  * the combo beside the search field says. The plan and todo counts are on
- * the row itself, and the + for a new session sits at the right of the
- * list's first line (the first heading, or the empty note) rather than on a
- * line of its own. In the Track view every heading has its own + already.
+ * the row itself, and so is the + for a new session in the project. In the
+ * Track view every heading keeps its own +, for a session in that track.
  */
 function buildProjectDrawer(project) {
   const wrap = document.createElement('div');
-  const list = buildSessionPaneList(project);
-  const first = list.firstElementChild;
-  if (first && !first.querySelector('.pane-sec-plus')) {
-    const plus = document.createElement('button');
-    plus.type = 'button';
-    plus.className = 'pdrawer-new';
-    plus.title = 'New session in the project';
-    plus.setAttribute('aria-label', 'New session in the project');
-    plus.innerHTML = PICONS.plus(12);
-    plus.onclick = (e) => { e.stopPropagation(); showNewSessionMenu(findTreeProject(project.id) || project, null, e.currentTarget); };
-    if (!first.querySelector('.ws-flex')) first.insertAdjacentHTML('beforeend', '<span class="ws-flex"></span>');
-    first.appendChild(plus);
-  }
-  wrap.appendChild(list);
+  wrap.appendChild(buildSessionPaneList(project));
   return wrap;
 }
 

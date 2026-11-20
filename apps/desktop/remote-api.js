@@ -218,6 +218,7 @@ const EVENTS = new Set([
   'projects-changed',
   'harnesses-changed',
   'cli-busy-state',
+  'cli-subagent-state',
   'terminal-notification',
   'process-exited',
   'session-detected',

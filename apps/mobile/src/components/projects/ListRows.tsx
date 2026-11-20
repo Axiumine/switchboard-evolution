@@ -51,10 +51,11 @@ export function ProjectMark({ project, size = 30 }: { project: Pick<Project, 'id
 
 /**
  * A project row: the chevron that opens its drawer, its mark, its name over
- * its numbers (tap one to see what it counts), and on the right how many of
- * its sessions run and its state dot. The rest of the row opens the project.
+ * its numbers (tap one to see what it counts), and on the right its + (a new
+ * session in the project) over how many of its sessions run and its state
+ * dot. The rest of the row opens the project.
  */
-export const ProjectListRow = memo(function ProjectListRow({ project, open, dim, state, running, stats, tail, onToggle, onOpen, onLeaveOut }: {
+export const ProjectListRow = memo(function ProjectListRow({ project, open, dim, state, running, stats, tail, onToggle, onOpen, onNewSession, onLeaveOut }: {
   project: Project;
   open: boolean;
   /** Snoozed or done: quieter, as on the desktop. */
@@ -65,6 +66,7 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
   tail: string;
   onToggle: () => void;
   onOpen: () => void;
+  onNewSession?: () => void;
   onLeaveOut?: () => void;
 }) {
   const [named, setNamed] = useState<RowStat['key'] | null>(null);
@@ -107,9 +109,16 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
             {tail ? <Text style={[styles.meta, styles.tail]} numberOfLines={1}>{` · ${tail}`}</Text> : null}
           </View>
         </View>
-        <View style={styles.status}>
-          {running ? <Text style={styles.count}>{running}</Text> : null}
-          <View style={[styles.dot, { backgroundColor: STATE_COLORS[state], borderColor: state === 'idle' ? colors.border : STATE_COLORS[state] }]} />
+        {/* Centred as one block: alone, the + sits mid-row; with the status line under it, both move to make room. */}
+        <View style={styles.side}>
+          {/* Its own Pressable, so tapping it does not open the project. */}
+          {onNewSession ? <Plus label={`New session in ${project.name}`} onPress={onNewSession} /> : null}
+          {running || state !== 'idle' ? (
+            <View style={styles.status}>
+              {running ? <Text style={styles.count}>{running}</Text> : null}
+              <View style={[styles.dot, { backgroundColor: STATE_COLORS[state], borderColor: state === 'idle' ? colors.border : STATE_COLORS[state] }]} />
+            </View>
+          ) : null}
         </View>
         {onLeaveOut ? <LeaveOutButton label={project.name} onPress={onLeaveOut} /> : null}
       </Pressable>
@@ -136,7 +145,7 @@ function Plus({ label, onPress }: { label: string; onPress: () => void }) {
   );
 }
 
-/** A group's heading in a drawer: "TODAY 4", a track's name in its colour, "NEEDS INPUT 1"… with its + when it has one. */
+/** A group's heading in a drawer: "TODAY 4", a track's name in its colour, "NEEDS INPUT 1"… with its + when it is a track's. */
 export function GroupHead({ project, group, onPlus }: { project: Project; group: DrawerGroup; onPlus?: () => void }) {
   const color = group.track !== undefined ? trackTint(project, group.track).fg : group.tone === 'attention' ? colors.attention : group.tone === 'running' ? colors.running : SECTION;
   return (
@@ -145,20 +154,18 @@ export function GroupHead({ project, group, onPlus }: { project: Project; group:
         <Text style={[styles.headTitle, { color }]} numberOfLines={1}>{group.title}</Text>
         <Text style={styles.headCount}>{group.sessions.length}</Text>
         <View style={styles.flex} />
-        {onPlus ? <Plus label={group.track ? `New session in ${group.track.name}` : 'New session in the project'} onPress={onPlus} /> : null}
+        {onPlus ? <Plus label={group.track ? `New session in ${group.track.name}` : 'New session'} onPress={onPlus} /> : null}
       </View>
     </Card>
   );
 }
 
-/** "No sessions yet." where a drawer or a track has none, with the drawer's + when it is the first line. */
-export function NoneRow({ onPlus }: { onPlus?: () => void }) {
+/** "No sessions yet." where a drawer or a track has none. */
+export function NoneRow() {
   return (
     <Card>
       <View style={styles.none}>
         <Text style={styles.noneText}>No sessions yet.</Text>
-        <View style={styles.flex} />
-        {onPlus ? <Plus label="New session in the project" onPress={onPlus} /> : null}
       </View>
     </Card>
   );
@@ -202,7 +209,7 @@ export function FolderHead({ projectPath, count, open, top, onPress, onPlus }: {
   );
 }
 
-const STATE_WORDS: Partial<Record<RowState, string>> = { attention: 'waiting for you', busy: 'working', unread: 'unread', running: 'running' };
+const STATE_WORDS: Partial<Record<RowState, string>> = { attention: 'waiting for you', busy: 'working', subagent: 'a subagent is working', unread: 'unread', running: 'running' };
 
 /**
  * A session in a drawer, as the desktop's: its title over one line with its
@@ -281,7 +288,8 @@ const styles = StyleSheet.create({
   metaNamed: { color: colors.text },
   sep: { color: colors.textFaint, fontSize: 12 },
   tail: { flexShrink: 1 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  side: { alignItems: 'flex-end', justifyContent: 'center' },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 14 },
   count: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   dot: { width: 9, height: 9, borderRadius: 5, borderWidth: 1 },
 

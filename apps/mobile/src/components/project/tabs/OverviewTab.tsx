@@ -47,7 +47,7 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
     <>
       <ScrollView {...scroll} refreshControl={pull}>
         {status || state !== 'idle' ? (
-          <Text style={styles.status}>{[status, state === 'attention' ? 'a session needs you' : state === 'busy' ? 'working' : state === 'unread' ? 'unread' : null].filter(Boolean).join(' · ')}</Text>
+          <Text style={styles.status}>{[status, state === 'attention' ? 'a session needs you' : state === 'busy' ? 'working' : state === 'subagent' ? 'a subagent is working' : state === 'unread' ? 'unread' : null].filter(Boolean).join(' · ')}</Text>
         ) : null}
 
         {project.tracks.map((track) => (

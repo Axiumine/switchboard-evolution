@@ -155,7 +155,7 @@ test('the desktop\'s marks arrive as sets, whatever shape they come in', () => {
   expect(noticesFrom({ ready: 'a', attention: [1, 'd'] })).toEqual({ ready: new Set(), attention: new Set(['d']) });
 });
 
-test('a row shows needs-you, then working, then unread, then running', () => {
+test('a row shows needs-you, then working, then a subagent working, then unread, then running', () => {
   const idle: LiveState = { busy: false, attention: false, exited: false, starting: false };
   const notices = noticesFrom({ ready: ['done', 'busy', 'asked'], attention: ['asked-on-desktop'] });
   expect(rowState('done', undefined, notices)).toBe('unread');
@@ -166,6 +166,58 @@ test('a row shows needs-you, then working, then unread, then running', () => {
   expect(rowState('asked-on-desktop', undefined, notices)).toBe('attention');
   expect(rowState('other', idle, notices)).toBe('running');
   expect(rowState('other', undefined, notices)).toBe('idle');
+  // A subagent at work: after working and needs-you, before unread, whatever it was doing.
+  const sub: LiveState = { ...idle, subagents: true };
+  expect(rowState('other', sub, notices)).toBe('subagent');
+  expect(rowState('done', sub, notices)).toBe('subagent');
+  expect(rowState('busy', { ...sub, busy: true }, notices)).toBe('busy');
+  expect(rowState('asked', { ...sub, attention: true }, notices)).toBe('attention');
+  expect(rowState('asked-on-desktop', sub, notices)).toBe('attention');
+  // A process that exited has no subagents, whatever the flag says.
+  expect(rowState('other', { ...sub, exited: true }, notices)).toBe('idle');
+});
+
+test('subagent events set and clear the flag, and leave the rest of the state alone', () => {
+  let live: Record<string, LiveState> = {};
+  // Unknown session told to stop: nothing to remember.
+  expect(applyLiveEvent(live, 'cli-subagent-state', ['s1', false])).toBe(live);
+  live = applyLiveEvent(live, 'cli-subagent-state', ['s1', true]);
+  expect(live.s1.subagents).toBe(true);
+  expect(sessionState(live.s1)).toBe('subagent');
+  // Said twice: the same map, so nothing redraws.
+  expect(applyLiveEvent(live, 'cli-subagent-state', ['s1', true])).toBe(live);
+  // The main agent starting and stopping again does not touch the flag.
+  live = applyLiveEvent(live, 'cli-busy-state', ['s1', true]);
+  expect(sessionState(live.s1)).toBe('busy');
+  live = applyLiveEvent(live, 'cli-busy-state', ['s1', false]);
+  expect(sessionState(live.s1)).toBe('subagent');
+  // The session is re-keyed with its flag.
+  live = applyLiveEvent(live, 'session-detected', ['s1', 's2']);
+  expect(live.s1).toBeUndefined();
+  expect(live.s2.subagents).toBe(true);
+  live = applyLiveEvent(live, 'cli-subagent-state', ['s2', false]);
+  expect(sessionState(live.s2)).toBe('running');
+  live = applyLiveEvent(live, 'cli-subagent-state', ['s2', true]);
+  live = applyLiveEvent(live, 'process-exited', ['s2', 0, 0, false]);
+  expect(live.s2.subagents).toBe(false);
+  expect(sessionState(live.s2)).toBe('idle');
+  // A malformed event changes nothing.
+  expect(applyLiveEvent(live, 'cli-subagent-state', [42, true])).toBe(live);
+});
+
+test('the snapshot carries subagents, and an older desktop that sends none reads as false', () => {
+  const live = liveFromStates([
+    { sessionId: 's1', busy: false, attention: false, exited: false, starting: false, subagents: true },
+    { sessionId: 's2', busy: false, attention: false, exited: false, starting: false },
+  ]);
+  expect(live.s1.subagents).toBe(true);
+  expect(sessionState(live.s1)).toBe('subagent');
+  expect(live.s2.subagents).toBe(false);
+  expect(sessionState(live.s2)).toBe('running');
+});
+
+test('the subtitle says a subagent is working', () => {
+  expect(sessionSubtitle({ type: 'claude', projectPath: '/w/app' }, { state: 'subagent' })).toBe('Claude · app · a subagent is working');
 });
 
 test('a live session remembers since when it works, while it works', () => {

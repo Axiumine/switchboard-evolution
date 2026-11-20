@@ -183,11 +183,11 @@ export type ListRow =
   | { kind: 'section'; key: string; title: string }
   | { kind: 'toggle'; key: string; section: 'snoozed' | 'done' | 'other'; title: string; count: number; open: boolean }
   | { kind: 'project'; key: string; project: Project; open: boolean }
-  /** A drawer's group heading. `plus` starts a session: in the project, or in the group's track. */
-  | { kind: 'head'; key: string; project: Project; group: DrawerGroup; plus: 'project' | 'track' | null }
+  /** A drawer's group heading. `plus` starts a session in the group's track (the project's own + is on its row). */
+  | { kind: 'head'; key: string; project: Project; group: DrawerGroup; plus: 'track' | null }
   | { kind: 'session'; key: string; project: Project | null; session: Session; showTrack: boolean; archived?: boolean }
   | { kind: 'more'; key: string; listKey: string; label: string }
-  | { kind: 'none'; key: string; project: Project | null; plus: boolean }
+  | { kind: 'none'; key: string }
   | { kind: 'archived'; key: string; project: Project; count: number; open: boolean }
   | { kind: 'folder'; key: string; projectPath: string; count: number; open: boolean }
   /** The bottom edge of a drawer's card. */
@@ -224,16 +224,16 @@ function drawerRows(project: Project, { ui, stateOf, archivedOf, now }: ListInpu
   const base = `d:${project.id}`;
   const rows: ListRow[] = [];
   const groups = drawerGroups(project, mode, stateOf, now);
-  if (!groups.length) rows.push({ kind: 'none', key: `${base}:none`, project, plus: true });
-  groups.forEach((group, index) => {
-    const plus = mode === 'track' ? 'track' : index === 0 ? 'project' : null;
+  if (!groups.length) rows.push({ kind: 'none', key: `${base}:none` });
+  groups.forEach((group) => {
+    const plus = mode === 'track' ? 'track' : null;
     rows.push({ kind: 'head', key: `${base}:h:${group.key}`, project, group, plus });
     const listKey = `${project.id}:${mode}:${group.key}`;
     const limit = group.unlimited || ui.expandedLists[listKey] ? Infinity : mode === 'track' ? LIST_LIMIT : GROUP_LIMIT;
     for (const session of group.sessions.slice(0, limit)) {
       rows.push({ kind: 'session', key: `${base}:${group.key}:${session.sessionId}`, project, session, showTrack: mode !== 'track' });
     }
-    if (!group.sessions.length) rows.push({ kind: 'none', key: `${base}:none:${group.key}`, project, plus: false });
+    if (!group.sessions.length) rows.push({ kind: 'none', key: `${base}:none:${group.key}` });
     if (group.sessions.length > limit) {
       rows.push({ kind: 'more', key: `${base}:more:${group.key}`, listKey, label: `+ ${group.sessions.length - limit} ${mode === 'time' ? 'older' : 'more'}` });
     }

@@ -5017,7 +5017,7 @@ body { display: flex; flex-direction: column; }
 }
 
 /* Keep an inactive session dot from reserving space after the task count. */
-.proj-status > .proj-dot:not(.running, .ready, .attention, .idle, .woke) {
+.proj-status > .proj-dot:not(.running, .subagent, .ready, .attention, .idle, .woke) {
   display: none;
 }
 
@@ -5072,6 +5072,23 @@ body { display: flex; flex-direction: column; }
   inset: -2px;
   border-radius: 50%;
   border: 1.5px solid #4fc3f7;
+  border-top-color: transparent;
+  animation: spin-dot 0.8s linear infinite;
+}
+
+/* A subagent works while the main agent waits: the same ring, in the grey
+   of the session count beside it, a quieter "still working". */
+.proj-dot.subagent {
+  position: relative;
+  background: transparent;
+  box-shadow: none;
+}
+.proj-dot.subagent::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.5px solid #7a7a90;
   border-top-color: transparent;
   animation: spin-dot 0.8s linear infinite;
 }
@@ -6575,7 +6592,7 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 }
 
 .ws-tab--session { display: inline-flex; align-items: center; gap: 6px; }
-.ws-tab--session .proj-dot:not(.running, .ready, .attention, .idle) { display: none; }
+.ws-tab--session .proj-dot:not(.running, .subagent, .ready, .attention, .idle) { display: none; }
 
 .pane-seg {
   display: inline-flex;
@@ -9092,3 +9109,66 @@ body.project-window .ws-body:has(> .note-window-body) { padding: 0; overflow: hi
 .note-window-body .viewer-panel-editor,
 .note-window-body .markdown-preview { flex: 1; min-height: 0; }
 .note-window-error { padding: 20px; color: #e05070; font-size: 13px; }
+
+/* ========== PROJECT ROW: + AND STATUS ==========
+   The + for a new session at the right of the row, centred; with sessions at
+   work it moves up and their dot and count sit under it. */
+.proj-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  flex-shrink: 0;
+  min-width: 22px;
+  align-self: stretch;
+}
+.proj-side:not(.has-status) > .proj-status { display: none; }
+.proj-new {
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: #8088ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.proj-new:hover { background: rgba(120,130,255,0.16); color: #a6abff; }
+
+/* The session rows' spinner, grey, while a subagent works and the main agent waits. */
+.session-item.subagent-busy:not(.cli-busy):not(.needs-attention) .session-status-dot {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.session-item.subagent-busy:not(.cli-busy):not(.needs-attention) .session-mark::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.5px solid #7a7a90;
+  border-top-color: transparent;
+  animation: spin-dot 0.8s linear infinite;
+}
+.pane-session.subagent-busy:not(.cli-busy):not(.needs-attention) .pane-dot {
+  display: block;
+  position: relative;
+  width: 10px;
+  height: 10px;
+  margin-right: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.pane-session.subagent-busy:not(.cli-busy):not(.needs-attention) .pane-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid #7a7a90;
+  border-top-color: transparent;
+  animation: spin-dot 0.8s linear infinite;
+}

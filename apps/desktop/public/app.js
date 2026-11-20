@@ -138,6 +138,8 @@ const searchExcluded = { query: null, sessions: new Set(), projects: new Set() }
 const attentionSessions = new Set(); // sessions needing user action (OSC 9)
 const responseReadySessions = new Set(); // CLI finished, user hasn't looked (terminal state)
 const sessionBusyState = new Map(); // sessionId → boolean (currently active)
+// sessionId → true while a subagent works for a session whose main agent waits (main.js sweepSubagents).
+const sessionSubagentState = new Map();
 // Who is looking (isSessionSeen): the open session counts only while the
 // window is on screen, and a paired phone can have a session open too.
 let windowOnScreen = true;
@@ -211,6 +213,10 @@ function rekeySessionActivity(oldId, newId) {
   if (sessionBusyState.has(oldId)) {
     sessionBusyState.set(newId, sessionBusyState.get(oldId));
     sessionBusyState.delete(oldId);
+  }
+  if (sessionSubagentState.has(oldId)) {
+    sessionSubagentState.set(newId, sessionSubagentState.get(oldId));
+    sessionSubagentState.delete(oldId);
   }
   if (activePtyIds.delete(oldId)) activePtyIds.add(newId);
   if (sessionEventTimes.has(oldId)) { sessionEventTimes.set(newId, sessionEventTimes.get(oldId)); sessionEventTimes.delete(oldId); }
@@ -409,6 +415,8 @@ window.api.onSessionForked((oldId, newId) => {
 });
 
 window.api.onProcessExited((sessionId, exitCode, signal, userStopped) => {
+  // Its subagents went with it.
+  if (sessionSubagentState.has(sessionId)) setSubagentActivity(sessionId, false);
   const entry = openSessions.get(sessionId);
   const session = sessionMap.get(sessionId);
   if (entry) entry.closed = true;
@@ -503,6 +511,24 @@ window.api.onTerminalNotification((sessionId, message, kind) => {
 window.api.onCliBusyState((sessionId, busy) => {
   setActivity(sessionId, busy);
 });
+
+/**
+ * A subagent started or stopped working for this session. Its rows show a
+ * second spinner, in the grey of the session counts, while the main agent
+ * waits; it says nothing about unread, which only the main agent's turn sets.
+ */
+function setSubagentActivity(sessionId, running) {
+  if (running) sessionSubagentState.set(sessionId, true);
+  else sessionSubagentState.delete(sessionId);
+  forEachSessionItem(sessionId, item => item.classList.toggle('subagent-busy', !!running));
+  if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+}
+
+window.api.onCliSubagentState((sessionId, running) => setSubagentActivity(sessionId, running));
+// Subagents already at work when this window loads.
+window.api.getSessionStates?.().then(states => {
+  for (const state of states || []) if (state.subagents) setSubagentActivity(state.sessionId, true);
+}).catch(() => {});
 
 // --- Seen elsewhere: a hidden window, a paired phone (session-notices.js) ---
 window.api.onWindowVisibility((visible) => {

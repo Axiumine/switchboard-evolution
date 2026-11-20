@@ -135,16 +135,17 @@ export default function ProjectsScreen() {
             now={now}
             onToggle={() => ui.toggleDrawer(item.project.id, searching)}
             onOpen={openProject}
+            onNewSession={() => newSession(`p:${item.project.id}`)}
             onLeaveOut={searching ? () => leaveOut({ projectId: item.project.id }) : undefined}
           />
         );
       case 'head': {
         const { project, group } = item;
-        const plus = item.plus === 'track' && group.track ? () => newSession(`t:${group.track!.id}`) : item.plus ? () => newSession(`p:${project.id}`) : undefined;
+        const plus = item.plus === 'track' && group.track ? () => newSession(`t:${group.track!.id}`) : undefined;
         return <GroupHead project={project} group={group} onPlus={plus} />;
       }
       case 'none':
-        return <NoneRow onPlus={item.plus && item.project ? () => newSession(`p:${item.project!.id}`) : undefined} />;
+        return <NoneRow />;
       case 'session':
         return (
           <DrawerSessionRow
@@ -260,12 +261,13 @@ export default function ProjectsScreen() {
 }
 
 /** A project row with what it needs read: its plan's numbers, its state and running sessions. */
-function ProjectRow({ project, open, now, onToggle, onOpen, onLeaveOut }: {
+function ProjectRow({ project, open, now, onToggle, onOpen, onNewSession, onLeaveOut }: {
   project: Project;
   open: boolean;
   now: number;
   onToggle: () => void;
   onOpen: (project: Project) => void;
+  onNewSession: () => void;
   onLeaveOut?: () => void;
 }) {
   const live = useConnection((s) => s.live);
@@ -288,6 +290,7 @@ function ProjectRow({ project, open, now, onToggle, onOpen, onLeaveOut }: {
       tail={tail}
       onToggle={onToggle}
       onOpen={() => onOpen(project)}
+      onNewSession={onNewSession}
       onLeaveOut={onLeaveOut}
     />
   );

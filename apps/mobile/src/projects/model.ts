@@ -65,7 +65,7 @@ export function projectRowStats(project: Project, plan: Pick<ProjectPlan, 'plan'
   ];
 }
 
-const URGENCY: RowState[] = ['attention', 'busy', 'unread', 'running', 'idle'];
+const URGENCY: RowState[] = ['attention', 'busy', 'subagent', 'unread', 'running', 'idle'];
 
 /** The most urgent state among sessions, as a project's dot shows it. */
 export function rollupState(sessions: Session[], live: Record<string, LiveState>, notices: Notices): RowState {

@@ -36,6 +36,10 @@ test('a project reads as its most urgent session', () => {
   expect(rollupState(projectSessions(p), { b: { ...idle, busy: true } }, notices)).toBe('busy');
   expect(rollupState(projectSessions(p), { b: { ...idle, busy: true }, c: { ...idle, attention: true } }, notices)).toBe('attention');
   expect(rollupState([], {}, notices)).toBe('idle');
+  // A subagent at work reads under a session working itself and over an unread one.
+  expect(rollupState(projectSessions(p), { b: { ...idle, subagents: true } }, notices)).toBe('subagent');
+  expect(rollupState(projectSessions(p), { b: { ...idle, subagents: true }, c: { ...idle, busy: true } }, notices)).toBe('busy');
+  expect(rollupState(projectSessions(p), { b: { ...idle, subagents: true }, c: { ...idle, attention: true } }, notices)).toBe('attention');
 });
 
 test('a session starts in the track\'s folder, then the project\'s default, then its own folder', () => {
