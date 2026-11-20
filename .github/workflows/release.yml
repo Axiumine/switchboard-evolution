@@ -155,8 +155,10 @@ jobs:
       - name: herdr-core is in the app
         if: runner.os != 'Windows'
         run: |
+          # Both patterns have a wildcard: nullglob drops only a pattern with
+          # one that matches nothing, so a plain path would stay in the list.
           shopt -s nullglob
-          apps=(dist/mac*/*.app/Contents/Resources dist/linux-unpacked/resources)
+          apps=(dist/mac*/*.app/Contents/Resources dist/linux*-unpacked/resources)
           [ ${#apps[@]} -gt 0 ] || { echo "::error::No packed app found in dist."; exit 1; }
           for resources in "${apps[@]}"; do
             if [ ! -x "$resources/bin/herdr-core" ]; then
