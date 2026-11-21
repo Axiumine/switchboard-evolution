@@ -7,6 +7,11 @@ const path = require('path');
 const sessionCache = require('../session-cache');
 const { getFolderIndexMtimeMs } = require('../folder-index-state');
 
+// Keep the machine's real OpenCode database out of these tests: the OpenCode
+// ones below point OPENCODE_DB at a fixture of their own.
+const NO_OPENCODE_DB = path.join(os.tmpdir(), `switchboard-no-opencode-${process.pid}.db`);
+process.env.OPENCODE_DB = NO_OPENCODE_DB;
+
 // Minimal valid session transcript: one line carries `cwd` (for deriveProjectPath)
 // and a user message (so readSessionFile yields a non-null session).
 function writeSession(folderPath, cwd) {
@@ -660,4 +665,225 @@ test('a live plain terminal keeps the name and star it was given', () => {
     .find(session => session.sessionId === 'terminal-1');
   assert.equal(terminal.name, 'dev server');
   assert.equal(terminal.starred, 1);
+});
+
+// --- OpenCode: sessions in a database, not in files ---
+
+const { DatabaseSync } = require('node:sqlite');
+const opencode = require('../harnesses/opencode');
+
+const OPENCODE_SCHEMA = `
+  CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, parent_id text, slug text NOT NULL,
+    directory text NOT NULL, title text, version text NOT NULL, time_created integer NOT NULL,
+    time_updated integer NOT NULL, time_archived integer);
+  CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+    seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);
+`;
+
+// An OpenCode data folder with its database, and a Claude projects folder,
+// both empty until a test writes to them.
+function setUpOpencode(globalSettings = { disabledHarnesses: ['codex'] }, initOptions = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-opencode-'));
+  const projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-claude-'));
+  const file = path.join(dir, 'opencode.db');
+  const db = new DatabaseSync(file);
+  db.exec(OPENCODE_SCHEMA);
+  process.env.OPENCODE_DB = file;
+  let seq = 0;
+  const T = Date.parse('2026-11-21T10:00:00.000Z');
+  const oc = {
+    dir, projectsDir, db,
+    addSession(id, { project = 'p1', directory = '/tmp/oc-project', text = 'hello opencode', updated = T } = {}) {
+      db.prepare(`INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated)
+        VALUES (?, ?, 'calm-otter', ?, '2.3.2', ?, ?)`).run(id, project, directory, T, updated);
+      oc.addMessage(id, text);
+    },
+    addMessage(sessionId, text) {
+      seq++;
+      db.prepare(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+        VALUES (?, ?, 'user', ?, ?, ?, ?)`).run(`msg_${sessionId}_${seq}`, sessionId, seq, T + seq, T + seq,
+        JSON.stringify({ text, time: { created: T + seq } }));
+    },
+    touch(sessionId, ms) {
+      db.prepare('UPDATE session_v2 SET time_updated = ? WHERE id = ?').run(ms, sessionId);
+    },
+    metaMap: new Map(),
+    init(fake) {
+      sessionCache.init({ PROJECTS_DIR: projectsDir, activeSessions: new Map(),
+        getMainWindow: () => null, log: console, db: fake.db, ...initOptions });
+    },
+    // A fake db whose cache reads see the rows written so far, like the real one.
+    fake() {
+      const fake = makeFakeDb(oc.metaMap, globalSettings);
+      fake.deleted = [];
+      fake.deletedFolders = [];
+      fake.db.getCachedByFolder = key => oc.rows.filter(r => r.folder === key);
+      fake.db.getCachedSession = id => oc.rows.find(r => r.sessionId === id) || null;
+      fake.db.upsertCachedSessions = sessions => {
+        for (const s of sessions) {
+          fake.indexedFolders.add(s.folder);
+          fake.cachedRows.push(s);
+          oc.rows = oc.rows.filter(r => r.sessionId !== s.sessionId).concat(s);
+        }
+      };
+      fake.db.deleteCachedSession = id => { fake.deleted.push(id); oc.rows = oc.rows.filter(r => r.sessionId !== id); };
+      fake.db.deleteCachedFolder = folder => { fake.deletedFolders.push(folder); oc.rows = oc.rows.filter(r => r.folder !== folder); };
+      oc.init(fake);
+      return fake;
+    },
+    rows: [],
+    cleanup() {
+      opencode.closeDb();
+      try { db.close(); } catch {}
+      process.env.OPENCODE_DB = NO_OPENCODE_DB;
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(projectsDir, { recursive: true, force: true });
+    },
+  };
+  return oc;
+}
+
+test('reconcile indexes OpenCode projects from its database, then skips them while unchanged', () => {
+  const oc = setUpOpencode();
+  try {
+    oc.addSession('ses_a', { directory: '/tmp/oc-project' });
+    oc.addSession('ses_b', { project: 'p2', directory: '/tmp/oc-other' });
+
+    const first = oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.ok(first.indexedFolders.has('opencode/p1'));
+    assert.ok(first.indexedFolders.has('opencode/p2'));
+    const row = first.cachedRows.find(r => r.sessionId === 'ses_a');
+    assert.equal(row.runtime, 'opencode');
+    assert.equal(row.projectPath, '/tmp/oc-project');
+    // Like a codex date folder, a project spans directories: no folder project.
+    assert.equal(oc.metaMap.get('opencode/p1').projectPath, null);
+
+    const second = oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.equal(second.indexedFolders.size, 0, 'an unchanged database is not read again');
+  } finally {
+    oc.cleanup();
+  }
+});
+
+test('an OpenCode session written to is read again, the others are not', () => {
+  const oc = setUpOpencode();
+  try {
+    oc.addSession('ses_a');
+    oc.addSession('ses_b');
+    oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+
+    oc.addMessage('ses_a', 'second turn zebra');
+    oc.touch('ses_a', Date.parse('2026-11-21T11:00:00.000Z'));
+    const after = oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.deepEqual(after.cachedRows.map(r => r.sessionId), ['ses_a']);
+    assert.match(after.cachedRows[0].textContent, /zebra/);
+  } finally {
+    oc.cleanup();
+  }
+});
+
+test('an archived or deleted OpenCode session leaves the cache, and so does an emptied project', () => {
+  const oc = setUpOpencode();
+  try {
+    oc.addSession('ses_a');
+    oc.addSession('ses_b');
+    oc.addSession('ses_c', { project: 'p2' });
+    oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+
+    oc.db.prepare('UPDATE session_v2 SET time_archived = 1, time_updated = time_updated + 5 WHERE id = ?').run('ses_a');
+    oc.db.prepare('DELETE FROM session_message WHERE session_id = ?').run('ses_c');
+    oc.db.prepare('DELETE FROM session_v2 WHERE id = ?').run('ses_c');
+    const after = oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.deepEqual(after.deleted, ['ses_a']);
+    // A project with nothing left is no longer listed, like a deleted Claude
+    // folder: the watcher's refresh of the folders it knows is what drops it.
+    assert.deepEqual(oc.rows.map(r => r.sessionId).sort(), ['ses_b', 'ses_c']);
+    sessionCache.refreshFolder('opencode/p2');
+    assert.deepEqual(after.deletedFolders, ['opencode/p2']);
+    assert.deepEqual(oc.rows.map(r => r.sessionId), ['ses_b']);
+  } finally {
+    oc.cleanup();
+  }
+});
+
+test('OpenCode sessions read on a worker are written once it reports', async () => {
+  // A pass over the inline limit hands every planned read to a worker, OpenCode's
+  // included. Its rows have no file to stat afterwards: the stamp comes from
+  // the database, or they would be dropped on every pass.
+  const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-codex-'));
+  const prevHome = process.env.CODEX_HOME;
+  const oc = setUpOpencode({}, { inlineReadLimitBytes: 0 });
+  try {
+    process.env.CODEX_HOME = codexHome;
+    writeRollout(path.join(codexHome, 'sessions', '2026', '08', '26'), '/tmp/some-project');
+    oc.addSession('ses_a');
+    const fake = oc.fake();
+    const pending = sessionCache.reconcileCacheFromFilesystem();
+    assert.ok(pending, 'the pass is read on a worker');
+    await pending;
+    assert.ok(fake.indexedFolders.has('opencode/p1'));
+    assert.ok(oc.rows.some(r => r.sessionId === 'ses_a'));
+  } finally {
+    if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome;
+    fs.rmSync(codexHome, { recursive: true, force: true });
+    oc.cleanup();
+  }
+});
+
+test('indexing on the worker reads OpenCode sessions and remembers the project stamp', async () => {
+  const oc = setUpOpencode();
+  try {
+    oc.addSession('ses_a', { text: 'worker giraffe' });
+    const fake = oc.fake();
+    const result = await sessionCache.indexFoldersInWorker({ pauseMs: 0 });
+    assert.ok(result.changed);
+    assert.ok(oc.rows.some(r => r.sessionId === 'ses_a' && /giraffe/.test(r.textContent)));
+    assert.equal(oc.metaMap.get('opencode/p1').indexMtimeMs, opencode.folderStamp('opencode/p1'));
+
+    fake.indexedFolders.clear();
+    const again = await sessionCache.indexFoldersInWorker({ pauseMs: 0 });
+    assert.equal(again.count, 0, 'an unchanged project is skipped');
+  } finally {
+    oc.cleanup();
+  }
+});
+
+test('a database change names no session: the folders whose stamp moved are found', () => {
+  const oc = setUpOpencode();
+  try {
+    oc.addSession('ses_a');
+    oc.addSession('ses_b', { project: 'p2' });
+    oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.deepEqual(sessionCache.changedFolders(opencode), []);
+
+    oc.touch('ses_a', Date.parse('2026-11-21T12:00:00.000Z'));
+    assert.deepEqual(sessionCache.changedFolders(opencode), ['opencode/p1']);
+
+    // A project whose last session is gone is no longer listed by OpenCode,
+    // but the cache still knows it, and it has to be refreshed to be dropped.
+    oc.db.prepare('DELETE FROM session_v2 WHERE id = ?').run('ses_b');
+    assert.deepEqual(sessionCache.changedFolders(opencode).sort(), ['opencode/p1', 'opencode/p2']);
+
+    // A project OpenCode starts after the last pass is new to the cache.
+    oc.addSession('ses_c', { project: 'p3' });
+    assert.ok(sessionCache.changedFolders(opencode).includes('opencode/p3'));
+  } finally {
+    oc.cleanup();
+  }
+});
+
+test('the database and its write-ahead log are what to watch', () => {
+  const oc = setUpOpencode();
+  try {
+    assert.deepEqual(opencode.watchPaths(), [process.env.OPENCODE_DB, process.env.OPENCODE_DB + '-wal']);
+  } finally {
+    oc.cleanup();
+  }
 });

@@ -13,7 +13,7 @@ const { createRemoteServer, reachableAddresses, pairingLink } = require('./remot
 const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
-const { readTranscriptSince } = require('./transcript-reader');
+const { readViewerEntriesSince } = require('./transcript-reader');
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
 const { createSessionNotices } = require('./session-notices');
@@ -2034,8 +2034,10 @@ ipcMain.handle('rename-session', (_event, sessionId, name) => {
 function readSessionViewerEntries(row) {
   // The harness owns its transcript naming and its on-disk format. Normalize
   // here so neither transcript consumer needs runtime-specific branches.
-  const jsonlPath = transcriptPath(row);
   const harness = getHarness(row.runtime);
+  // A CLI keeping its sessions in a database reads them itself.
+  if (harness.readEntriesSince) return harness.readEntriesSince(row, 0).entries;
+  const jsonlPath = transcriptPath(row);
   const content = fs.readFileSync(jsonlPath, 'utf-8');
   const entries = [];
   for (const line of content.split('\n')) {
@@ -2066,14 +2068,14 @@ ipcMain.handle('get-session-last-message', (_event, sessionId) => {
   }
 });
 
-// The entries written since `cursor` (a byte offset from the previous call),
-// so a client following a live session does not re-read the whole transcript.
+// The entries written since `cursor` (from the previous call: a byte offset, or
+// a database CLI's own position), so a client following a live session does
+// not re-read the whole transcript.
 ipcMain.handle('read-session-entries', (_event, sessionId, cursor) => {
   const row = getCachedSession(sessionId);
   if (!row) return { error: 'Session not found in cache' };
   try {
-    const read = readTranscriptSince(transcriptPath(row), cursor || 0);
-    return { entries: getHarness(row.runtime).toViewerEntries(read.entries), cursor: read.cursor, reset: read.reset };
+    return readViewerEntriesSince(getHarness(row.runtime), row, cursor || 0);
   } catch (err) {
     return { error: err.message };
   }
@@ -2086,8 +2088,8 @@ ipcMain.handle('read-session-tail', (_event, sessionId, count) => {
   const row = getCachedSession(sessionId);
   if (!row) return { error: 'Session not found in cache' };
   try {
-    const read = readTranscriptSince(transcriptPath(row), 0);
-    const entries = getHarness(row.runtime).toViewerEntries(read.entries);
+    const read = readViewerEntriesSince(getHarness(row.runtime), row, 0);
+    const entries = read.entries;
     const kept = entries.slice(-count);
     return { entries: kept, cursor: read.cursor, earlier: entries.length - kept.length };
   } catch (err) {
@@ -3126,7 +3128,8 @@ function sweepSubagents() {
     seen.add(session);
     const sessionId = session.realSessionId || key;
     let running = false;
-    if (!session.exited && !session.isPlainTerminal && session.runtime !== 'codex') {
+    // Only Claude keeps its subagents' transcripts in a folder beside the session's.
+    if (!session.exited && !session.isPlainTerminal && (session.runtime || DEFAULT_HARNESS) === DEFAULT_HARNESS) {
       const row = getCachedSession(sessionId);
       if (row) {
         try { running = subagentsRunning(subagentsDirFor(transcriptPath(row))); } catch { running = false; }
@@ -3324,10 +3327,51 @@ function stopHarnessWatchers() {
   }
 }
 
+/**
+ * A CLI keeping its sessions in one database (OpenCode) is watched through that
+ * file and its write-ahead log, in their directory so a database created or
+ * replaced later is still seen. A write names no session, so each pass refreshes
+ * the folders whose stamp moved. Throttled rather than debounced: the database
+ * is written all through a turn, and a debounce would hold every update back
+ * until the turn paused.
+ */
+function startDatabaseWatcher(h) {
+  const files = h.watchPaths();
+  const dir = path.dirname(files[0]);
+  if (!fs.existsSync(dir)) return;
+  const names = new Set(files.map(f => path.basename(f)));
+  let timer = null;
+
+  function flush() {
+    timer = null;
+    let folders = [];
+    try { folders = sessionCache.changedFolders(h); } catch (err) { log.error(`[harness-watch] ${h.id}:`, err.message); }
+    for (const folder of folders) {
+      try { refreshFolder(folder); } catch (err) { log.error('[harness-watch]', folder, err.message); }
+    }
+    if (folders.length) notifyRendererProjectsChanged('sessions');
+  }
+
+  try {
+    const watcher = fs.watch(dir, (_eventType, filename) => {
+      if (filename && !names.has(String(filename))) return;
+      if (!timer) timer = setTimeout(flush, 1000);
+    });
+    watcher.on('error', (err) => log.error(`[harness-watch] ${h.id}:`, err.message));
+    harnessWatchers.push(watcher);
+    // Closing the watcher must not leave a pending pass behind.
+    harnessWatchers.push({ close() { if (timer) clearTimeout(timer); timer = null; } });
+    log.info(`[harness-watch] watching ${h.id} at ${files[0]}`);
+  } catch (err) {
+    log.error(`[harness-watch] failed to watch ${h.id}:`, err.message);
+  }
+}
+
 function startHarnessWatchers() {
   for (const h of availableHarnesses()) {
     if (!h.folderPrefix) continue; // Claude's root is startProjectsWatcher's job
     if (!harnessEnabled(h.id)) continue;
+    if (h.watchPaths) { startDatabaseWatcher(h); continue; }
     const root = h.sessionsRoot();
     if (!fs.existsSync(root)) continue;
 

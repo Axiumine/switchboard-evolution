@@ -50,3 +50,31 @@ test('a bad cursor counts as the start', () => {
   assert.deepEqual(readTranscriptSince(file, -5).entries, [{ n: 1 }]);
   assert.deepEqual(readTranscriptSince(file, 1.5).entries, [{ n: 1 }]);
 });
+
+// --- viewer entries for any CLI ---
+
+const { readViewerEntriesSince } = require('../transcript-reader');
+
+test('a file-based CLI is read from its transcript and mapped by the harness', () => {
+  const file = tempTranscript('{"n":1}\n{"n":2}\n');
+  const harness = {
+    transcriptPath: row => (row.sessionId === 's1' ? file : null),
+    toViewerEntries: entries => entries.map(e => ({ mapped: e.n })),
+  };
+  const read = readViewerEntriesSince(harness, { sessionId: 's1' }, 0);
+  assert.deepEqual(read.entries, [{ mapped: 1 }, { mapped: 2 }]);
+  assert.equal(read.cursor, fs.statSync(file).size);
+  assert.equal(read.reset, false);
+});
+
+test('a CLI with its own reader is asked directly, with the cursor it gave', () => {
+  const calls = [];
+  const harness = {
+    transcriptPath: () => { throw new Error('no file to read'); },
+    toViewerEntries: () => { throw new Error('already viewer entries'); },
+    readEntriesSince: (row, cursor) => { calls.push([row.sessionId, cursor]); return { entries: [{ x: 1 }], cursor: 9, reset: false }; },
+  };
+  assert.deepEqual(readViewerEntriesSince(harness, { sessionId: 's1' }, 4), { entries: [{ x: 1 }], cursor: 9, reset: false });
+  assert.deepEqual(readViewerEntriesSince(harness, { sessionId: 's1' }), { entries: [{ x: 1 }], cursor: 9, reset: false });
+  assert.deepEqual(calls, [['s1', 4], ['s1', 0]]);
+});

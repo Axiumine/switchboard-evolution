@@ -17,7 +17,7 @@ test('one indexing worker commits searchable results, queues changes, and keeps 
       const root = path.join(process.env.SWITCHBOARD_DATA_DIR, 'projects');
       const folder = path.join(root, 'project');
       fs.mkdirSync(folder, { recursive: true });
-      db.setSetting('global', { disabledHarnesses: ['codex'] });
+      db.setSetting('global', { disabledHarnesses: ['codex', 'opencode'] });
       const line = content => JSON.stringify({ type: 'user', cwd: '/test/project',
         message: { role: 'user', content } }) + '\\n';
       for (let i = 0; i < 40; i++) fs.writeFileSync(path.join(folder, i + '.jsonl'), line('searchable elephant ' + i + ' abc '.repeat(2000)));
@@ -84,6 +84,58 @@ test('one indexing worker commits searchable results, queues changes, and keeps 
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', SWITCHBOARD_DATA_DIR: dataDir },
       encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stderr || result.error?.message);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('the indexing worker reads OpenCode sessions from its database', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-index-opencode-'));
+  try {
+    const opencodeDb = path.join(dataDir, 'opencode.db');
+    const result = spawnSync(require('electron'), ['-e', `
+      const assert = require('node:assert/strict');
+      const { DatabaseSync } = require('node:sqlite');
+      const oc = new DatabaseSync(process.env.OPENCODE_DB);
+      oc.exec(\`
+        CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, parent_id text, slug text NOT NULL,
+          directory text NOT NULL, title text, version text NOT NULL, time_created integer NOT NULL,
+          time_updated integer NOT NULL, time_archived integer);
+        CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+          seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);
+      \`);
+      oc.prepare("INSERT INTO session_v2 VALUES ('ses_one', 'p1', NULL, 's', '/test/oc', 'Named by OpenCode', '2.3.2', 1, 2, NULL)").run();
+      oc.prepare("INSERT INTO session_message VALUES ('msg_1', 'ses_one', 'user', 1, 1, 1, ?)").run(JSON.stringify({ text: 'find the walrus' }));
+      const db = require('./db');
+      const { SessionIndexer } = require('./session-indexer');
+      db.setSetting('global', { disabledHarnesses: ['codex'] });
+      const errors = [];
+      const indexer = new SessionIndexer({ projectsDir: require('path').join(process.env.SWITCHBOARD_DATA_DIR, 'projects'),
+        onError: err => errors.push(String(err)) });
+      // The worker is unref'd: without a timer the process would end, status 0,
+      // before a single assertion ran.
+      const keepAlive = setInterval(() => {}, 1000);
+      (async () => {
+        await indexer.populate();
+        const row = db.getCachedSession('ses_one');
+        assert.equal(row.runtime, 'opencode');
+        assert.equal(row.projectPath, '/test/oc');
+        assert.equal(row.aiTitle, 'Named by OpenCode');
+        assert.deepEqual(db.searchSessionIds('walrus', ['ses_one']), ['ses_one']);
+        oc.prepare("UPDATE session_v2 SET time_archived = 3, time_updated = 3 WHERE id = 'ses_one'").run();
+        await indexer.folder('opencode/p1');
+        assert.equal(db.getCachedSession('ses_one'), null);
+        assert.deepEqual(errors, []);
+        await indexer.close();
+        db.closeDb();
+        clearInterval(keepAlive);
+        console.log('ALL ASSERTIONS RAN');
+      })().catch(err => { console.error(err); process.exit(1); });
+    `], { cwd: path.join(__dirname, '..'),
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', SWITCHBOARD_DATA_DIR: dataDir, OPENCODE_DB: opencodeDb },
+      encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    assert.match(result.stdout, /ALL ASSERTIONS RAN/);
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
