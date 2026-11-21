@@ -47,4 +47,35 @@ function applyStatusReport(session, report) {
   return events;
 }
 
-module.exports = { markBusy, markIdle, applyStatusReport };
+const STATUS_OPEN = '\x1b]7501;';
+const STATUS_RECORD_RE = /\x1b\]7501;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+// A record is at most a few hundred bytes (title 192, message 2048): an
+// unterminated start longer than this is not one, and is dropped.
+const MAX_STATUS_CARRY = 4096;
+
+/**
+ * The complete OSC 7501 payloads in some terminal output, and what to keep
+ * for the next chunk: an unterminated record, or the start of one ("\x1b]75").
+ */
+function takeStatusRecords(text) {
+  const reports = [];
+  let end = 0;
+  for (const m of text.matchAll(STATUS_RECORD_RE)) {
+    reports.push(m[1]);
+    end = m.index + m[0].length;
+  }
+  const tail = text.slice(end);
+  let rest = '';
+  const open = tail.lastIndexOf(STATUS_OPEN);
+  if (open !== -1) {
+    rest = tail.slice(open);
+  } else {
+    // The chunk may end inside the opening bytes themselves.
+    for (let n = Math.min(STATUS_OPEN.length - 1, tail.length); n > 0; n--) {
+      if (STATUS_OPEN.startsWith(tail.slice(-n))) { rest = tail.slice(-n); break; }
+    }
+  }
+  return { reports, rest: rest.length > MAX_STATUS_CARRY ? '' : rest };
+}
+
+module.exports = { markBusy, markIdle, applyStatusReport, takeStatusRecords };

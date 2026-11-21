@@ -14,7 +14,7 @@ const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
 const { readViewerEntriesSince } = require('./transcript-reader');
-const { markBusy, markIdle, applyStatusReport } = require('./cli-state');
+const { markBusy, markIdle, applyStatusReport, takeStatusRecords } = require('./cli-state');
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
 const { createSessionNotices } = require('./session-notices');
@@ -2403,6 +2403,25 @@ function wireSessionPty(sessionId, session, harness) {
       if (busy !== null) sendTerminalBusy(session, currentId, busy);
     }
 
+    // OpenCode's status records (OSC 7501): one for the whole TUI, with no id,
+    // and one per session it has open; the TUI's own is the PTY's state. A
+    // record is sent only when it changes, so one cut by a chunk boundary
+    // would never come again: the unfinished end of a chunk is kept and read
+    // with the next one (only here, never sent twice to the terminal).
+    if (harness?.parseStatusReport && (session._statusCarry || data.includes('\x1b'))) {
+      const { reports, rest } = takeStatusRecords((session._statusCarry || '') + data);
+      session._statusCarry = rest;
+      for (const payload of reports) {
+        const report = harness.parseStatusReport(payload);
+        if (!report || report.id) continue;
+        log.debug(`[OSC 7501] session=${currentId} state=${report.state} wasBusy=${!!session._cliBusy}`);
+        for (const [channel, ...args] of applyStatusReport(session, report)) {
+          if (channel === 'terminal-notification') log.info(`[OSC 7501] session=${currentId} → ATTENTION "${args[0]}"`);
+          emit(channel, currentId, ...args);
+        }
+      }
+    }
+
     // Parse OSC sequences (title changes, progress, notifications, etc.)
     if (data.includes('\x1b]')) {
       const oscMatches = data.matchAll(/\x1b\](\d+);([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
@@ -2453,20 +2472,6 @@ function wireSessionPty(sessionId, session, harness) {
           } else if (isIdle && markIdle(session)) {
             log.debug(`[OSC 0] session=${currentId} → IDLE`);
             emit('cli-busy-state', currentId, false);
-          }
-        }
-        // OpenCode's status records (OSC 7501): one for the whole TUI, with no
-        // id, and one per session it has open. The TUI's own is the PTY's
-        // state. Read whole, not cut like the payload above: the message
-        // comes last.
-        if (code === '7501' && harness?.parseStatusReport) {
-          const report = harness.parseStatusReport(m[2].slice(0, 4096));
-          if (report && !report.id) {
-            log.debug(`[OSC 7501] session=${currentId} state=${report.state} wasBusy=${!!session._cliBusy}`);
-            for (const [channel, ...args] of applyStatusReport(session, report)) {
-              if (channel === 'terminal-notification') log.info(`[OSC 7501] session=${currentId} → ATTENTION "${args[0]}"`);
-              emit(channel, currentId, ...args);
-            }
           }
         }
       }

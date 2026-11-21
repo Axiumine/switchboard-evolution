@@ -74,16 +74,20 @@ function watchPaths() {
 // ships with both. One read-only connection per thread (the indexing worker
 // opens its own), reopened when the file is replaced.
 
-let conn = null; // { file, ino, db, hasTables }
+let conn = null; // { file, ino, db, schema, hasTables, hasParts, stmts }
+
+// How long a read waits for OpenCode to finish a write that locks the file
+// (WAL readers rarely wait at all). Short: some reads run on the main thread.
+const BUSY_TIMEOUT_MS = 500;
 
 function openDatabase(file) {
   try {
     const { DatabaseSync } = require('node:sqlite');
-    return new DatabaseSync(file, { readOnly: true });
+    return new DatabaseSync(file, { readOnly: true, timeout: BUSY_TIMEOUT_MS });
   } catch (err) {
     if (err?.code !== 'ERR_UNKNOWN_BUILTIN_MODULE' && err?.code !== 'MODULE_NOT_FOUND') throw err;
     const Database = require('better-sqlite3');
-    return new Database(file, { readonly: true, fileMustExist: true });
+    return new Database(file, { readonly: true, fileMustExist: true, timeout: BUSY_TIMEOUT_MS });
   }
 }
 
@@ -92,24 +96,40 @@ function closeDb() {
   conn = null;
 }
 
-/** The open database, or null when there is none (or it is not a 2.x one). */
+/**
+ * Which of OpenCode's tables the database has. Read again whenever its schema
+ * changes: OpenCode 2.x migrates a 1.x opencode.db in place, under the same
+ * inode, while this connection stays open.
+ */
+function readTables(c) {
+  const schema = c.db.prepare('PRAGMA schema_version').get().schema_version;
+  if (schema === c.schema) return;
+  const names = new Set(c.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(r => r.name));
+  c.schema = schema;
+  c.hasTables = names.has('session_v2') && names.has('session_message');
+  c.hasParts = names.has('session_part');
+  c.stmts.clear();
+}
+
+/**
+ * The open database, or null when there is nothing to read: no file, or a
+ * database without OpenCode 2.x's tables. A file that is there but cannot be
+ * read is an error, never "nothing": the indexer would take an empty answer
+ * for deleted sessions.
+ */
 function getDb() {
   const file = dbPath();
   let stat;
   try { stat = fs.statSync(file); } catch { closeDb(); return null; }
   if (conn && (conn.file !== file || conn.ino !== stat.ino)) closeDb();
   if (!conn) {
-    let db;
-    try { db = openDatabase(file); } catch { return null; }
-    let hasTables = false;
-    try {
-      const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(r => r.name));
-      hasTables = names.has('session_v2') && names.has('session_message');
-      conn = { file, ino: stat.ino, db, hasTables, hasParts: names.has('session_part'), stmts: new Map() };
-    } catch {
-      try { db.close(); } catch {}
-      return null;
-    }
+    conn = { file, ino: stat.ino, db: openDatabase(file), schema: null, hasTables: false, hasParts: false, stmts: new Map() };
+  }
+  try {
+    readTables(conn);
+  } catch (err) {
+    closeDb();
+    throw err;
   }
   return conn.hasTables ? conn : null;
 }
@@ -123,12 +143,14 @@ function stmt(sql) {
   return s;
 }
 
+// Errors propagate. The few readers for which "nothing" is a safe answer
+// (a launch not recorded yet, a session to read again) catch them themselves.
 function all(sql, ...params) {
-  try { return stmt(sql)?.all(...params) || []; } catch { return []; }
+  return stmt(sql)?.all(...params) || [];
 }
 
 function get(sql, ...params) {
-  try { return stmt(sql)?.get(...params) || null; } catch { return null; }
+  return stmt(sql)?.get(...params) || null;
 }
 
 /** Accepts a folder key with or without the prefix, like folderPath gets it. */
@@ -181,10 +203,18 @@ function listSessionStamps(folder) {
     .map(r => ({ sessionId: r.id, locator: r.id, stamp: iso(r.time_updated) }));
 }
 
-/** The stamp a cached row was read at: matches fileMtime while the session is unchanged. */
+/**
+ * The stamp a cached row was read at: matches fileMtime while the session is
+ * unchanged. Null when it is gone or cannot be read now, which only means
+ * "read it again".
+ */
 function sessionStamp(row) {
-  const r = get('SELECT time_updated FROM session_v2 WHERE id = ?', row?.sessionId);
-  return r ? iso(r.time_updated) : null;
+  try {
+    const r = get('SELECT time_updated FROM session_v2 WHERE id = ?', row?.sessionId);
+    return r ? iso(r.time_updated) : null;
+  } catch {
+    return null;
+  }
 }
 
 // --- Messages ---
@@ -245,6 +275,16 @@ function projectPathOf(directory) {
  * without a user message are not listed.
  */
 function readSessionFile(locator, folder) {
+  // Null leaves the cached row as it is, like an unreadable transcript; what
+  // is gone is decided by listSessionStamps, which does not swallow errors.
+  try {
+    return readSessionRow(locator, folder);
+  } catch {
+    return null;
+  }
+}
+
+function readSessionRow(locator, folder) {
   const s = get('SELECT * FROM session_v2 WHERE id = ?', locator);
   if (!s || s.parent_id || s.time_archived != null || !s.directory) return null;
 
@@ -544,7 +584,11 @@ function needsIdDetection({ isNew }) {
 
 /** What resolvePendingLaunches compares: the session, once OpenCode has created it. */
 function readLaunchSignals(sessionId) {
-  return get('SELECT id FROM session_v2 WHERE id = ?', sessionId) ? { sessionId } : null;
+  try {
+    return get('SELECT id FROM session_v2 WHERE id = ?', sessionId) ? { sessionId } : null;
+  } catch {
+    return null; // not readable now: the next pass looks again
+  }
 }
 
 /** The row is ours when it carries the id the launch chose (its tag). */

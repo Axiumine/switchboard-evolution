@@ -517,3 +517,37 @@ test('a blocked record without its message still says what it waits for', () => 
   assert.equal(opencode.parseStatusReport('state=blocked:kind=question:app=opencode').message, 'Input needs response');
   assert.equal(opencode.parseStatusReport('state=working:app=opencode').message, null);
 });
+
+// --- review fixes ---
+
+test('a 1.x database upgraded to 2.x in place is read without reopening it', () => {
+  // OpenCode 2.x migrates the same opencode.db file, so its inode stays put
+  // while the app that read it as a 1.x database keeps running.
+  const file = path.join(dir, 'upgraded.db');
+  const live = new DatabaseSync(file);
+  live.exec('CREATE TABLE session (id text PRIMARY KEY)');
+  setEnv('OPENCODE_DB', file);
+  assert.deepEqual(opencode.listFolders(), []);
+
+  live.exec(SCHEMA);
+  live.prepare(`INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated)
+    VALUES ('ses_up', 'p1', 's', '/w', '2.3.2', 1, 1)`).run();
+  assert.deepEqual(opencode.listFolders(), ['opencode/p1']);
+  live.close();
+});
+
+test('an unreadable database is an error, not an empty one', () => {
+  // Reading "nothing" would tell the indexer the sessions were deleted.
+  const broken = path.join(dir, 'broken.db');
+  fs.writeFileSync(broken, 'this is not a database, just bytes '.repeat(200));
+  setEnv('OPENCODE_DB', broken);
+  assert.equal(opencode.available(), true);
+  assert.throws(() => opencode.folderExists('opencode/p1'));
+  assert.throws(() => opencode.folderStamp('opencode/p1'));
+  assert.throws(() => opencode.listSessionStamps('opencode/p1'));
+  assert.throws(() => opencode.readEntriesSince({ sessionId: 'ses_a' }, 3));
+  // Where "not yet" or "changed" is the safe answer, it is still given.
+  assert.equal(opencode.readLaunchSignals('ses_a'), null);
+  assert.equal(opencode.sessionStamp({ sessionId: 'ses_a' }), null);
+  assert.equal(opencode.readSessionFile('ses_a', 'opencode/p1'), null);
+});

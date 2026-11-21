@@ -887,3 +887,26 @@ test('the database and its write-ahead log are what to watch', () => {
     oc.cleanup();
   }
 });
+
+test('an OpenCode database that cannot be read leaves the cache as it was', () => {
+  const oc = setUpOpencode();
+  try {
+    oc.addSession('ses_a');
+    oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.deepEqual(oc.rows.map(r => r.sessionId), ['ses_a']);
+
+    // Replaced by something that is not a database (a broken copy, a lock).
+    oc.db.close();
+    opencode.closeDb();
+    fs.writeFileSync(process.env.OPENCODE_DB, 'garbage '.repeat(500));
+    const after = oc.fake();
+    sessionCache.reconcileCacheFromFilesystem();
+    assert.throws(() => sessionCache.refreshFolder('opencode/p1'));
+    assert.deepEqual(after.deletedFolders, []);
+    assert.deepEqual(after.deleted, []);
+    assert.deepEqual(oc.rows.map(r => r.sessionId), ['ses_a']);
+  } finally {
+    oc.cleanup();
+  }
+});

@@ -99,3 +99,22 @@ test('Codex: an "Action Required" title asks for attention once and ends busy', 
     ['cli-busy-state', 's1', false],
   ]);
 });
+
+test('OpenCode: a status record split across two chunks still counts, once', () => {
+  // OpenCode sends a record only when it changes, so a lost one is not repeated.
+  const record = osc7501('state=working:app=opencode');
+  for (const cut of [5, 12, record.length - 1, 3]) {
+    const { feed, events } = wire('opencode');
+    feed('output ' + record.slice(0, cut));
+    feed(record.slice(cut) + ' more output');
+    assert.deepEqual(events, [['cli-busy-state', 's1', true]], `cut at ${cut}`);
+  }
+});
+
+test('OpenCode: a record in one chunk is not read twice with the next one', () => {
+  const { feed, events } = wire('opencode');
+  feed(osc7501('state=working:app=opencode'));
+  feed(osc7501('state=idle:app=opencode') + osc7501('state=working:app=opencode').slice(0, 9));
+  feed(osc7501('state=working:app=opencode').slice(9));
+  assert.deepEqual(events, [['cli-busy-state', 's1', true], ['cli-busy-state', 's1', false], ['cli-busy-state', 's1', true]]);
+});
