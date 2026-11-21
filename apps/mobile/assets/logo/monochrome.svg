@@ -1,15 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- The mark in one colour, for Android's themed icons: the dot stands apart from the bubble. -->
+  <!-- The mark in one colour, for Android's themed icons: the phone stands apart from the
+       computer behind it, and the dot from the phone. -->
   <defs>
-    <mask id="gap">
-      <rect width="1024" height="1024" fill="#fff"/>
-      <circle cx="726" cy="334" r="68" fill="#000"/>
+    <mask id="behind-phone" maskUnits="userSpaceOnUse" x="-100" y="-100" width="712" height="712">
+      <rect x="-100" y="-100" width="712" height="712" fill="#fff"/>
+      <rect x="190" y="66" width="232" height="398" rx="54" fill="#000" stroke="#000" stroke-width="52"/>
+    </mask>
+    <mask id="behind-dot" maskUnits="userSpaceOnUse" x="-100" y="-100" width="712" height="712">
+      <rect x="-100" y="-100" width="712" height="712" fill="#fff"/>
+      <circle cx="412" cy="76" r="44" fill="#000"/>
+    </mask>
+    <mask id="arrow" maskUnits="userSpaceOnUse" x="-100" y="-100" width="712" height="712">
+      <rect x="-100" y="-100" width="712" height="712" fill="#fff"/>
+      <path d="M266 366 h76 M314 342 l26 24 l-26 24" fill="none" stroke="#000" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
     </mask>
   </defs>
-  <g mask="url(#gap)">
-    <path d="M375 322 H649 A88 88 0 0 1 737 410 V584 A88 88 0 0 1 649 672 H452 L352 748 L366 672 A88 88 0 0 1 287 584 V410 A88 88 0 0 1 375 322 Z" fill="none" stroke="#ffffff" stroke-width="34" stroke-linejoin="round"/>
+  <g transform="translate(256 256)">
+    <g transform="translate(20 0)" fill="#fff">
+      <g mask="url(#behind-phone)">
+        <rect x="134" y="264" width="30" height="46"/><rect x="92" y="302" width="114" height="22" rx="11"/>
+        <rect x="28" y="84" width="250" height="180" rx="34" fill="none" stroke="#fff" stroke-width="20"/>
+        <path d="M70 140 L108 174 L70 208" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <rect x="190" y="66" width="232" height="398" rx="54" fill="none" stroke="#fff" stroke-width="22" mask="url(#behind-dot)"/>
+      <g opacity="0.6">
+        <rect x="270" y="98" width="72" height="13" rx="6.5"/>
+        <rect x="226" y="152" width="160" height="26" rx="13"/><rect x="226" y="200" width="112" height="26" rx="13"/><rect x="226" y="248" width="140" height="26" rx="13"/>
+      </g>
+      <rect x="226" y="318" width="160" height="96" rx="26" mask="url(#arrow)"/>
+      <circle cx="412" cy="76" r="30"/>
+    </g>
   </g>
-  <path d="M384 432 L456 497 L384 562" fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M498 562 H604" fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round"/>
-  <circle cx="726" cy="334" r="46" fill="#ffffff"/>
 </svg>

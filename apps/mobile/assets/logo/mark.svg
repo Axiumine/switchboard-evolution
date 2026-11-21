@@ -1,26 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Switchboard Mobile: a chat bubble (the phone talking to its sessions) holding the
-       terminal prompt of the desktop's icon, with the orange dot of a session that needs you.
-       Drawn inside the central circle Android keeps for adaptive icons. -->
+  <!-- The foreground of icon.svg: the computer's terminal, and in front of it the phone that
+       answers its sessions, with the orange dot of a session that needs you. Drawn smaller,
+       inside the central circle Android keeps for adaptive icons. -->
   <defs>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="14"/>
-    </filter>
-    <linearGradient id="bubble" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#9aa0ff"/>
-      <stop offset="1" stop-color="#7078f5"/>
-    </linearGradient>
+    <linearGradient id="ind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a7acff"/><stop offset="1" stop-color="#6d74f2"/></linearGradient>
+    <linearGradient id="cy" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8ef1fb"/><stop offset="1" stop-color="#4fd6e6"/></linearGradient>
+    <filter id="gl" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="10"/></filter>
   </defs>
-  <g id="glows" opacity="0.55" filter="url(#glow)">
-    <path d="M375 322 H649 A88 88 0 0 1 737 410 V584 A88 88 0 0 1 649 672 H452 L352 748 L366 672 A88 88 0 0 1 287 584 V410 A88 88 0 0 1 375 322 Z" fill="none" stroke="#8088ff" stroke-width="34" stroke-linejoin="round"/>
-    <path d="M384 432 L456 497 L384 562" fill="none" stroke="#5fe3f0" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M498 562 H604" fill="none" stroke="#5fe3f0" stroke-width="40" stroke-linecap="round"/>
-    <circle cx="726" cy="334" r="50" fill="#ff8a4c"/>
+  <g transform="translate(256 256)">
+    <g transform="translate(20 0)">
+      <g opacity="0.4" filter="url(#gl)"><rect x="28" y="84" width="250" height="180" rx="34" fill="none" stroke="#7c84ff" stroke-width="20"/><rect x="190" y="66" width="232" height="398" rx="54" fill="none" stroke="#6ee9f5" stroke-width="22"/></g>
+      <rect x="134" y="264" width="30" height="46" fill="#6d74f2"/><rect x="92" y="302" width="114" height="22" rx="11" fill="#6d74f2"/>
+      <rect x="28" y="84" width="250" height="180" rx="34" fill="#141422" stroke="url(#ind)" stroke-width="20"/>
+      <path d="M70 140 L108 174 L70 208" fill="none" stroke="#6ee9f5" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="190" y="66" width="232" height="398" rx="54" fill="#0f0f1b" stroke="#0f0f1b" stroke-width="52"/>
+      <rect x="190" y="66" width="232" height="398" rx="54" fill="#1b1b30" stroke="url(#cy)" stroke-width="22"/>
+      <rect x="270" y="98" width="72" height="13" rx="6.5" fill="#33335a"/>
+      <rect x="226" y="152" width="160" height="26" rx="13" fill="#3a3a5e"/><rect x="226" y="200" width="112" height="26" rx="13" fill="#3a3a5e"/><rect x="226" y="248" width="140" height="26" rx="13" fill="#3a3a5e"/>
+      <rect x="226" y="318" width="160" height="96" rx="26" fill="#ff8a4c"/><path d="M266 366 h76 M314 342 l26 24 l-26 24" fill="none" stroke="#1b1b30" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="412" cy="76" r="42" fill="#0f0f1b"/><circle cx="412" cy="76" r="30" fill="#ff8a4c"/><circle cx="403" cy="67" r="9" fill="#ffc29e" opacity="0.8"/>
+    </g>
   </g>
-  <path d="M375 322 H649 A88 88 0 0 1 737 410 V584 A88 88 0 0 1 649 672 H452 L352 748 L366 672 A88 88 0 0 1 287 584 V410 A88 88 0 0 1 375 322 Z" fill="#171724" fill-opacity="0.85" stroke="url(#bubble)" stroke-width="34" stroke-linejoin="round"/>
-  <path d="M384 432 L456 497 L384 562" fill="none" stroke="#6ee9f5" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M498 562 H604" fill="none" stroke="#6ee9f5" stroke-width="40" stroke-linecap="round"/>
-  <circle cx="726" cy="334" r="62" fill="#161624"/>
-  <circle cx="726" cy="334" r="46" fill="#ff8a4c"/>
-  <circle cx="712" cy="320" r="14" fill="#ffc29e" opacity="0.7"/>
 </svg>
