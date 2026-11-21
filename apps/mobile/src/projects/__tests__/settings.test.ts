@@ -113,3 +113,14 @@ test('long lists are cut, and the questions for tracks and folders say what stay
   });
   expect(detachQuestion(project(), worktree).message).toContain('the branch web and its commits stay');
 });
+
+test('a track can name any of three CLIs, in the desktop\'s order', () => {
+  const harnesses = [
+    { id: 'claude', label: 'Claude', enabled: true },
+    { id: 'codex', label: 'Codex', enabled: true },
+    { id: 'opencode', label: 'OpenCode', enabled: true },
+  ];
+  expect(cliChoices(harnesses, null)).toEqual([
+    { key: '', label: 'Ask each time' }, { key: 'claude', label: 'Claude' }, { key: 'codex', label: 'Codex' }, { key: 'opencode', label: 'OpenCode' },
+  ]);
+});

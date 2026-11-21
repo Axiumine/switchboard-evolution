@@ -48,9 +48,7 @@ function showNewSessionPopover(project, anchorEl) {
   function render(harnesses) {
     popover.replaceChildren();
     for (const h of harnesses) {
-      const icon = h.id === 'codex'
-        ? ICONS.codex(16, 'popover-option-icon codex-icon')
-        : ICONS.claude(16, 'popover-option-icon claude-icon');
+      const icon = harnessIcon(h.id, 16, `popover-option-icon ${h.id}-icon`);
       addOption(`${icon} ${escapeHtml(h.label)}`, 'popover-option-' + h.id, async () => {
         popover.remove();
         const options = await resolveDefaultSessionOptions(project);
@@ -169,7 +167,7 @@ async function launchTerminalSession(project) {
 }
 
 function runtimeLabel(runtime) {
-  return runtime === 'codex' ? 'Codex' : runtime === 'claude' ? 'Claude' : runtime;
+  return harnessLabel(runtime);
 }
 
 async function showNewSessionDialog(project, runtime = 'claude') {

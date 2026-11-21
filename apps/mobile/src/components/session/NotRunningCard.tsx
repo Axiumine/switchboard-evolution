@@ -6,9 +6,11 @@ import { colors, spacing } from '@/theme';
  * In place of the composer when the session is not running: resume it, resume
  * it with options, or fork it. A plain terminal that ended has nothing to resume.
  */
-export function NotRunningCard({ terminal, starting, onResume, onOptions, onFork }: {
+export function NotRunningCard({ terminal, starting, forkable = true, onResume, onOptions, onFork }: {
   terminal: boolean;
   starting: boolean;
+  /** False for a CLI whose sessions cannot be forked yet (OpenCode). */
+  forkable?: boolean;
   onResume: () => void;
   onOptions: () => void;
   onFork: () => void;
@@ -23,7 +25,7 @@ export function NotRunningCard({ terminal, starting, onResume, onOptions, onFork
   return (
     <View style={styles.card}>
       <Text style={styles.title}>Not running</Text>
-      <Text style={styles.text}>Resume it to continue, or fork it into a new session.</Text>
+      <Text style={styles.text}>{forkable ? 'Resume it to continue, or fork it into a new session.' : 'Resume it to continue.'}</Text>
       {starting ? <ActivityIndicator color={colors.accent} style={styles.spinner} /> : (
         <View style={styles.actions}>
           <Pressable onPress={onResume} style={({ pressed }) => [styles.button, styles.primary, pressed && styles.pressed]} accessibilityRole="button">
@@ -32,9 +34,11 @@ export function NotRunningCard({ terminal, starting, onResume, onOptions, onFork
           <Pressable onPress={onOptions} style={({ pressed }) => [styles.button, styles.secondary, pressed && styles.pressed]} accessibilityRole="button">
             <Text style={styles.secondaryText}>Resume with options…</Text>
           </Pressable>
-          <Pressable onPress={onFork} style={({ pressed }) => [styles.button, styles.secondary, pressed && styles.pressed]} accessibilityRole="button">
-            <Text style={styles.secondaryText}>Fork</Text>
-          </Pressable>
+          {forkable ? (
+            <Pressable onPress={onFork} style={({ pressed }) => [styles.button, styles.secondary, pressed && styles.pressed]} accessibilityRole="button">
+              <Text style={styles.secondaryText}>Fork</Text>
+            </Pressable>
+          ) : null}
         </View>
       )}
     </View>

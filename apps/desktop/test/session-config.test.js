@@ -5,6 +5,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 const SessionConfig = require('../public/session-config');
 
+// The renderer's table of CLIs (public/utils.js), which the views read labels and abilities from.
+const utilsSource = fs.readFileSync(path.join(__dirname, '../public/utils.js'), 'utf8');
+const cliTable = utilsSource.slice(utilsSource.indexOf('// --- CLIs ---'), utilsSource.indexOf('// --- end CLIs ---'));
+
 test('quick-launch defaults pick up newly defined settings without another option-copying list', async () => {
   const field = { key: 'futureOption', label: 'Future option', type: 'text', default: '' };
   SessionConfig.FIELDS.claude.push(field);
@@ -153,6 +157,7 @@ test('resume with config shows and passes the settings of the CLI that wrote the
     openSession: (session, options) => opened.push([session, options]),
     window: { api: { getEffectiveSettings: async () => effective } },
   });
+  vm.runInContext(cliTable, context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/dialogs.js'), 'utf8'), context);
   const session = { sessionId: 'abc', projectPath: '/project', runtime: 'codex', name: 'Daily check' };
   await context.showResumeSessionDialog(session);
@@ -167,4 +172,18 @@ test('resume with config shows and passes the settings of the CLI that wrote the
   assert.equal(options.codexModel, 'gpt-5');
   assert.equal(options.permissionMode, undefined);
   assert.equal(options.chrome, undefined);
+});
+
+test('OpenCode offers auto-approve and the common launch prefix, not extra directories', () => {
+  const keys = SessionConfig.fieldsFor('opencode').map(f => f.key);
+  assert.deepEqual(keys, ['dangerouslySkipPermissions', 'preLaunchCmd']);
+  const auto = SessionConfig.fieldsFor('opencode')[0];
+  assert.equal(auto.type, 'boolean');
+  assert.ok(!auto.hidden, 'shown in the form');
+  // Other CLIs keep the common directories field.
+  assert.ok(SessionConfig.fieldsFor('codex').some(f => f.key === 'addDirs'));
+  assert.ok(SessionConfig.fieldsFor('claude').some(f => f.key === 'addDirs'));
+  assert.throws(() => SessionConfig.normalizeOverrides('opencode', { addDirs: '/x' }), /Unsupported/);
+  assert.deepEqual(SessionConfig.resolveOptions('opencode', { dangerouslySkipPermissions: true, addDirs: '/x', codexModel: 'm' }, {}),
+    { dangerouslySkipPermissions: true, preLaunchCmd: '' });
 });

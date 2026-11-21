@@ -4,7 +4,7 @@ import type { LiveState, Session } from '@/sessions/model';
 import {
   baseChoices, createSpec, createdText, existingChoices, FILTERS, filterMatches, findWorktree, folderFor, formRef, mergedChoices, parentFolder, patternsList, patternsText,
   previewTemplate, prunedText, refFolderName, remoteLocalName, removeReady, rowPath, runningSessionChoices, sessionActivity, sessionsByWorktree, shortPath, sortWorktrees, startPointChoices,
-  SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches, worktreeTime,
+  SORT_ORDERS, START_OPTIONS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches, worktreeTime,
   type Branches, type CreateForm, type Worktree, type WorktreeRepository,
 } from '../model';
 
@@ -278,4 +278,9 @@ test('the sessions running in a worktree, the ones that need you first, with the
   expect(choices[2].hint).toMatch(/^Terminal · Open · /);
   expect(sessionActivity(undefined)).toBe('Open');
   expect(sessionActivity({ ...running, starting: true })).toBe('Starting');
+});
+
+test('a new worktree can start an OpenCode session, listed after Codex', () => {
+  expect(START_OPTIONS.map((o) => o.key)).toEqual(['none', 'claude', 'codex', 'opencode', 'terminal']);
+  expect(START_OPTIONS.find((o) => o.key === 'opencode')?.label).toBe('An OpenCode session');
 });

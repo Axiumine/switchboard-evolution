@@ -4,6 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+// The renderer's table of CLIs (public/utils.js), which the views map their rows over.
+const utilsSource = fs.readFileSync(path.join(__dirname, '../public/utils.js'), 'utf8');
+const cliTable = utilsSource.slice(utilsSource.indexOf('// --- CLIs ---'), utilsSource.indexOf('// --- end CLIs ---'));
+
 function setup({ platform = 'darwin', running = [] } = {}) {
   const calls = [];
   const project = {
@@ -29,6 +33,7 @@ function setup({ platform = 'darwin', running = [] } = {}) {
     escapeHtml: s => String(s),
     alert: m => calls.push(['alert', m]),
   });
+  vm.runInContext(cliTable, context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/file-actions.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/project-files-view.js'), 'utf8'), context);
   return { context, calls, project };
@@ -202,4 +207,13 @@ test('what could not be trashed stays ticked and is reported', async () => {
   assert.equal(state.selecting, true);
   assert.deepEqual([...state.picked], ['c.md']);
   assert.match(calls.find(c => c[0] === 'alert')[1], /1 item could not be moved:\nc\.md: No longer exists/);
+});
+
+test('OpenCode takes a file as its path, like Codex, and can start a new chat with it', () => {
+  const { context, project } = setup();
+  assert.equal(context.chatMentionFor('opencode', '/code/app', '/code/app/src/x.ts'), 'src/x.ts ');
+  assert.equal(context.chatMentionFor('opencode', '/code/app', '/code/app/my file.ts'), "'my file.ts' ");
+  const file = { name: 'x.ts', relativePath: 'src/x.ts', type: 'file', viewable: true };
+  const newChat = context.explorerMenuItems(project, '/code/app', file).find(i => i.label === 'Add File to New Chat');
+  assert.deepEqual(labels(newChat.submenu), ['Claude', 'Codex', 'OpenCode']);
 });

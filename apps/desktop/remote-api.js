@@ -42,13 +42,16 @@ function allow(method, params = [], { channel = method, local = false, run = nul
   METHODS.set(method, { channel, params, local, run });
 }
 
+// Any CLI the desktop has registered, or a plain terminal.
+const isLaunchRuntime = (r) => r === 'terminal' || require('./harnesses').allHarnesses().some(h => h.id === r && h.buildLaunchArgs);
+
 const isLaunchSpec = (v) => isPlainObject(v)
   && ['new', 'resume', 'fork'].includes(v.mode)
   && optional(isId)(v.sessionId)
   && optional(isPath)(v.projectPath)
   && optional(isId)(v.projectId)
   && optional(isId)(v.trackId)
-  && optional((r) => ['claude', 'codex', 'terminal'].includes(r))(v.runtime)
+  && optional(isLaunchRuntime)(v.runtime)
   && optional(isString(100000))(v.initialPrompt)
   && optional(isPlainObject)(v.options)
   // Started on a phase or a todo of the project's plan, or by a schedule.

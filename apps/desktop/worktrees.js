@@ -25,7 +25,7 @@ const { buildPtyEnv } = require('./pty-env');
 
 const SETTINGS_PREFIX = 'worktrees:';
 const DEFAULT_PATH_TEMPLATE = '$BASE_PATH.worktrees/$REF_NAME';
-const START_OPTIONS = new Set(['none', 'claude', 'codex', 'terminal']);
+const START_OPTIONS = new Set(['none', 'claude', 'codex', 'opencode', 'terminal']);
 const SORT_ORDERS = new Set(['default', 'modifiedDesc', 'modifiedAsc', 'createdDesc', 'createdAsc', 'nameAsc', 'nameDesc', 'changesFirst']);
 // Changed files looked at for a worktree's last modification; past these, the rest are left out.
 const MODIFIED_STAT_LIMIT = 500;

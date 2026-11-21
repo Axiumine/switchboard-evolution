@@ -1,6 +1,6 @@
 # Switchboard Evolution
 
-Desktop and mobile apps for running and managing coding-agent sessions (Claude Code, Codex) across projects.
+Desktop and mobile apps for running and managing coding-agent sessions (Claude Code, Codex, OpenCode) across projects.
 
 ```
 apps/desktop     Electron app (main process at the root of the folder, renderer in public/)

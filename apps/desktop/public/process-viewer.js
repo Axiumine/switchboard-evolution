@@ -91,7 +91,7 @@
     if (owner.kind === 'task') return 'Task';
     if (owner.type === 'terminal') return 'Terminal';
     const runtime = owner.runtime || 'claude';
-    return runtime.charAt(0).toUpperCase() + runtime.slice(1);
+    return LAUNCH_CLIS.includes(runtime) ? harnessLabel(runtime) : runtime.charAt(0).toUpperCase() + runtime.slice(1);
   }
 
   const TASK_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
@@ -100,8 +100,8 @@
   function ownerIcon(owner) {
     if (owner.kind === 'task') return TASK_ICON;
     if (owner.type === 'terminal') return ICONS.terminal(14);
-    if (owner.runtime === 'codex') return ICONS.codex(14, 'codex-icon');
-    if (!owner.runtime || owner.runtime === 'claude') return ICONS.claude(14);
+    const runtime = owner.runtime || 'claude';
+    if (LAUNCH_CLIS.includes(runtime)) return harnessIcon(runtime, 14, cliIconClass(runtime));
     return ICONS.terminal(14);
   }
 

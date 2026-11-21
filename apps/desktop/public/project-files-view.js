@@ -705,18 +705,22 @@ function openWithItems(project, root, entry) {
 
 // --- Chats: add a file to a running chat, or start one with it ---
 
-/** The project's Claude and Codex sessions that are running, the most recent first. */
+/** The project's CLI sessions that are running, the most recent first. */
 function runningChatsOf(project) {
   const live = typeof activePtyIds !== 'undefined' ? activePtyIds : new Set();
   const time = s => (typeof sessionEventTime === 'function' ? sessionEventTime(s) : 0) || Date.parse(s.modified || 0) || 0;
   return projectSessionsAll(project).filter(s => live.has(s.sessionId) && s.type !== 'terminal').sort((a, b) => time(b) - time(a));
 }
 
-/** What to type into a chat for a file: an @-mention for Claude, the path for Codex. */
+/**
+ * What to type into a chat for a file: an @-mention for Claude, the path for
+ * Codex and OpenCode (OpenCode attaches a file only when it is picked from its
+ * own @ popup; a typed or pasted @path stays text).
+ */
 function chatMentionFor(runtime, cwd, filePath) {
   let ref = filePath;
   if (cwd && (filePath.startsWith(cwd + '/') || filePath.startsWith(cwd + '\\'))) ref = filePath.slice(cwd.length + 1);
-  if (runtime === 'codex') return (/\s/.test(ref) ? shellEscape(ref) : ref) + ' ';
+  if (runtime === 'codex' || runtime === 'opencode') return (/\s/.test(ref) ? shellEscape(ref) : ref) + ' ';
   return (/\s/.test(ref) ? `@"${ref}"` : `@${ref}`) + ' ';
 }
 
@@ -772,10 +776,8 @@ function chatMenuItems(project, root, entry) {
   return [
     toChat,
     {
-      label: `Add ${kind} to New Chat`, icon: PICONS.plus(14), submenu: [
-        { label: 'Claude', icon: ICONS.claude(14), onClick: () => addFileToNewChat(project, filePath, 'claude') },
-        { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: () => addFileToNewChat(project, filePath, 'codex') },
-      ],
+      label: `Add ${kind} to New Chat`, icon: PICONS.plus(14),
+      submenu: LAUNCH_CLIS.map(cli => ({ label: harnessLabel(cli), icon: harnessIcon(cli, 14, cliIconClass(cli)), onClick: () => addFileToNewChat(project, filePath, cli) })),
     },
   ];
 }

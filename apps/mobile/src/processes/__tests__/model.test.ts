@@ -42,6 +42,7 @@ describe('names', () => {
     expect(ownerTitle(owner({}), sessions)).toBe('Fix the login');
     expect(ownerTitle(owner({ id: 'other' }), sessions)).toBe('Claude session');
     expect(ownerTitle(owner({ id: 'other', runtime: 'codex' }), sessions)).toBe('Codex session');
+    expect(ownerTitle(owner({ id: 'other', runtime: 'opencode' }), sessions)).toBe('OpenCode session');
     expect(ownerTitle(owner({ id: 'other', type: 'terminal' }), sessions)).toBe('Terminal');
     expect(ownerTitle(owner({ kind: 'task', type: 'task', label: 'dev server' }), sessions)).toBe('dev server');
   });

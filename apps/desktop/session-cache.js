@@ -22,6 +22,56 @@ function resolveFolderPath(folder) {
   return h.folderPath(String(folder).slice(h.folderPrefix.length));
 }
 
+// --- Folder and session stamps ---
+//
+// What the indexer knows about a folder without reading a transcript. For a
+// CLI with one file per session that is the filesystem (mtimes, the file
+// list); a CLI keeping sessions in a database answers itself through the
+// optional hooks described in harnesses/index.js.
+
+function folderExists(h, folder) {
+  return h.folderExists ? h.folderExists(folder) : fs.existsSync(resolveFolderPath(folder));
+}
+
+function folderIndexStamp(h, folder) {
+  return h.folderStamp ? h.folderStamp(folder) : getFolderIndexMtimeMs(resolveFolderPath(folder));
+}
+
+/**
+ * Has the folder changed since it was indexed? A file mtime only moves
+ * forward, so a newer one is a change; a database stamp is compared for
+ * equality, because deleting a session can lower it.
+ */
+function folderChanged(h, folder, meta) {
+  if (!meta) return true;
+  const now = folderIndexStamp(h, folder);
+  const then = meta.indexMtimeMs || 0;
+  return h.folderStamp ? now !== then : now > then;
+}
+
+/** Every session of a folder, with the stamp (its fileMtime) to compare against the cache. */
+function sessionStamps(h, folder, folderPath) {
+  if (h.listSessionStamps) return h.listSessionStamps(folder);
+  const out = [];
+  for (const filePath of h.listTranscripts(folderPath)) {
+    // Derived from the file name, so this costs no read — which is the whole
+    // point of the mtime gate in planFolderRefresh.
+    const sessionId = h.sessionIdFromPath(filePath);
+    if (!sessionId) continue;
+    // A file that cannot be stat'ed is still there: not read, but not removed.
+    let stat = null;
+    try { stat = fs.statSync(filePath); } catch {}
+    out.push({ sessionId, locator: filePath, stamp: stat ? stat.mtime.toISOString() : null, size: stat ? stat.size : 0 });
+  }
+  return out;
+}
+
+/** The stamp of a session read moments ago, to tell whether it changed meanwhile. */
+function currentSessionStamp(h, session, filePath) {
+  if (h.sessionStamp) return h.sessionStamp(session);
+  try { return fs.statSync(filePath).mtime.toISOString(); } catch { return null; }
+}
+
 /**
  * Session cache module.
  * Call init(ctx) once with the shared context object.
@@ -229,7 +279,7 @@ function listAllFolders() {
 function planFolderRefresh(folder, force = false) {
   const h = harnessForFolder(folder);
   const folderPath = resolveFolderPath(folder);
-  if (!fs.existsSync(folderPath)) {
+  if (!folderExists(h, folder)) {
     deleteCachedFolder(folder);
     deleteSearchFolder(folder);
     return null;
@@ -237,7 +287,7 @@ function planFolderRefresh(folder, force = false) {
   // Never mark writes that arrive during this pass as already indexed. The
   // Claude parser deliberately stops at its initial file size; a later append
   // must remain visible to reconciliation even if its watcher event is missed.
-  const indexMtimeMs = getFolderIndexMtimeMs(folderPath);
+  const indexMtimeMs = folderIndexStamp(h, folder);
 
   // For Claude a folder IS a project, and one with no readable cwd is unusable.
   // A codex folder is a date spanning many projects, so there is no folder-level
@@ -259,21 +309,14 @@ function planFolderRefresh(folder, force = false) {
   const currentIds = new Set();
   const toRead = [];
 
-  for (const filePath of h.listTranscripts(folderPath)) {
-    // Derived from the file name, so this costs no read — which is the whole
-    // point of the mtime gate below.
-    const sessionId = h.sessionIdFromPath(filePath);
-    if (!sessionId) continue;
+  for (const { sessionId, locator, stamp, size } of sessionStamps(h, folder, folderPath)) {
     currentIds.add(sessionId);
-
-    // Check if file mtime changed
-    let stat;
-    try { stat = fs.statSync(filePath); } catch { continue; }
-
-    if (!force && cachedMap.has(sessionId) && cachedMap.get(sessionId) === stat.mtime.toISOString()) {
+    if (stamp == null) continue;
+    if (!force && cachedMap.has(sessionId) && cachedMap.get(sessionId) === stamp) {
       continue; // unchanged, skip
     }
-    toRead.push({ filePath, sessionId, size: stat.size });
+    // filePath is whatever readSessionFile takes: a path, or the harness's locator.
+    toRead.push({ filePath: locator, sessionId, size: size || 0 });
   }
 
   // Sessions whose transcripts were deleted
@@ -346,6 +389,22 @@ function applyFolderRefreshImpl(plan, sessions, finalize) {
   if (finalize) setFolderMeta(plan.folder, plan.folderProject, plan.indexMtimeMs);
 }
 
+/**
+ * The folders of a database CLI that changed since they were indexed. A change
+ * to its database names no session, so this is how a watcher knows what to
+ * refresh: every folder the CLI lists, plus those only the cache still knows
+ * (a project whose last session went away has to be refreshed to be dropped),
+ * whose stamp moved.
+ */
+function changedFolders(harness) {
+  const metaMap = getAllFolderMeta();
+  const folders = new Set(harness.listFolders());
+  for (const folder of metaMap.keys()) {
+    if (harness.folderPrefix && String(folder).startsWith(harness.folderPrefix)) folders.add(folder);
+  }
+  return [...folders].filter(folder => folderChanged(harness, folder, metaMap.get(folder)));
+}
+
 /** Refresh a single folder incrementally: only re-read changed/new transcripts */
 function refreshFolder(folder) {
   if (indexer) return indexer.folder(folder);
@@ -411,9 +470,8 @@ function readInBackground(plans) {
         try {
           // A transcript written to after the worker read it is left for the
           // next pass: its cached mtime stays stale, so it is read again.
-          const sessions = msg.sessions.filter(s => {
-            try { return fs.statSync(s.sessionFile).mtime.toISOString() === s.fileMtime; } catch { return false; }
-          });
+          const h = getHarness(plan.harnessId);
+          const sessions = msg.sessions.filter(s => currentSessionStamp(h, s, s.sessionFile) === s.fileMtime);
           applyFolderRefresh(plan, sessions);
           refreshHarnessTitles(getHarness(plan.harnessId));
         } catch (err) {
@@ -450,8 +508,7 @@ function reconcileCacheFromFilesystem() {
     if (backgroundFolders.has(folder)) continue;
     try {
       const meta = metaMap.get(folder);
-      const folderPath = resolveFolderPath(folder);
-      if (!meta || getFolderIndexMtimeMs(folderPath) > (meta.indexMtimeMs || 0)) {
+      if (folderChanged(harnessForFolder(folder), folder, meta)) {
         const plan = planFolderRefresh(folder);
         if (plan) plans.push(plan);
       }
@@ -765,8 +822,8 @@ async function indexFoldersInWorker({ folders, force = false, progress = () => {
   for (let i = 0; i < allFolders.length; i++) {
     const folder = allFolders[i];
     const meta = metaMap.get(folder);
-    if (!force && !folders && meta && fs.existsSync(resolveFolderPath(folder)) &&
-        getFolderIndexMtimeMs(resolveFolderPath(folder)) <= (meta.indexMtimeMs || 0)) continue;
+    const fh = harnessForFolder(folder);
+    if (!force && !folders && meta && folderExists(fh, folder) && !folderChanged(fh, folder, meta)) continue;
     progress({ text: `Indexing folders (${i + 1}/${allFolders.length})…`, count });
     try {
       const plan = planFolderRefresh(folder, force);
@@ -799,9 +856,7 @@ async function indexFoldersInWorker({ folders, force = false, progress = () => {
         const titles = externalTitles.get(h.id);
         if (titles instanceof Map) s.aiTitle = titles.get(s.sessionId) || null;
         // A growing transcript must remain eligible for the next pass.
-        try {
-          if (fs.statSync(filePath).mtime.toISOString() !== s.fileMtime) stable = false;
-        } catch { stable = false; }
+        if (currentSessionStamp(h, s, filePath) !== s.fileMtime) stable = false;
         batch.push(s);
         bytes += Buffer.byteLength(s.textContent || '', 'utf8');
         if (batch.length >= 8 || bytes >= 512 * 1024) await flush();
@@ -827,6 +882,7 @@ module.exports = {
   indexFoldersInWorker,
   init,
   refreshFolder,
+  changedFolders,
   reconcileCacheFromFilesystem,
   buildProjectsFromCache,
   notifyRendererProjectsChanged,

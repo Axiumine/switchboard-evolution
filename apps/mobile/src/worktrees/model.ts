@@ -52,7 +52,7 @@ export type WorktreeRepository = {
 export type SortOrder = 'default' | 'modifiedDesc' | 'modifiedAsc' | 'createdDesc' | 'createdAsc' | 'nameAsc' | 'nameDesc' | 'changesFirst';
 export type WorktreeFilter =
   | 'all' | 'changes' | 'unpushed' | 'running' | 'attached' | 'unattached' | 'locked' | 'missing' | 'claude' | 'codex' | 'switchboard';
-export type StartAfter = 'none' | 'claude' | 'codex' | 'terminal';
+export type StartAfter = 'none' | 'claude' | 'codex' | 'opencode' | 'terminal';
 
 export type WorktreeSettings = {
   pathTemplate: string;
@@ -155,6 +155,7 @@ export const START_OPTIONS: readonly { key: StartAfter; label: string }[] = [
   { key: 'none', label: 'Nothing' },
   { key: 'claude', label: 'A Claude session' },
   { key: 'codex', label: 'A Codex session' },
+  { key: 'opencode', label: 'An OpenCode session' },
   { key: 'terminal', label: 'A terminal' },
 ];
 

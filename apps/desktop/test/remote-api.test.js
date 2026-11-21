@@ -315,3 +315,12 @@ test('a phone can read a changed file to edit and save it, against its version',
   assert.match((await api.call('save-project-git-edit-file', ['p1', '/r', 'src/a.js', 42])).error, /Wrong parameter 4/);
   assert.equal(calls.length, 3);
 });
+
+test('the phone can start any CLI the desktop has, and nothing else', async () => {
+  const { api } = setup({ 'launch-session': (spec) => ({ sessionId: 'id', spec }) });
+  for (const runtime of ['claude', 'codex', 'opencode', 'terminal']) {
+    const reply = await api.call('launch-session', [{ mode: 'new', projectPath: '/p/app', runtime }]);
+    assert.equal(reply.result?.sessionId, 'id', runtime);
+  }
+  assert.match((await api.call('launch-session', [{ mode: 'new', projectPath: '/p/app', runtime: 'gemini' }])).error, /Wrong parameter 1/);
+});

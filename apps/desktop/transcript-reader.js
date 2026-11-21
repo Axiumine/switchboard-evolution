@@ -32,4 +32,16 @@ function readTranscriptSince(filePath, cursor = 0) {
   }
 }
 
-module.exports = { readTranscriptSince };
+/**
+ * The viewer entries of a cached session written after `cursor`, for any CLI:
+ * read from its transcript file and mapped by the harness, or, for a CLI that
+ * keeps its sessions in a database, asked of the harness itself. The cursor is
+ * opaque to callers either way: a byte offset, or the harness's own position.
+ */
+function readViewerEntriesSince(harness, row, cursor = 0) {
+  if (typeof harness.readEntriesSince === 'function') return harness.readEntriesSince(row, cursor || 0);
+  const read = readTranscriptSince(harness.transcriptPath(row), cursor || 0);
+  return { entries: harness.toViewerEntries(read.entries), cursor: read.cursor, reset: read.reset };
+}
+
+module.exports = { readTranscriptSince, readViewerEntriesSince };

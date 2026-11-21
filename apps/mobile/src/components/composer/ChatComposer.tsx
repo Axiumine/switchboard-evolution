@@ -25,7 +25,7 @@ const ESC = '\x1b';
  */
 export function ChatComposer({ sessionId, cli, state, working, onOpenTerminal }: {
   sessionId: string;
-  /** "Claude" or "Codex". */
+  /** The CLI's name: "Claude", "Codex" or "OpenCode". */
   cli: string;
   state: SessionState;
   working?: string;

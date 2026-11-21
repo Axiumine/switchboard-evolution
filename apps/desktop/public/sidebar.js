@@ -833,12 +833,9 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   if (session.type === 'terminal') {
     markIcon.innerHTML = ICONS.terminal(14);
     mark.title = 'Terminal session';
-  } else if (session.runtime === 'codex') {
-    markIcon.innerHTML = ICONS.codex(14);
-    mark.title = 'Codex session';
   } else {
-    markIcon.innerHTML = ICONS.claude(14);
-    mark.title = 'Claude session';
+    markIcon.innerHTML = harnessIcon(session.runtime, 14);
+    mark.title = `${harnessLabel(session.runtime)} session`;
   }
 
   const dot = document.createElement('span');
@@ -916,7 +913,8 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   moreBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
   if (session.type !== 'terminal') {
-    actions.append(archiveBtn, forkBtn);
+    actions.append(archiveBtn);
+    if (cliCanFork(session.runtime)) actions.append(forkBtn);
   }
   actions.append(unreadBtn, stopBtn, moreBtn);
   for (const button of actions.children) {

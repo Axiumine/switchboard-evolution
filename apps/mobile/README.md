@@ -1,6 +1,6 @@
 # Switchboard Evolution (mobile)
 
-The phone companion of Switchboard Evolution, a fork of [Switchboard](https://github.com/doctly/switchboard): browse and manage your Claude Code and Codex sessions and projects from your phone.
+The phone companion of Switchboard Evolution, a fork of [Switchboard](https://github.com/doctly/switchboard): browse and manage your Claude Code, Codex and OpenCode sessions and projects from your phone.
 
 The app talks directly to the Switchboard Evolution desktop app running on your computer, over your local network or your own [Tailscale](https://tailscale.com/) network. There is no cloud relay and no account: the phone and the computer only ever talk to each other, and every message between them is encrypted end to end.
 
@@ -13,7 +13,7 @@ The app talks directly to the Switchboard Evolution desktop app running on your 
 - Searches what was said in your sessions, and filters to running, pinned or today's sessions.
 - Opens a session as a **chat** (the conversation, with tool calls you can expand) or as a **live terminal** (xterm.js), with keys a phone keyboard lacks (Esc, Tab, arrows, Ctrl-C, Shift+Enter) and a line to type into.
 - **Fit to phone** resizes the session's terminal to the phone while you look at it; the computer gets its own size back when you leave.
-- Starts a new Claude, Codex or terminal session in a project, track or folder, with a first message and the same options as the desktop; resumes (with or without changed options) and forks.
+- Starts a new Claude, Codex, OpenCode or terminal session in a project, track or folder, with a first message and the same options as the desktop; resumes (with or without changed options) and forks (not OpenCode sessions yet).
 - Renames, pins, moves to a project, marks as read or unread, archives or stops a session (long-press a row).
 - Tells you, while the app is open, when another session needs you or finishes its turn.
 - **Projects**: active, snoozed and done; a project's plan and todos to tick, add to and start a session on; its tracks, sessions, schedules (run now, pause, edit) and folders; snooze, finish, rename, add tracks and attach folders, in place or as a worktree.

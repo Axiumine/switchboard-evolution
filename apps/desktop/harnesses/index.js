@@ -28,11 +28,28 @@
 //   titleIndexPath()           optional external title-index path
 //   readSessionTitles()        optional Map<sessionId, title> from that index
 //   buildLaunchArgs({ sessionId, isNew, options }) → argv after the binary
+//
+// A harness that keeps its sessions in a database rather than one file each
+// (OpenCode) also exports the stamps the indexer would otherwise get from the
+// filesystem, and a reader for the viewer. Each is optional, and the file
+// path is used whenever one is missing:
+//
+//   folderExists(folder)        is there still anything in this folder
+//   folderStamp(folder)         a number that changes when the folder does
+//                               (compared for equality, not order)
+//   listSessionStamps(folder)   [{ sessionId, locator, stamp, size? }]; the
+//                               locator goes to readSessionFile in place of a
+//                               path, the stamp is compared to fileMtime
+//   sessionStamp(row)           the stamp of a session now, null when gone
+//   readEntriesSince(row, cursor) → { entries, cursor, reset }, viewer entries
+//                               written after an opaque numeric cursor
 
 const claude = require('./claude');
 const codex = require('./codex');
+const opencode = require('./opencode');
 
-const HARNESSES = { [claude.id]: claude, [codex.id]: codex };
+// Registration order is display order: every list of CLIs is built from it.
+const HARNESSES = { [claude.id]: claude, [codex.id]: codex, [opencode.id]: opencode };
 
 const DEFAULT_HARNESS = claude.id;
 

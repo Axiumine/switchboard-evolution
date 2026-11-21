@@ -10,7 +10,7 @@ The desktop app (`apps/desktop`, Electron) is the primary surface and is built w
 
 ## Users
 
-Developers who run several coding agents at once (Claude Code, Codex) across many projects. Today that is the owner; the app is built to be published for developers like them, one person per installation, no team features.
+Developers who run several coding agents at once (Claude Code, Codex, OpenCode) across many projects. Today that is the owner; the app is built to be published for developers like them, one person per installation, no team features.
 
 They spend long stretches at the desktop with many agent sessions running in parallel, and keep watch from the phone when away from it: glance at what needs them, answer, nudge, review. Anyone who installs the app must understand it without being told how it works.
 
@@ -22,14 +22,14 @@ Success: at a glance the user knows which sessions need them and what each proje
 
 ## Positioning
 
-One board for all your coding agents (Claude Code, Codex) across all your projects: plan and todos per project, sessions that survive a restart, complete Git, the phone as a remote.
+One board for all your coding agents (Claude Code, Codex, OpenCode) across all your projects: plan and todos per project, sessions that survive a restart, complete Git, the phone as a remote.
 
 Product copy does not cite Switchboard: the name already says where the app comes from.
 
 ## Operating Context
 
 - Desktop: macOS first, with Windows and Linux builds. Agent CLIs run in terminals (xterm) inside the app, kept alive by herdr-core across restarts.
-- Projects are folders on disk with `CLAUDE.md`, `AGENTS.md`, `plan.md`, `plan-tracker.md`, `todos.md` and `memory.md`, written and read by the agents themselves. Claude Code and Codex transcripts stay in their own folders; the app reads them.
+- Projects are folders on disk with `CLAUDE.md`, `AGENTS.md`, `plan.md`, `plan-tracker.md`, `todos.md` and `memory.md`, written and read by the agents themselves. Claude Code and Codex transcripts stay in their own folders, OpenCode's sessions in its own database; the app reads them.
 - Git is part of the daily loop: changes and staging (files, hunks, lines), history graph with actions, worktrees.
 - Phone: Android (including dual-screen devices) and iOS, paired to the computer with a QR code and connected over Tailscale. Used for short checks, answering an agent, small edits, staging, starting a session.
 - Sessions last hours; many run at once; the interface is dense and lives open all day.

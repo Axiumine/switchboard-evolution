@@ -94,9 +94,33 @@ export function shortProjectPath(projectPath: string): string {
   return projectPath.split(/[\\/]/).filter(Boolean).slice(-2).join('/');
 }
 
+/**
+ * The CLIs the desktop runs, in its order: their names, and whether a session
+ * can be forked (OpenCode's fork goes through its service, which the desktop
+ * does not use yet). The list of CLIs to start comes from the desktop
+ * (get-harnesses); this names the sessions that already exist.
+ */
+const CLIS: Record<string, { label: string; canFork: boolean }> = {
+  claude: { label: 'Claude', canFork: true },
+  codex: { label: 'Codex', canFork: true },
+  opencode: { label: 'OpenCode', canFork: false },
+};
+
+/** A CLI's name. Sessions from before the desktop recorded the CLI are Claude's. */
+export function runtimeLabel(runtime: string | null | undefined): string {
+  const id = runtime || 'claude';
+  return CLIS[id]?.label ?? id.charAt(0).toUpperCase() + id.slice(1);
+}
+
 export function cliLabel(session: Pick<Session, 'type' | 'runtime'>): string {
   if (session.type === 'terminal') return 'Terminal';
-  return session.runtime === 'codex' ? 'Codex' : 'Claude';
+  return runtimeLabel(session.runtime);
+}
+
+/** Whether a session that is not running can be forked into a new one. */
+export function canFork(session: Pick<Session, 'type' | 'runtime'>): boolean {
+  if (session.type === 'terminal') return false;
+  return CLIS[session.runtime || 'claude']?.canFork !== false;
 }
 
 function sessionTime(session: Session): number {

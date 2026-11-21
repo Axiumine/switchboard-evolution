@@ -9,6 +9,10 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../public/project-worktrees-view.js'), 'utf8');
 
+// The renderer's table of CLIs (public/utils.js), which the views map their rows over.
+const utilsSource = fs.readFileSync(path.join(__dirname, '../public/utils.js'), 'utf8');
+const cliTable = utilsSource.slice(utilsSource.indexOf('// --- CLIs ---'), utilsSource.indexOf('// --- end CLIs ---'));
+
 function loadContext(extra = {}) {
   const icon = name => () => `<svg data-icon="${name}"></svg>`;
   const context = vm.createContext({
@@ -21,6 +25,7 @@ function loadContext(extra = {}) {
     ICONS: new Proxy({}, { get: (_t, name) => icon(name) }),
     ...extra,
   });
+  vm.runInContext(cliTable, context);
   vm.runInContext(source, context);
   return context;
 }
@@ -441,4 +446,14 @@ test('"N running" is a button listing the sessions running in the worktree; a cl
   assert.equal(two[1].label, 'Open a running session');
   assert.equal(two[1].submenu.length, 2);
   assert.equal(ctx.wtRowMenuItems(project, repo, wt('/w/a', { branch: 'a' }))[1].label, 'New session', 'nothing running: as before');
+});
+
+test('a worktree can start an OpenCode session, right after Codex, now or once it is made', () => {
+  const context = loadContext();
+  const rows = context.wtSessionMenuItems({ id: 'p1', folders: [] }, { path: '/w/app' });
+  assert.deepEqual(plain(rows.filter(r => r.label).map(r => r.label)),
+    ['Claude', 'Codex', 'OpenCode', 'Terminal', 'Claude, configure…', 'Codex, configure…', 'OpenCode, configure…']);
+  const startOptions = plain(vm.runInContext('WT_START_OPTIONS', context));
+  assert.deepEqual(startOptions.map(([value]) => value), ['none', 'claude', 'codex', 'opencode', 'terminal']);
+  assert.equal(startOptions.find(([value]) => value === 'opencode')[1], 'An OpenCode session');
 });

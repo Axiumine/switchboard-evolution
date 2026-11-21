@@ -13,7 +13,8 @@ const { createRemoteServer, reachableAddresses, pairingLink } = require('./remot
 const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
-const { readTranscriptSince } = require('./transcript-reader');
+const { readViewerEntriesSince } = require('./transcript-reader');
+const { markBusy, markIdle, applyStatusReport, takeStatusRecords } = require('./cli-state');
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
 const { createSessionNotices } = require('./session-notices');
@@ -2034,8 +2035,10 @@ ipcMain.handle('rename-session', (_event, sessionId, name) => {
 function readSessionViewerEntries(row) {
   // The harness owns its transcript naming and its on-disk format. Normalize
   // here so neither transcript consumer needs runtime-specific branches.
-  const jsonlPath = transcriptPath(row);
   const harness = getHarness(row.runtime);
+  // A CLI keeping its sessions in a database reads them itself.
+  if (harness.readEntriesSince) return harness.readEntriesSince(row, 0).entries;
+  const jsonlPath = transcriptPath(row);
   const content = fs.readFileSync(jsonlPath, 'utf-8');
   const entries = [];
   for (const line of content.split('\n')) {
@@ -2066,14 +2069,14 @@ ipcMain.handle('get-session-last-message', (_event, sessionId) => {
   }
 });
 
-// The entries written since `cursor` (a byte offset from the previous call),
-// so a client following a live session does not re-read the whole transcript.
+// The entries written since `cursor` (from the previous call: a byte offset, or
+// a database CLI's own position), so a client following a live session does
+// not re-read the whole transcript.
 ipcMain.handle('read-session-entries', (_event, sessionId, cursor) => {
   const row = getCachedSession(sessionId);
   if (!row) return { error: 'Session not found in cache' };
   try {
-    const read = readTranscriptSince(transcriptPath(row), cursor || 0);
-    return { entries: getHarness(row.runtime).toViewerEntries(read.entries), cursor: read.cursor, reset: read.reset };
+    return readViewerEntriesSince(getHarness(row.runtime), row, cursor || 0);
   } catch (err) {
     return { error: err.message };
   }
@@ -2086,8 +2089,8 @@ ipcMain.handle('read-session-tail', (_event, sessionId, count) => {
   const row = getCachedSession(sessionId);
   if (!row) return { error: 'Session not found in cache' };
   try {
-    const read = readTranscriptSince(transcriptPath(row), 0);
-    const entries = getHarness(row.runtime).toViewerEntries(read.entries);
+    const read = readViewerEntriesSince(getHarness(row.runtime), row, 0);
+    const entries = read.entries;
     const kept = entries.slice(-count);
     return { entries: kept, cursor: read.cursor, earlier: entries.length - kept.length };
   } catch (err) {
@@ -2400,6 +2403,25 @@ function wireSessionPty(sessionId, session, harness) {
       if (busy !== null) sendTerminalBusy(session, currentId, busy);
     }
 
+    // OpenCode's status records (OSC 7501): one for the whole TUI, with no id,
+    // and one per session it has open; the TUI's own is the PTY's state. A
+    // record is sent only when it changes, so one cut by a chunk boundary
+    // would never come again: the unfinished end of a chunk is kept and read
+    // with the next one (only here, never sent twice to the terminal).
+    if (harness?.parseStatusReport && (session._statusCarry || data.includes('\x1b'))) {
+      const { reports, rest } = takeStatusRecords((session._statusCarry || '') + data);
+      session._statusCarry = rest;
+      for (const payload of reports) {
+        const report = harness.parseStatusReport(payload);
+        if (!report || report.id) continue;
+        log.debug(`[OSC 7501] session=${currentId} state=${report.state} wasBusy=${!!session._cliBusy}`);
+        for (const [channel, ...args] of applyStatusReport(session, report)) {
+          if (channel === 'terminal-notification') log.info(`[OSC 7501] session=${currentId} → ATTENTION "${args[0]}"`);
+          emit(channel, currentId, ...args);
+        }
+      }
+    }
+
     // Parse OSC sequences (title changes, progress, notifications, etc.)
     if (data.includes('\x1b]')) {
       const oscMatches = data.matchAll(/\x1b\](\d+);([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
@@ -2444,15 +2466,10 @@ function wireSessionPty(sessionId, session, harness) {
             session._titleAttention = false;
           }
 
-          if (isBusy && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            session._needsAttention = false;
+          if (isBusy && markBusy(session)) {
             log.debug(`[OSC 0] session=${currentId} → BUSY`);
             emit('cli-busy-state', currentId, true);
-          } else if (isIdle && session._cliBusy) {
-            session._cliBusy = false;
-            session._oscIdle = true;
+          } else if (isIdle && markIdle(session)) {
             log.debug(`[OSC 0] session=${currentId} → IDLE`);
             emit('cli-busy-state', currentId, false);
           }
@@ -2467,20 +2484,15 @@ function wireSessionPty(sessionId, session, harness) {
           const level = payload.split(';')[1];
           const progressState = progressBusyState({ level, titleBusy: !!session._titleBusy });
           log.debug(`[OSC 9;4] session=${currentId} level=${level} payload="${payload}" state=${progressState || 'none'} titleBusy=${!!session._titleBusy} wasBusy=${!!session._cliBusy}`);
-          if (progressState === 'busy' && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            session._needsAttention = false;
+          if (progressState === 'busy' && markBusy(session)) {
             log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
             emit('cli-busy-state', currentId, true);
-          } else if (progressState === 'idle' && session._cliBusy) {
+          } else if (progressState === 'idle' && markIdle(session)) {
             // The end of the progress run. Without acting on this, a busy state
             // raised by 9;4 could only be cleared by a spinner-to-idle title
             // change, which does not come for a slash command — the session sat
             // spinning until Claude's "waiting for your input" notice a full
             // minute later.
-            session._cliBusy = false;
-            session._oscIdle = true;
             log.debug(`[OSC 9;4] session=${currentId} → IDLE`);
             emit('cli-busy-state', currentId, false);
           }
@@ -2771,6 +2783,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   if (harness && !harness.buildLaunchArgs) {
     return { ok: false, error: `${harness.label} sessions cannot be launched yet` };
   }
+  if (harness && harness.canFork === false && sessionOptions?.forkFrom) {
+    return { ok: false, error: `${harness.label} sessions cannot be forked yet` };
+  }
 
   // Claude asks about every --add-dir it does not trust, again in every session.
   // Ask once here instead, while someone is at the desktop; a phone or a
@@ -2838,6 +2853,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     }
   }
 
+  // A CLI that takes an id it did not make (OpenCode) is started on one in its
+  // own format. The session stays under the id the caller knows until the CLI
+  // records it, and is then re-keyed onto this one (resolvePendingLaunches).
+  const launchId = (startFresh && harness?.newSessionId) ? harness.newSessionId() : sessionId;
+
   let ptyProcess;
   let mcpServer = null;
   try {
@@ -2865,7 +2885,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // Argv is built by the harness and quoted here, so a value can never be
       // spliced into the command line as shell syntax.
       const cliArgs = harness.buildLaunchArgs({
-        sessionId, isNew: startFresh, options: sessionOptions,
+        sessionId: launchId, isNew: startFresh, options: sessionOptions,
       });
 
       let claudeCmd = harness.binary;
@@ -2957,7 +2977,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // Set for a harness whose real session id only appears once its transcript
     // does; cleared by resolvePendingLaunches when the transcript is matched.
     pendingLaunch: (harness?.needsIdDetection?.({ isNew: startFresh, options: sessionOptions })) ? {
-      tag: harness.originatorTag ? harness.originatorTag(sessionId) : null,
+      // What identifies the launch once the CLI records it: the id it was
+      // started on, or the env tag a CLI copies into its transcript (codex).
+      tag: launchId !== sessionId ? launchId : (harness.originatorTag ? harness.originatorTag(sessionId) : null),
       // A fork is identified by its parent, not by our env tag — codex copies
       // the originator from the thread being forked.
       forkFrom: sessionOptions?.forkFrom || null,
@@ -3126,7 +3148,8 @@ function sweepSubagents() {
     seen.add(session);
     const sessionId = session.realSessionId || key;
     let running = false;
-    if (!session.exited && !session.isPlainTerminal && session.runtime !== 'codex') {
+    // Only Claude keeps its subagents' transcripts in a folder beside the session's.
+    if (!session.exited && !session.isPlainTerminal && (session.runtime || DEFAULT_HARNESS) === DEFAULT_HARNESS) {
       const row = getCachedSession(sessionId);
       if (row) {
         try { running = subagentsRunning(subagentsDirFor(transcriptPath(row))); } catch { running = false; }
@@ -3230,11 +3253,13 @@ function startProjectsWatcher() {
  * onto the real id — everything downstream (terminal data, exit, the renderer's
  * sidebar row) follows session.realSessionId, exactly as fork detection does.
  */
-function resolvePendingLaunches(candidatePaths) {
+function resolvePendingLaunches(candidatePaths, harnessId = null) {
   for (const [tempId, session] of [...activeSessions]) {
     if (session.exited || !session.pendingLaunch || session.realSessionId) continue;
     const harness = getHarness(session.runtime);
     if (!harness.matchesLaunch) continue;
+    // Candidates are one CLI's: a path, or an id for a database CLI.
+    if (harnessId && harness.id !== harnessId) continue;
 
     for (const filePath of candidatePaths) {
       const signals = harness.readLaunchSignals(filePath);
@@ -3282,6 +3307,7 @@ function sweepPendingLaunches() {
   }
 
   for (const [h, since] of roots) {
+    if (h.watchPaths) { resolvePendingLaunches(pendingLaunchTags(h), h.id); continue; }
     const candidates = [];
     // Claude's folders live under the injected PROJECTS_DIR, not its own root.
     const dirs = h.folderPrefix
@@ -3296,6 +3322,19 @@ function sweepPendingLaunches() {
     }
     resolvePendingLaunches(candidates);
   }
+}
+
+/**
+ * The ids a database CLI's pending launches were started on: its candidates,
+ * since its sessions have no file to turn up.
+ */
+function pendingLaunchTags(h) {
+  const tags = [];
+  for (const session of activeSessions.values()) {
+    if (session.exited || session.realSessionId || !session.pendingLaunch?.tag) continue;
+    if ((session.runtime || DEFAULT_HARNESS) === h.id) tags.push(session.pendingLaunch.tag);
+  }
+  return tags;
 }
 
 /** Is any session still waiting for its transcript to appear? */
@@ -3324,10 +3363,54 @@ function stopHarnessWatchers() {
   }
 }
 
+/**
+ * A CLI keeping its sessions in one database (OpenCode) is watched through that
+ * file and its write-ahead log, in their directory so a database created or
+ * replaced later is still seen. A write names no session, so each pass refreshes
+ * the folders whose stamp moved. Throttled rather than debounced: the database
+ * is written all through a turn, and a debounce would hold every update back
+ * until the turn paused.
+ */
+function startDatabaseWatcher(h) {
+  const files = h.watchPaths();
+  const dir = path.dirname(files[0]);
+  if (!fs.existsSync(dir)) return;
+  const names = new Set(files.map(f => path.basename(f)));
+  let timer = null;
+
+  function flush() {
+    timer = null;
+    // A launch waiting for its row is re-keyed before the row is listed, so the
+    // window learns the session's id in the same beat it appears.
+    if (hasPendingLaunches()) resolvePendingLaunches(pendingLaunchTags(h), h.id);
+    let folders = [];
+    try { folders = sessionCache.changedFolders(h); } catch (err) { log.error(`[harness-watch] ${h.id}:`, err.message); }
+    for (const folder of folders) {
+      try { refreshFolder(folder); } catch (err) { log.error('[harness-watch]', folder, err.message); }
+    }
+    if (folders.length) notifyRendererProjectsChanged('sessions');
+  }
+
+  try {
+    const watcher = fs.watch(dir, (_eventType, filename) => {
+      if (filename && !names.has(String(filename))) return;
+      if (!timer) timer = setTimeout(flush, 1000);
+    });
+    watcher.on('error', (err) => log.error(`[harness-watch] ${h.id}:`, err.message));
+    harnessWatchers.push(watcher);
+    // Closing the watcher must not leave a pending pass behind.
+    harnessWatchers.push({ close() { if (timer) clearTimeout(timer); timer = null; } });
+    log.info(`[harness-watch] watching ${h.id} at ${files[0]}`);
+  } catch (err) {
+    log.error(`[harness-watch] failed to watch ${h.id}:`, err.message);
+  }
+}
+
 function startHarnessWatchers() {
   for (const h of availableHarnesses()) {
     if (!h.folderPrefix) continue; // Claude's root is startProjectsWatcher's job
     if (!harnessEnabled(h.id)) continue;
+    if (h.watchPaths) { startDatabaseWatcher(h); continue; }
     const root = h.sessionsRoot();
     if (!fs.existsSync(root)) continue;
 

@@ -10,7 +10,7 @@ import { NotRunningCard } from '@/components/session/NotRunningCard';
 import type { SessionData } from '@/components/session/useSessionData';
 import { TerminalView } from '@/components/TerminalView';
 import type { SessionView } from '@/projects/tabs';
-import { cliLabel } from '@/sessions/model';
+import { canFork, cliLabel } from '@/sessions/model';
 import { colors, spacing } from '@/theme';
 
 /** The bar that says a change waits for review, and opens it. */
@@ -33,6 +33,7 @@ export function NotRunning({ data, onResume, onFork }: { data: SessionData; onRe
     <NotRunningCard
       terminal={data.isTerminal}
       starting={data.starting}
+      forkable={!data.session || canFork(data.session)}
       onResume={onResume}
       onOptions={() => router.push({ pathname: '/new', params: { mode: 'resume', sessionId: data.sessionId } })}
       onFork={onFork}

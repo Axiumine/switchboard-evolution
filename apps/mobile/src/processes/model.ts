@@ -2,7 +2,7 @@
 // as the desktop's More → Task Manager measures it (get-process-usage). Pure
 // functions, so the screen only draws.
 
-import { cleanDisplayName, shortProjectPath, type Session } from '@/sessions/model';
+import { cleanDisplayName, runtimeLabel, shortProjectPath, type Session } from '@/sessions/model';
 import * as UsageChart from '@/shared/vendor/usage-chart';
 
 /** One process of a session's or task's tree, root first, `depth` below the root. */
@@ -84,12 +84,11 @@ export function ownerRef(owner: Pick<Owner, 'kind' | 'id' | 'projectPath' | 'lab
     : { kind: 'session', id: owner.id };
 }
 
-/** "Claude", "Codex", "Terminal" or "Task". */
+/** "Claude", "Codex", "OpenCode", "Terminal" or "Task". */
 export function kindLabel(owner: Pick<Owner, 'kind' | 'type' | 'runtime'>): string {
   if (owner.kind === 'task') return 'Task';
   if (owner.type === 'terminal') return 'Terminal';
-  const runtime = owner.runtime || 'claude';
-  return runtime.charAt(0).toUpperCase() + runtime.slice(1);
+  return runtimeLabel(owner.runtime);
 }
 
 /** The session's name as the session list shows it, the task's label, or what it is. */

@@ -1,6 +1,6 @@
 # Switchboard Evolution
 
-Run and manage your coding-agent sessions (Claude Code, Codex) across every project, from your computer and from your phone.
+Run and manage your coding-agent sessions (Claude Code, Codex, OpenCode) across every project, from your computer and from your phone.
 
 Downloads, install notes and every release: **[vivi7.github.io](https://vivi7.github.io/)**.
 

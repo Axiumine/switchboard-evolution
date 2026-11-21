@@ -1,5 +1,5 @@
 import { expect, test } from '@jest/globals';
-import { applyLiveEvent, buildSections, cleanDisplayName, elapsedLabel, liveFromStates, noticesFrom, relativeTime, rowState, sessionState, sessionSubtitle, sessionTitle, shortProjectPath, type Folder, type LiveState } from '../model';
+import { applyLiveEvent, buildSections, canFork, cleanDisplayName, cliLabel, elapsedLabel, liveFromStates, noticesFrom, relativeTime, rowState, sessionState, sessionSubtitle, sessionTitle, shortProjectPath, type Folder, type LiveState } from '../model';
 
 const now = Date.parse('2026-11-01T15:00:00Z');
 const at = (minutesAgo: number) => new Date(now - minutesAgo * 60000).toISOString();
@@ -263,4 +263,20 @@ test("a session's subtitle: the CLI, its track, its folder and what it does", ()
   expect(sessionSubtitle({ ...session, runtime: 'codex' }, { state: 'attention' })).toBe('Codex · harbor-app · waiting for you');
   expect(sessionSubtitle(session, { state: 'idle' })).toBe('Claude · harbor-app · not running');
   expect(sessionSubtitle(session, { state: 'running' })).toBe('Claude · harbor-app');
+});
+
+test('every CLI the desktop runs has its name, OpenCode included', () => {
+  expect(cliLabel({ runtime: 'claude' })).toBe('Claude');
+  expect(cliLabel({ runtime: 'codex' })).toBe('Codex');
+  expect(cliLabel({ runtime: 'opencode' })).toBe('OpenCode');
+  expect(cliLabel({})).toBe('Claude');
+  expect(cliLabel({ type: 'terminal', runtime: 'opencode' })).toBe('Terminal');
+});
+
+test('an OpenCode session cannot be forked yet, and neither can a terminal', () => {
+  expect(canFork({ runtime: 'claude' })).toBe(true);
+  expect(canFork({ runtime: 'codex' })).toBe(true);
+  expect(canFork({})).toBe(true);
+  expect(canFork({ runtime: 'opencode' })).toBe(false);
+  expect(canFork({ type: 'terminal' })).toBe(false);
 });

@@ -4,7 +4,7 @@
 
 Your command center for CLI coding sessions.
 
-Switchboard is a desktop app that puts every Claude Code and Codex session, across every project, in one window. Launch, resume, fork, and monitor sessions without juggling terminal tabs or digging through `~/.claude/projects` and `~/.codex/sessions` for that one conversation from last week.
+Switchboard is a desktop app that puts every Claude Code, Codex and OpenCode session, across every project, in one window. Launch, resume, fork, and monitor sessions without juggling terminal tabs or digging through `~/.claude/projects` and `~/.codex/sessions` for that one conversation from last week.
 
 ![Switchboard](build/screenshot.png)
 
@@ -38,21 +38,23 @@ Packaged builds check GitHub Releases for updates on launch and every 4 hours, d
 
 ## Supported CLIs
 
-| | Claude Code (`claude`) | Codex (`codex`) |
-|---|---|---|
-| Browse and search history | ✅ | ✅ |
-| Resume a session | ✅ | ✅ |
-| Start a new session | ✅ | ✅ |
-| Fork a session | ✅ | ✅ |
-| Read in the message viewer | ✅ | ✅ |
-| Status and activity indicators | ✅ | ✅ |
-| Session names from `/rename` | ✅ | — |
-| IDE emulation (diff review) | ✅ | — |
-| Plans and memory files | ✅ | — |
+| | Claude Code (`claude`) | Codex (`codex`) | OpenCode (`opencode`) |
+|---|---|---|---|
+| Browse and search history | ✅ | ✅ | ✅ |
+| Resume a session | ✅ | ✅ | ✅ |
+| Start a new session | ✅ | ✅ | ✅ |
+| Fork a session | ✅ | ✅ | — |
+| Read in the message viewer | ✅ | ✅ | ✅ |
+| Status and activity indicators | ✅ | ✅ | ✅ |
+| Session names from `/rename` | ✅ | — | ✅ (OpenCode's own titles) |
+| IDE emulation (diff review) | ✅ | — | — |
+| Plans and memory files | ✅ | — | — |
 
-Sessions from both CLIs share one sidebar, each row marked with its CLI's logo. A fork runs on the CLI that wrote the session being forked.
+Sessions from all the CLIs share one sidebar, each row marked with its CLI's logo. A fork runs on the CLI that wrote the session being forked.
 
-Turn either CLI off under **CLI Agents** in Settings. A switched-off CLI is not scanned, not watched, and not offered when you start a session, and its sessions are hidden. Its history is kept, so switching it back on restores everything immediately. At least one CLI always stays on.
+OpenCode means OpenCode 2.x. It keeps its sessions in one database rather than a file each (`~/.local/share/opencode/opencode.db`, or what `OPENCODE_DB` names), which Switchboard reads without writing to it. Its working and waiting states come from the status reports its terminal interface sends.
+
+Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not scanned, not watched, and not offered when you start a session, and its sessions are hidden. Its history is kept, so switching it back on restores everything immediately. At least one CLI always stays on.
 
 ## Features at a glance
 
@@ -82,6 +84,7 @@ Each CLI exposes its own options when you start or resume a session:
 |---|---|
 | Claude Code | Permission mode, worktree, Chrome, model, effort |
 | Codex | Sandbox policy, approval policy, model, reasoning effort |
+| OpenCode | Auto-approve permissions (`--auto`); the model is chosen in OpenCode |
 
 Set them per session, per project, or globally in Settings. Model and effort are chosen per session or per schedule (Codex's model can also be set in Settings); left blank, each CLI uses its own default.
 
@@ -99,12 +102,12 @@ For Project View schedules, defaults come from the track's starting folder, then
 
 ### Status notifications
 
-Switchboard watches every session in the background, Claude and Codex alike, and shows status in the sidebar so you can tell at a glance which sessions need attention while you work in a different one.
+Switchboard watches every session in the background, whichever CLI runs it, and shows status in the sidebar so you can tell at a glance which sessions need attention while you work in a different one.
 
 ![Status Notifications](build/screenshot-notifications.png)
 
 - **Waiting for input** — A session that needs your response is highlighted.
-- **Permission approval** — A session blocked on a permission grant or approval gets a badge immediately. Switchboard reads each CLI's own wording, so Claude's permission prompts and Codex's approval requests both register.
+- **Permission approval** — A session blocked on a permission grant or approval gets a badge immediately. Switchboard reads each CLI's own wording, so Claude's permission prompts, Codex's approval requests and OpenCode's permission and question prompts all register.
 - **Activity indicators** — See which sessions are running, idle, or finished.
 
 ### Session grid
@@ -161,10 +164,11 @@ None of these is read at the start of a session, only when the plan or the todos
 
 Sessions start in the project folder by default. A project or a track can choose an attached folder instead. Wherever a project session starts, Switchboard passes the project folder and every attached folder to the CLI as extra directories, so the agent can read and edit all of them.
 
-The two CLIs handle this differently:
+The CLIs handle this differently:
 
 - **Claude** loads the `CLAUDE.md` from each of those directories.
 - **Codex** only reads `AGENTS.md` from the folder it starts in, so a Codex session that starts in an attached folder does not see the project brief. Codex also refuses extra directories unless its sandbox is `workspace-write` or `danger-full-access`, so Switchboard's global default for Codex is `workspace-write`. Choose "Default" in Settings to hand the choice back to Codex's own config. Under `read-only` the extra directories are left off, since read-only can read every path anyway.
+- **OpenCode** has no option for extra directories, so none are passed: it works in the folder the session starts in.
 
 ### Overview, Session tab and sessions drawer
 
@@ -358,7 +362,7 @@ npm run release
 main.js            Electron main process
 preload.js         Context bridge (IPC bindings)
 db.js              SQLite session cache and metadata
-harnesses/         Per-CLI modules (claude, codex) and registry
+harnesses/         Per-CLI modules (claude, codex, opencode) and registry
 public/            Renderer (HTML/CSS/JS)
 templates/         Built-in project templates (feature, research, customer)
 workers/           Background workers

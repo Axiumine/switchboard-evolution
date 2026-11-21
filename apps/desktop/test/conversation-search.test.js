@@ -88,3 +88,68 @@ for (const provider of harnesses) {
     assert.equal(session.textContent, 'real_question\nfirst_answer\nsecond_answer');
   });
 }
+
+// OpenCode keeps sessions in a database, so its fixture is a database row set
+// rather than a transcript file.
+function readOpencodeFixture(messages) {
+  const { DatabaseSync } = require('node:sqlite');
+  const opencode = require('../harnesses/opencode');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conversation-search-opencode-'));
+  const prev = process.env.OPENCODE_DB;
+  const file = path.join(dir, 'opencode.db');
+  const db = new DatabaseSync(file);
+  try {
+    db.exec(`CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, parent_id text, slug text NOT NULL,
+        directory text NOT NULL, title text, version text NOT NULL, time_created integer NOT NULL,
+        time_updated integer NOT NULL, time_archived integer);
+      CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+        seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);`);
+    db.prepare("INSERT INTO session_v2 VALUES ('ses_1', 'p', NULL, 's', '/tmp/project', NULL, '2.3.2', 1, 1, NULL)").run();
+    messages.forEach(([type, data], i) => db.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, 1, 1, ?)')
+      .run(`msg_${i}`, 'ses_1', type, i + 1, JSON.stringify(data)));
+    process.env.OPENCODE_DB = file;
+    return opencode.readSessionFile('ses_1', 'opencode/p', '/tmp/project');
+  } finally {
+    require('../harnesses/opencode').closeDb();
+    db.close();
+    if (prev === undefined) delete process.env.OPENCODE_DB; else process.env.OPENCODE_DB = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const done = { created: 1, completed: 2 };
+
+test('OpenCode indexes full messages and later turns beyond the old search limits', () => {
+  const first = 'a'.repeat(600) + ' move_fna_lines';
+  const middle = 'b'.repeat(600);
+  const session = readOpencodeFixture([
+    ['user', { text: first }],
+    ...Array.from({ length: 20 }, () => ['assistant', { time: done, content: [{ type: 'text', text: middle }] }]),
+    ['assistant', { time: done, content: [{ type: 'text', text: 'late_conversation_marker' }, { type: 'text', text: 'second_block_marker' }] }],
+    ['user', { text: 'final_user_marker' }],
+  ]);
+  assert.ok(session.textContent.includes(first));
+  assert.ok(session.textContent.includes('late_conversation_marker\nsecond_block_marker'));
+  assert.ok(session.textContent.includes('final_user_marker'));
+  assert.ok(session.textContent.length > 12000);
+  assert.equal(session.summary, first.slice(0, 120));
+});
+
+test('OpenCode indexes only conversation text, excluding tools and scaffolding', () => {
+  const session = readOpencodeFixture([
+    ['synthetic', { text: 'synthetic_marker' }],
+    ['system', { text: 'system_marker' }],
+    ['user', { text: 'real_question' }],
+    ['assistant', { time: done, content: [
+      { type: 'reasoning', text: 'thinking_marker' },
+      { type: 'text', text: 'first_answer' },
+      { type: 'tool', id: 'c1', name: 'shell', state: { status: 'completed', input: { command: 'tool_input_marker' },
+        content: [{ type: 'text', text: 'tool_output_marker' }] } },
+      { type: 'text', text: 'second_answer' },
+    ] }],
+    ['shell', { command: 'shell_marker', output: 'shell_output_marker' }],
+    ['idle', { outcome: 'succeeded' }],
+  ]);
+  assert.equal(session.summary, 'real_question');
+  assert.equal(session.textContent, 'real_question\nfirst_answer\nsecond_answer');
+});

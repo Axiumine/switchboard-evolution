@@ -44,7 +44,7 @@ What "an app of its own" means:
 ### 1. The phone as a second seat (mobile app and remote access)
 
 - A remote-access server with an encrypted protocol (tweetnacl). Pairing uses a QR code that works once and for two minutes. Paired devices are listed with their state and can be removed.
-- The phone sees and drives terminals: it starts Claude or Codex sessions, types, fits the terminal to its screen, attaches files and photos, and reads the tail of a long conversation.
+- The phone sees and drives terminals: it starts Claude, Codex or OpenCode sessions, types, fits the terminal to its screen, attaches files and photos, and reads the tail of a long conversation.
 - Unread and needs-you marks are shared between window and phone. A session open on the phone counts as seen.
 - Projects, plans, todos, schedules and files work from the phone: upload, rename, trash, a safe save that refuses if the file changed meanwhile, and download of any file.
 - The Git Graph with all its actions, worktrees, project tasks, the Task Manager, search and replace, and staging also work from the phone.

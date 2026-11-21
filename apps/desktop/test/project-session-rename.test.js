@@ -5,6 +5,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../public/projects-view.js'), 'utf8');
+
+// The renderer's table of CLIs (public/utils.js), which the views read labels and abilities from.
+const utilsSource = fs.readFileSync(path.join(__dirname, '../public/utils.js'), 'utf8');
+const cliTable = utilsSource.slice(utilsSource.indexOf('// --- CLIs ---'), utilsSource.indexOf('// --- end CLIs ---'));
 const between = (start, end) => source.slice(source.indexOf(start), source.indexOf(end));
 const menu = between('function sessionMenuItems(session) {', '// --- Flows (create, rename, attach, detach, done, remove) ---');
 const flow = between('/**\n * Rename a session, the same as the Sessions tab', 'async function attachFolderFlow(');
@@ -28,6 +32,7 @@ function load({ answer = null } = {}) {
     starIconSvg: () => '',
     toggleSessionStar: (s) => { calls.starred = (calls.starred || []).concat(s.sessionId); },
   });
+  vm.runInContext(cliTable, context);
   vm.runInContext(menu + flow, context);
   return { context, calls };
 }
@@ -93,4 +98,12 @@ test('cancel or an unchanged name saves nothing', async () => {
     assert.equal(calls.loaded, 0);
     assert.equal(s.name, 'Login work');
   }
+});
+
+test('an OpenCode session has no Fork yet; Claude and Codex sessions do', () => {
+  const { context } = load();
+  const has = runtime => context.sessionMenuItems({ sessionId: 's', runtime, projectPath: '/p' }).some(i => i.label === 'Fork');
+  assert.equal(has('claude'), true);
+  assert.equal(has('codex'), true);
+  assert.equal(has('opencode'), false);
 });

@@ -124,3 +124,9 @@ test('a phone may choose every order the desktop knows', async () => {
   }
   assert.equal(calls.length, orders.length);
 });
+
+test('a phone can ask for an OpenCode session after creating a worktree', async () => {
+  const { api } = setup();
+  const reply = await api.call('set-worktree-settings', ['p1', { startAfterCreate: 'opencode' }]);
+  assert.equal(reply.error, undefined);
+});
