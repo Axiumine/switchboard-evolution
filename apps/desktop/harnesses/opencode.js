@@ -498,12 +498,15 @@ function parseStatusReport(payload) {
   const state = STATUS_STATES[fields.state];
   if (!state) return null;
   if (fields.app && fields.app !== 'opencode') return null;
+  const kind = fields.kind || null;
+  // The message comes last in a record, and a long one can be cut off with it.
+  const fallback = state === 'attention' ? (kind === 'question' ? 'Input needs response' : 'Permission needs input') : null;
   return {
     state,
     id: fields.id || null,
-    kind: fields.kind || null,
+    kind,
     title: decodeField(fields.title),
-    message: decodeField(fields.msg),
+    message: decodeField(fields.msg) || fallback,
   };
 }
 

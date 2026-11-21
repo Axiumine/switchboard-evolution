@@ -510,3 +510,10 @@ test('a new session is matched once OpenCode has created it under the chosen id'
 test('fork waits for OpenCode\'s service: not offered yet', () => {
   assert.equal(opencode.canFork, false);
 });
+
+test('a blocked record without its message still says what it waits for', () => {
+  // The message comes last in the record and can be cut off with it.
+  assert.equal(opencode.parseStatusReport('state=blocked:kind=permission:app=opencode').message, 'Permission needs input');
+  assert.equal(opencode.parseStatusReport('state=blocked:kind=question:app=opencode').message, 'Input needs response');
+  assert.equal(opencode.parseStatusReport('state=working:app=opencode').message, null);
+});

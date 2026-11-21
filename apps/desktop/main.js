@@ -14,6 +14,7 @@ const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
 const { readViewerEntriesSince } = require('./transcript-reader');
+const { markBusy, markIdle, applyStatusReport } = require('./cli-state');
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
 const { createSessionNotices } = require('./session-notices');
@@ -2446,17 +2447,26 @@ function wireSessionPty(sessionId, session, harness) {
             session._titleAttention = false;
           }
 
-          if (isBusy && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            session._needsAttention = false;
+          if (isBusy && markBusy(session)) {
             log.debug(`[OSC 0] session=${currentId} → BUSY`);
             emit('cli-busy-state', currentId, true);
-          } else if (isIdle && session._cliBusy) {
-            session._cliBusy = false;
-            session._oscIdle = true;
+          } else if (isIdle && markIdle(session)) {
             log.debug(`[OSC 0] session=${currentId} → IDLE`);
             emit('cli-busy-state', currentId, false);
+          }
+        }
+        // OpenCode's status records (OSC 7501): one for the whole TUI, with no
+        // id, and one per session it has open. The TUI's own is the PTY's
+        // state. Read whole, not cut like the payload above: the message
+        // comes last.
+        if (code === '7501' && harness?.parseStatusReport) {
+          const report = harness.parseStatusReport(m[2].slice(0, 4096));
+          if (report && !report.id) {
+            log.debug(`[OSC 7501] session=${currentId} state=${report.state} wasBusy=${!!session._cliBusy}`);
+            for (const [channel, ...args] of applyStatusReport(session, report)) {
+              if (channel === 'terminal-notification') log.info(`[OSC 7501] session=${currentId} → ATTENTION "${args[0]}"`);
+              emit(channel, currentId, ...args);
+            }
           }
         }
       }
@@ -2469,20 +2479,15 @@ function wireSessionPty(sessionId, session, harness) {
           const level = payload.split(';')[1];
           const progressState = progressBusyState({ level, titleBusy: !!session._titleBusy });
           log.debug(`[OSC 9;4] session=${currentId} level=${level} payload="${payload}" state=${progressState || 'none'} titleBusy=${!!session._titleBusy} wasBusy=${!!session._cliBusy}`);
-          if (progressState === 'busy' && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            session._needsAttention = false;
+          if (progressState === 'busy' && markBusy(session)) {
             log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
             emit('cli-busy-state', currentId, true);
-          } else if (progressState === 'idle' && session._cliBusy) {
+          } else if (progressState === 'idle' && markIdle(session)) {
             // The end of the progress run. Without acting on this, a busy state
             // raised by 9;4 could only be cleared by a spinner-to-idle title
             // change, which does not come for a slash command — the session sat
             // spinning until Claude's "waiting for your input" notice a full
             // minute later.
-            session._cliBusy = false;
-            session._oscIdle = true;
             log.debug(`[OSC 9;4] session=${currentId} → IDLE`);
             emit('cli-busy-state', currentId, false);
           }
