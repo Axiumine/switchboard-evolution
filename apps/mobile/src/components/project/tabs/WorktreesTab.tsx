@@ -194,7 +194,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
     for (const choice of runningSessionChoices(running.get(wt.path) || [], liveStates)) {
       options.push({ label: `Open “${choice.title}”`, hint: choice.hint, onPress: () => openSession(choice.session) });
     }
-    if (wt.exists) options.push({ label: 'New session…', hint: 'Claude, Codex or a terminal here', onPress: () => setMenu({ kind: 'session', wt }) });
+    if (wt.exists) options.push({ label: 'New session…', hint: 'Claude, Codex, OpenCode or a terminal here', onPress: () => setMenu({ kind: 'session', wt }) });
     if (canChanges && canShowChanges(wt)) options.push({ label: 'Uncommitted and unpushed…', hint: 'what removing it would lose', onPress: () => openChanges(wt) });
     options.push({ label: 'Copy path', hint: shortPath(wt.path, homeDir), onPress: () => copyPath(wt.path) });
     const folder = folderFor(project.folders, wt);

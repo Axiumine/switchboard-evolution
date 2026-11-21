@@ -72,3 +72,10 @@ describe('explorer actions', () => {
     expect(remapExpanded(['src', 'src/lib', 'docs'], 'src', null)).toEqual(['docs']);
   });
 });
+
+describe('chatMention for OpenCode', () => {
+  it('gives OpenCode the path, like Codex: it attaches a typed @path only from its own popup', () => {
+    expect(chatMention('opencode', '/code/app', '/code/app/src/a.ts')).toBe('src/a.ts ');
+    expect(chatMention('opencode', '/code/app', '/code/app/my notes.md')).toBe("'my notes.md' ");
+  });
+});

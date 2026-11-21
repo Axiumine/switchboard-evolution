@@ -26,7 +26,7 @@ import { act } from '@/projects/queries';
 import { useProjectUi, useProjectUiStore } from '@/projects/ui-store';
 import { useOpenSession } from '@/projects/open-session';
 import { getDraft, setDraftText } from '@/sessions/drafts';
-import { sessionTitle, type Session } from '@/sessions/model';
+import { cliLabel, sessionTitle, type Session } from '@/sessions/model';
 import { collectFolders, failuresText, invertSelection, selectAll, topLevelPicks, trashQuestion } from '@/shared/vendor/file-selection';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -366,7 +366,7 @@ export function FilesTab({ project }: { project: Project }) {
     });
   };
 
-  /** Running Claude and Codex sessions of the project, the most recent first. */
+  /** Running CLI sessions of the project, the most recent first. */
   const runningChats = () => projectSessions(project)
     .filter((s) => s.type !== 'terminal' && live[s.sessionId] && !live[s.sessionId].exited)
     .sort((a, b) => Date.parse(b.modified || '') - Date.parse(a.modified || ''));
@@ -468,7 +468,7 @@ export function FilesTab({ project }: { project: Project }) {
         label: `Add ${kind} to Chat`,
         hint: running.length === 1 ? sessionTitle(running[0]) : running.length ? `${running.length} running chats` : 'no running chat',
         onPress: () => {
-          if (!running.length) Alert.alert('No running chat', 'Start a Claude or Codex session in this project first, or use Add to New Chat.');
+          if (!running.length) Alert.alert('No running chat', 'Start a Claude, Codex or OpenCode session in this project first, or use Add to New Chat.');
           else if (running.length === 1) addToChat(running[0], entry);
           else setChats({ entry, sessions: running });
         },
@@ -627,7 +627,7 @@ export function FilesTab({ project }: { project: Project }) {
       <Sheet
         visible={!!chats}
         title="Add to which chat?"
-        options={(chats?.sessions || []).map((s) => ({ label: sessionTitle(s), hint: s.runtime === 'codex' ? 'Codex' : 'Claude', onPress: () => chats && addToChat(s, chats.entry) }))}
+        options={(chats?.sessions || []).map((s) => ({ label: sessionTitle(s), hint: cliLabel(s), onPress: () => chats && addToChat(s, chats.entry) }))}
         onClose={() => setChats(null)}
       />
       <TextPrompt

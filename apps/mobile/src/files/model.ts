@@ -78,11 +78,15 @@ export function joinPath(root: string, rel: string): string {
   return rel ? `${root.replace(/\/$/, '')}/${rel}` : root;
 }
 
-/** What to type into a chat for a file: an @-mention for Claude, the path for Codex. */
+/**
+ * What to type into a chat for a file: an @-mention for Claude, the path for
+ * Codex and OpenCode (OpenCode attaches a file only when it is picked from its
+ * own @ popup; a typed @path stays text).
+ */
 export function chatMention(runtime: string | null | undefined, cwd: string | null | undefined, filePath: string): string {
   let ref = filePath;
   if (cwd && filePath.startsWith(cwd + '/')) ref = filePath.slice(cwd.length + 1);
-  if (runtime === 'codex') return (/\s/.test(ref) ? `'${ref.replace(/'/g, "'\\''")}'` : ref) + ' ';
+  if (runtime === 'codex' || runtime === 'opencode') return (/\s/.test(ref) ? `'${ref.replace(/'/g, "'\\''")}'` : ref) + ' ';
   return (/\s/.test(ref) ? `@"${ref}"` : `@${ref}`) + ' ';
 }
 

@@ -25,7 +25,7 @@ function PulsingDot() {
  */
 export function StateStrip({ state, cli, working, stopShown, onStop, onOpenTerminal }: {
   state: SessionState;
-  /** "Claude" or "Codex". */
+  /** The CLI's name: "Claude", "Codex" or "OpenCode". */
   cli: string;
   working?: string;
   /** The Send button is Stop now: point at it instead of showing another. */
