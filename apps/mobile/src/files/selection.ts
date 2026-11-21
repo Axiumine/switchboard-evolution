@@ -1,10 +1,12 @@
 // Ticked files and folders of the Files tab, moved to the Trash on the
-// computer together. The ticking itself (Select All, Invert, which entries to
-// trash, the question) comes from the desktop's file-selection.js.
+// computer or downloaded to the phone together. The ticking itself (Select
+// All, Invert, which entries to trash, the question) comes from the desktop's
+// file-selection.js.
 
 import { isWithin, topLevelPicks } from '@/shared/vendor/file-selection';
 
-import { remapExpanded } from './model';
+import type { DownloadItem } from './download';
+import { remapExpanded, type FileEntry } from './model';
 
 export type TrashOutcome = { removed: string[]; failed: { rel: string; error: string }[] };
 
@@ -48,4 +50,41 @@ export function afterTrash(expanded: string[], selected: string | null, removed:
   for (const rel of removed) next = remapExpanded(next, rel, null);
   const gone = !!selected && removed.some((rel) => isWithin(selected, rel));
   return { expanded: next, selected: gone ? null : selected };
+}
+
+/** At most this many files in one Download Selected, what is in the folders ticked included. */
+export const MAX_DOWNLOAD_FILES = 1000;
+
+/**
+ * The files Download Selected fetches for the ticked entries: a ticked file,
+ * and everything in a ticked folder, kept in a folder of the same name (and
+ * its subfolders, made on the phone as on the computer). Links and other
+ * special entries ('other') stay behind. `known` are the entries the tree
+ * shows; `list` lists a folder. Throws past `max` files.
+ */
+export async function downloadItems(
+  picked: Iterable<string>,
+  known: ReadonlyMap<string, FileEntry>,
+  list: (rel: string) => Promise<FileEntry[]>,
+  { max = MAX_DOWNLOAD_FILES }: { max?: number } = {},
+): Promise<(DownloadItem & { size: number })[]> {
+  const items: (DownloadItem & { size: number })[] = [];
+  const add = (entry: FileEntry, folders: string[]) => {
+    items.push({ relativePath: entry.relativePath, name: entry.name, folders, size: entry.size });
+    if (items.length > max) throw new Error(`That is more than ${max} files. Tick fewer, or folders further down.`);
+  };
+  for (const rel of topLevelPicks(picked)) {
+    const entry = known.get(rel);
+    if (entry?.type === 'file') add(entry, []);
+    if (entry?.type !== 'directory') continue;
+    const queue = [{ rel: entry.relativePath, folders: [entry.name] }];
+    while (queue.length) {
+      const { rel: folderRel, folders } = queue.shift()!;
+      for (const child of await list(folderRel)) {
+        if (child.type === 'file') add(child, folders);
+        else if (child.type === 'directory') queue.push({ rel: child.relativePath, folders: [...folders, child.name] });
+      }
+    }
+  }
+  return items;
 }

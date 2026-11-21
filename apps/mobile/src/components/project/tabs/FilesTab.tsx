@@ -12,16 +12,18 @@ import { FileView } from '@/components/files/FileView';
 import { usePullRefresh } from '@/components/PullRefresh';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
-import { downloadProjectFile, downloadSupported } from '@/files/download';
+import { downloadProjectFile, downloadProjectFiles, downloadSupported, type DownloadItem, type TransferOutcome } from '@/files/download';
 import {
   appendMention, byteSize, chatMention, filesRoots, foldersToList, joinPath, parentRelative, pasteTarget, remapExpanded, treeRows,
   type FileEntry,
 } from '@/files/model';
-import { afterTrash, trashPicked } from '@/files/selection';
+import { afterTrash, downloadItems, trashPicked } from '@/files/selection';
+import { downloadQuestion, transferDoneText, transferFailures, uploadClashQuestion } from '@/files/transfer-text';
+import { pickUploads, uploadFiles, type UploadConflict, type UploadItem, type UploadSource } from '@/files/upload';
 import { PaneLayout, usePaneMode } from '@/layout/PaneLayout';
 import { projectSessions, type Project } from '@/projects/model';
 import { act } from '@/projects/queries';
-import { useProjectUi } from '@/projects/ui-store';
+import { useProjectUi, useProjectUiStore } from '@/projects/ui-store';
 import { useOpenSession } from '@/projects/open-session';
 import { getDraft, setDraftText } from '@/sessions/drafts';
 import { sessionTitle, type Session } from '@/sessions/model';
@@ -47,6 +49,27 @@ const CHECK_COLUMN = 28;
 const TWO_PANE = 600;
 
 type Prompt = { title: string; confirm: string; initial: string; run: (value: string) => void };
+
+/**
+ * Open `folderRel` of `root` in the project's tree, from the store as it is
+ * now: an upload takes a while, and the tab may have moved on meanwhile.
+ */
+function expandFolder(projectId: string, root: string, folderRel: string) {
+  const { get, patch } = useProjectUiStore.getState();
+  const files = get(projectId).files;
+  const open = files?.expanded?.[root] ?? [];
+  if (!folderRel || open.includes(folderRel)) return;
+  patch(projectId, { files: { ...files, expanded: { ...(files?.expanded ?? {}), [root]: [...open, folderRel] } } });
+}
+
+/** After several files went down or up: what did not go and why, or a short line that they did. */
+function reportTransfer(kind: 'download' | 'upload', outcome: TransferOutcome, total: number) {
+  const failures = transferFailures(kind, outcome, total);
+  if (failures) Alert.alert(failures.title, failures.detail);
+  else if (Platform.OS === 'android') ToastAndroid.show(transferDoneText(kind, outcome, total), ToastAndroid.SHORT);
+  // On iOS the files are in a folder of Files, out of sight: say so. An upload shows in the tree.
+  else if (kind === 'download' && outcome.done) Alert.alert(transferDoneText(kind, outcome, total));
+}
 
 /**
  * The project's files, as on the desktop: a tab for the project folder and
@@ -79,6 +102,7 @@ export function FilesTab({ project }: { project: Project }) {
     manage: useCapability('manage-project-entry'),
     trashMany: useCapability('trash-project-entries'),
     download: useCapability('read-project-file-chunk'),
+    upload: useCapability('upload-project-file-chunk'),
     search: useCapability('search-project-files'),
     replace: useCapability('replace-in-project-files'),
   };
@@ -87,8 +111,9 @@ export function FilesTab({ project }: { project: Project }) {
   const [searchOpened, setSearchOpened] = useState(false);
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
   const searchOn = searching && can.search;
-  // Enable Selection in the "•••" menu: a checkbox on every row, for Delete N
-  // Selected. Kept for the folder it was turned on in; another tab drops it.
+  // Enable Selection in the "•••" menu: a checkbox on every row, for Download N
+  // Selected and Delete N Selected. Kept for the folder it was turned on in;
+  // another tab drops it.
   const [selection, setSelection] = useState<{ root: string; picked: ReadonlySet<string> } | null>(null);
   const selecting = selection?.root === root;
   const picked = selecting ? selection.picked : NOTHING;
@@ -195,10 +220,16 @@ export function FilesTab({ project }: { project: Project }) {
     ],
   );
 
-  /** Delete N Selected: one question, then everything ticked to the Trash on the computer. */
-  const trashSelection = () => {
+  /** The entries the tree has listed, by relative path. */
+  const knownEntries = () => {
     const known = new Map<string, FileEntry>();
     for (const entries of Object.values(byFolder)) for (const entry of entries ?? []) known.set(entry.relativePath, entry);
+    return known;
+  };
+
+  /** Delete N Selected: one question, then everything ticked to the Trash on the computer. */
+  const trashSelection = () => {
+    const known = knownEntries();
     const rels = topLevelPicks(picked);
     if (!rels.length) return;
     const question = trashQuestion(rels.map((rel) => ({ rel, isDir: known.get(rel)?.type === 'directory' })));
@@ -226,6 +257,102 @@ export function FilesTab({ project }: { project: Project }) {
     downloadProjectFile(root, entry.relativePath, entry.name)
       .then((outcome) => { if (outcome === 'saved' && Platform.OS === 'android') ToastAndroid.show(`Saved ${entry.name}`, ToastAndroid.SHORT); })
       .catch((err: any) => Alert.alert(`Could not download “${entry.name}”`, err?.message || String(err)));
+  }, AFTER_SHEET_MS);
+
+  /** A folder of this root as the computer lists it now; an error it sends back throws. */
+  const listFolder = async (rel: string): Promise<FileEntry[]> => {
+    const listing = await queryClient.fetchQuery({
+      queryKey: ['directory', root, rel],
+      queryFn: () => request<Listing>('list-project-directory', [root, rel]),
+    });
+    if (!listing?.ok) throw new Error(listing?.error || 'The computer did not list the folder');
+    return listing.entries ?? [];
+  };
+
+  const startDownloads = (items: DownloadItem[]) => {
+    downloadProjectFiles(root, items)
+      .then((outcome) => { if (outcome) reportTransfer('download', outcome, items.length); })
+      .catch((err: any) => Alert.alert('Could not download them', err?.message || String(err)));
+  };
+
+  /**
+   * Download N Selected: the ticked files, and what is in the ticked folders,
+   * into a folder picked on the phone. With folders ticked it says first how
+   * many files that is. The ticks stay, for Delete N Selected after.
+   */
+  const downloadSelection = () => {
+    const known = knownEntries();
+    const rels = topLevelPicks(picked);
+    if (!rels.length) return;
+    setTimeout(async () => {
+      let items: Awaited<ReturnType<typeof downloadItems>>;
+      try {
+        items = await downloadItems(rels, known, listFolder);
+      } catch (err: any) {
+        Alert.alert('Could not download them', err?.message || String(err));
+        return;
+      }
+      if (!items.length) {
+        Alert.alert('Nothing to download', 'There are no files in what is ticked.');
+        return;
+      }
+      if (!rels.some((rel) => known.get(rel)?.type === 'directory')) {
+        startDownloads(items);
+        return;
+      }
+      const question = downloadQuestion(items.length, byteSize(items.reduce((sum, item) => sum + item.size, 0)));
+      Alert.alert(question.title, question.detail, [
+        { text: 'Cancel', style: 'cancel' },
+        // The folder picker opens once the question has gone.
+        { text: question.confirm, onPress: () => setTimeout(() => startDownloads(items), AFTER_SHEET_MS) },
+      ]);
+    }, AFTER_SHEET_MS);
+  };
+
+  const startUploads = (folderRel: string, items: UploadItem[], conflict: UploadConflict) => {
+    const forRoot = root;
+    uploadFiles(forRoot, folderRel, items, conflict)
+      .then((outcome) => {
+        reportTransfer('upload', outcome, items.length);
+        // The folder open, to show what arrived.
+        if (outcome.done) expandFolder(project.id, forRoot, folderRel);
+      })
+      .catch((err: any) => Alert.alert('Could not upload', err?.message || String(err)))
+      .finally(afterChange);
+  };
+
+  /**
+   * Upload Files… / Upload Photos…: picked on the phone, several at once, into
+   * `folderRel`. Names already in the folder ask first: replace them (the old
+   * ones to the Trash on the computer) or keep both.
+   */
+  const upload = (folderRel: string, source: UploadSource) => setTimeout(async () => {
+    let items: UploadItem[];
+    try {
+      items = await pickUploads(source);
+    } catch (err: any) {
+      Alert.alert('Could not open the picker', err?.message || String(err));
+      return;
+    }
+    if (!items.length) return;
+    let taken: Set<string>;
+    try {
+      taken = new Set((await listFolder(folderRel)).map((entry) => entry.name));
+    } catch (err: any) {
+      Alert.alert('Could not upload', err?.message || String(err));
+      return;
+    }
+    const clashes = items.filter((item) => taken.has(item.name)).map((item) => item.name);
+    if (!clashes.length) {
+      startUploads(folderRel, items, 'keep-both');
+      return;
+    }
+    const question = uploadClashQuestion(clashes);
+    Alert.alert(question.title, question.detail, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Keep Both', onPress: () => startUploads(folderRel, items, 'keep-both') },
+      { text: 'Replace', style: 'destructive', onPress: () => startUploads(folderRel, items, 'replace') },
+    ]);
   }, AFTER_SHEET_MS);
 
   const paste = (target: FileEntry | null) => {
@@ -262,16 +389,25 @@ export function FilesTab({ project }: { project: Project }) {
 
   /** The selection part of the folder's "•••" menu. */
   const selectionOptions = (): SheetOption[] => {
-    if (!can.manage && !can.trashMany) return [];
+    const canDelete = can.manage || can.trashMany;
+    // Always offered on a phone, as Download is: an older computer says how to get there.
+    const canDownload = downloadSupported();
+    if (!canDelete && !canDownload) return [];
     if (!selecting) {
-      return [{ label: 'Enable Selection', hint: 'tick files and folders, then delete them together', onPress: () => setSelection({ root, picked: new Set() }) }];
+      const then = canDelete && canDownload ? 'download or delete them' : canDelete ? 'delete them' : 'download them';
+      return [{ label: 'Enable Selection', hint: `tick files and folders, then ${then} together`, onPress: () => setSelection({ root, picked: new Set() }) }];
     }
     const options: SheetOption[] = [
       { label: 'Select All', hint: `${visibleRels.length} shown`, onPress: () => setPicked(selectAll(visibleRels)) },
     ];
     if (picked.size) options.push({ label: 'Deselect All', onPress: () => setPicked(new Set()) });
     options.push({ label: 'Invert Selection', onPress: () => setPicked(invertSelection(visibleRels, picked)) });
-    if (picked.size) options.push({ label: `Delete ${picked.size} Selected…`, destructive: true, onPress: trashSelection });
+    if (picked.size && canDownload) {
+      options.push(can.download
+        ? { label: `Download ${picked.size} Selected…`, hint: 'into a folder you pick on this phone', onPress: downloadSelection }
+        : { label: `Download ${picked.size} Selected…`, hint: 'update Switchboard Evolution on the computer first', onPress: needsNewerComputer('Downloading files to this phone') });
+    }
+    if (picked.size && canDelete) options.push({ label: `Delete ${picked.size} Selected…`, destructive: true, onPress: trashSelection });
     options.push({ label: 'Cancel Selection', onPress: () => setSelection(null) });
     return options;
   };
@@ -299,6 +435,12 @@ export function FilesTab({ project }: { project: Project }) {
     return entryMenuOptions(target);
   };
 
+  /** For an action an older computer lacks: what to do about it. */
+  const needsNewerComputer = (what: string) => () => setTimeout(() => Alert.alert(
+    'Update Switchboard Evolution on the computer',
+    `${what} needs a newer Switchboard Evolution on the computer. Update it there, then try again.`,
+  ), AFTER_SHEET_MS);
+
   const entryMenuOptions = (target: FileEntry | 'root'): SheetOption[] => {
     const entry = target === 'root' ? null : target;
     const isDir = !entry || entry.type === 'directory';
@@ -307,6 +449,15 @@ export function FilesTab({ project }: { project: Project }) {
     const options: SheetOption[] = [];
     if (isDir && can.create) {
       options.push({ label: 'New File…', onPress: () => newEntry(rel, 'file') }, { label: 'New Folder…', onPress: () => newEntry(rel, 'folder') });
+    }
+    // Into this folder, from the phone; offered on a phone as Download is.
+    if (isDir && downloadSupported()) {
+      options.push(...(can.upload ? [
+        { label: 'Upload Files…', hint: 'from this phone, several at once', onPress: () => upload(rel, 'files') },
+        { label: 'Upload Photos…', hint: 'from the photo library, several at once', onPress: () => upload(rel, 'photos') },
+      ] : [
+        { label: 'Upload Files…', hint: 'update Switchboard Evolution on the computer first', onPress: needsNewerComputer('Uploading files from this phone') },
+      ]));
     }
     if (entry && !isDir) options.push({ label: 'Open', onPress: () => open(entry) });
     options.push({ label: 'Open in Terminal', hint: 'a terminal session in this folder on the computer', onPress: () => openTerminal(folderRel) });
@@ -344,14 +495,7 @@ export function FilesTab({ project }: { project: Project }) {
       if (downloadSupported() && entry.type === 'file') {
         options.push(can.download
           ? { label: 'Download', hint: byteSize(entry.size), onPress: () => download(entry) }
-          : {
-            label: 'Download',
-            hint: 'update Switchboard Evolution on the computer first',
-            onPress: () => Alert.alert(
-              'Update Switchboard Evolution on the computer',
-              'Downloading a file to this phone needs a newer Switchboard Evolution on the computer. Update it there, then try again.',
-            ),
-          });
+          : { label: 'Download', hint: 'update Switchboard Evolution on the computer first', onPress: needsNewerComputer('Downloading a file to this phone') });
       }
       if (can.manage) options.push({ label: 'Delete', destructive: true, onPress: () => trash(entry) });
     }

@@ -70,7 +70,7 @@ describe('shareProjectFile', () => {
     // Until the share sheet is open.
     for (let i = 0; i < 50 && !close; i++) await new Promise<void>((resolve) => setImmediate(() => resolve()));
     expect(close).toBeDefined();
-    await expect(shareProjectFile('/code/web', 'b.md', 'b.md', { text: 'b' })).rejects.toThrow('Another download is still running.');
+    await expect(shareProjectFile('/code/web', 'b.md', 'b.md', { text: 'b' })).rejects.toThrow('Another download or upload is still running.');
     close!();
     await expect(first).resolves.toBe('shared');
     mockShareSheet = async () => {};

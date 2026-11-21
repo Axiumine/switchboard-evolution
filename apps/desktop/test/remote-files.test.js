@@ -321,3 +321,93 @@ test('the remote parameters of locate-file are checked', async () => {
   assert.match((await api.call('locate-file', [5])).error, /Wrong parameter 1/);
   assert.equal(calls.length, 2);
 });
+
+test('a phone uploads a file into a folder piece by piece, and it shows up only once whole', async () => {
+  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-files-uploads-'));
+  after(() => fs.rmSync(uploadsDir, { recursive: true, force: true }));
+  const trashed = [];
+  const shell = { trashItem: async (p) => { trashed.push(p); fs.rmSync(p, { recursive: true, force: true }); } };
+  const files = createPhoneFiles({ roots: () => [project], shell, uploadsDir });
+  fs.mkdirSync(path.join(project, 'up'), { recursive: true });
+  const bytes = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xff]);
+  const piece = (offset, end, extra = {}) => ({ upload: 'aaaaaaaaaaaaaaaa1', offset, base64: bytes.subarray(offset, end).toString('base64'), ...extra });
+
+  assert.deepEqual(await files.upload(project, 'up', 'data.bin', piece(0, 4)), { ok: true, received: 4 });
+  assert.equal(fs.existsSync(path.join(project, 'up', 'data.bin')), false);
+  assert.deepEqual(await files.upload(project, 'up', 'data.bin', piece(4, 8)), { ok: true, received: 8 });
+  // The same piece again (its answer got lost) is written again, not added.
+  assert.deepEqual(await files.upload(project, 'up', 'data.bin', piece(4, 8)), { ok: true, received: 8 });
+  const done = await files.upload(project, 'up', 'data.bin', piece(8, 11, { last: true }));
+  assert.deepEqual(done, { ok: true, received: 11, relativePath: path.join('up', 'data.bin'), name: 'data.bin', size: 11 });
+  assert.deepEqual(fs.readFileSync(path.join(project, 'up', 'data.bin')), bytes);
+  assert.deepEqual(fs.readdirSync(uploadsDir), []);
+  // The last piece sent again gets the same answer, and writes nothing more.
+  assert.deepEqual(await files.upload(project, 'up', 'data.bin', piece(8, 11, { last: true })), done);
+  assert.deepEqual(fs.readdirSync(path.join(project, 'up')), ['data.bin']);
+
+  // A name already there: kept beside it, or replaced with the old one in the Trash.
+  const one = (upload, extra) => files.upload(project, 'up', 'data.bin', { upload, offset: 0, base64: Buffer.from('new').toString('base64'), last: true, ...extra });
+  assert.equal((await one('bbbbbbbbbbbbbbbb1')).name, 'data (1).bin');
+  assert.equal((await one('bbbbbbbbbbbbbbbb2', { conflict: 'keep-both' })).name, 'data (2).bin');
+  assert.equal((await one('bbbbbbbbbbbbbbbb3', { conflict: 'replace' })).name, 'data.bin');
+  assert.equal(fs.readFileSync(path.join(project, 'up', 'data.bin'), 'utf8'), 'new');
+  assert.deepEqual(trashed, [path.join(project, 'up', 'data.bin')]);
+  // A folder is never replaced by a file.
+  fs.mkdirSync(path.join(project, 'up', 'sub'));
+  const folder = await files.upload(project, 'up', 'sub', { upload: 'cccccccccccccccc1', offset: 0, base64: '', last: true, conflict: 'replace' });
+  assert.match(folder.error, /folder called "sub"/);
+  assert.ok(fs.statSync(path.join(project, 'up', 'sub')).isDirectory());
+
+  // An empty file, into the root of the folder.
+  assert.equal((await files.upload(project, '', 'blank.txt', { upload: 'dddddddddddddddd1', offset: 0, base64: '', last: true })).relativePath, 'blank.txt');
+  assert.equal(fs.readFileSync(path.join(project, 'blank.txt'), 'utf8'), '');
+});
+
+test('an upload stops cleanly: aborted, interrupted, or aimed outside the project', async () => {
+  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-files-uploads-'));
+  after(() => fs.rmSync(uploadsDir, { recursive: true, force: true }));
+  const files = createPhoneFiles({ roots: () => [project], shell: { trashItem: async () => {} }, uploadsDir });
+  const data = Buffer.from('abcd').toString('base64');
+
+  assert.equal((await files.upload(project, 'docs', 'gone.txt', { upload: 'eeeeeeeeeeeeeeee1', offset: 0, base64: data })).ok, true);
+  assert.deepEqual(await files.upload(project, 'docs', 'gone.txt', { upload: 'eeeeeeeeeeeeeeee1', offset: 0, abort: true }), { ok: true, aborted: true });
+  assert.deepEqual(fs.readdirSync(uploadsDir), []);
+  // What came after an abort, or a piece past what arrived, is an interrupted upload.
+  assert.match((await files.upload(project, 'docs', 'gone.txt', { upload: 'eeeeeeeeeeeeeeee1', offset: 4, base64: data, last: true })).error, /interrupted/);
+  assert.equal((await files.upload(project, 'docs', 'gone.txt', { upload: 'eeeeeeeeeeeeeeee2', offset: 0, base64: data })).ok, true);
+  assert.match((await files.upload(project, 'docs', 'gone.txt', { upload: 'eeeeeeeeeeeeeeee2', offset: 8, base64: data })).error, /interrupted/);
+  assert.equal(fs.existsSync(path.join(project, 'docs', 'gone.txt')), false);
+
+  for (const [folder, name, error] of [
+    ['../', 'x.txt', /outside the project/],
+    ['docs/notes.md', 'x.txt', /Not a folder/],
+    ['missing', 'x.txt', /ENOENT|no such file/],
+    ['docs', '../x.txt', /without path separators/],
+    ['docs', '..', /without path separators/],
+  ]) {
+    const result = await files.upload(project, folder, name, { upload: 'ffffffffffffffff1', offset: 0, base64: data, last: true });
+    assert.equal(result.ok, false, `${folder} ${name}`);
+    assert.match(result.error, error, `${folder} ${name}`);
+  }
+  assert.equal((await files.upload(project, 'docs', 'x.txt', { upload: '../../escape', offset: 0, base64: data })).error, 'Invalid upload');
+  assert.deepEqual(await files.upload(path.dirname(project), path.basename(project), 'x.txt', { upload: 'ffffffffffffffff2', offset: 0, base64: data, last: true }), { ok: false, error: 'Not a folder of a project' });
+  assert.equal((await createPhoneFiles({ roots: () => [project] }).upload(project, '', 'x.txt', { upload: 'ffffffffffffffff3', offset: 0 })).ok, false);
+  assert.equal(fs.existsSync(path.join(project, 'x.txt')), false);
+});
+
+test('the remote parameters of an upload are checked', async () => {
+  const calls = [];
+  const api = createRemoteApi({ getHandler: () => null, localMethods: { 'upload-project-file-chunk': (_client, ...args) => { calls.push(args); return { ok: true }; } } });
+  const ok = { upload: 'abcdefABCDEF0123-_', offset: 0, base64: 'AAEC', last: true, conflict: 'replace' };
+  assert.deepEqual(await api.call('upload-project-file-chunk', [project, 'docs', 'a.bin', ok]), { result: { ok: true } });
+  assert.deepEqual(await api.call('upload-project-file-chunk', [project, '', 'a.bin', { upload: ok.upload, offset: 0, abort: true }]), { result: { ok: true } });
+  assert.match((await api.call('upload-project-file-chunk', [project, '/abs', 'a.bin', ok])).error, /Wrong parameter 2/);
+  assert.match((await api.call('upload-project-file-chunk', [project, 'docs', 'x'.repeat(256), ok])).error, /Wrong parameter 3/);
+  for (const bad of [
+    { ...ok, upload: 'short' }, { ...ok, upload: '../../../../etc/x' }, { ...ok, offset: -1 }, { ...ok, base64: 'not base64!' },
+    { ...ok, conflict: 'overwrite' }, { ...ok, extra: 1 }, { upload: ok.upload }, 'piece',
+  ]) {
+    assert.match((await api.call('upload-project-file-chunk', [project, 'docs', 'a.bin', bad])).error, /Wrong parameter 4/, JSON.stringify(bad));
+  }
+  assert.equal(calls.length, 2);
+});

@@ -2159,7 +2159,7 @@ function remotePlanEdit(channel) {
 // Files a phone may list, read and save: inside a project's folder or one attached to it.
 // Claude's plans too, to read and save only: the chat opens the plan a session wrote.
 const phoneRoots = () => [...dbModule.listProjects().map(p => p.root), ...dbModule.listAllProjectFolders().map(f => f.path)];
-const phoneFiles = createPhoneFiles({ roots: phoneRoots, readRoots: () => [PLANS_DIR], shell });
+const phoneFiles = createPhoneFiles({ roots: phoneRoots, readRoots: () => [PLANS_DIR], shell, uploadsDir: path.join(dbModule.DATA_DIR, 'uploads') });
 const phoneTasks = createRemoteTasks({ roots: phoneRoots, taskManager });
 const phoneAttachments = createAttachments({ dir: path.join(dbModule.DATA_DIR, 'attachments') });
 
@@ -2206,6 +2206,7 @@ const remoteLocalMethods = {
   'save-project-file': (_client, projectPath, relativePath, content, expectedVersion) => phoneFiles.save(projectPath, relativePath, content, expectedVersion),
   'manage-project-entry': (_client, projectPath, relativePath, action, newName) => phoneFiles.manage(projectPath, relativePath, action, newName),
   'trash-project-entries': (_client, projectPath, relativePaths) => phoneFiles.trashMany(projectPath, relativePaths),
+  'upload-project-file-chunk': (_client, projectPath, folderRelative, name, piece) => phoneFiles.upload(projectPath, folderRelative, name, piece),
   'create-project-entry': (_client, projectPath, folderRelative, name, kind) => phoneFiles.create(projectPath, folderRelative, name, kind),
   'duplicate-project-entry': (_client, projectPath, relativePath) => phoneFiles.duplicate(projectPath, relativePath),
   'paste-project-entry': (_client, sourcePath, sourceRelative, targetPath, targetRelative, mode) => phoneFiles.paste(sourcePath, sourceRelative, targetPath, targetRelative, mode),

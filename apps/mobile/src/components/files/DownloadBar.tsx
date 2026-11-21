@@ -6,34 +6,37 @@ import { byteSize } from '@/files/model';
 import { colors, spacing } from '@/theme';
 
 /**
- * While a file comes down from the computer: its name, how far it got, and
- * Cancel. At the bottom of every screen (the root layout puts it under the
- * screens, which leave it the bottom safe area), so a download stays in sight
- * from anywhere in the app. While the computer is out of reach it says the
- * download waits, and goes on by itself once it is back.
+ * While a file comes down from the computer, or goes up to it: its name, how
+ * far it got (of several files, which one), and Cancel. At the bottom of
+ * every screen (the root layout puts it under the screens, which leave it the
+ * bottom safe area), so a transfer stays in sight from anywhere in the app.
+ * While the computer is out of reach it says the transfer waits, and goes on
+ * by itself once it is back.
  */
 export function DownloadBar() {
   const current = useDownload((s) => s.current);
   const insets = useSafeAreaInsets();
   if (!current) return null;
-  const { name, received, size, cancelled, waiting } = current;
+  const { name, received, size, cancelled, waiting, upload, index, count } = current;
+  const verb = upload ? 'Uploading' : 'Downloading';
   const fraction = size ? Math.min(received / size, 1) : 0;
   const amount = size === null ? '' : `${byteSize(received)} of ${byteSize(size)}`;
+  const which = count && count > 1 ? `${index} of ${count} · ` : '';
   const detail = cancelled ? 'Cancelling…'
-    : waiting ? `Waiting for the computer${amount ? ` · ${amount}` : ''}`
-    : size === null ? 'Starting…'
-    : `${amount} · ${Math.floor(fraction * 100)}%`;
+    : waiting ? `${which}Waiting for the computer${amount ? ` · ${amount}` : ''}`
+    : size === null ? `${which}Starting…`
+    : `${which}${amount} · ${Math.floor(fraction * 100)}%`;
   return (
     <View style={[styles.bar, { paddingBottom: insets.bottom + spacing.md }]} accessibilityLiveRegion="polite">
       {waiting && !cancelled
         ? <View style={styles.pausedDot} accessibilityLabel="Paused" />
         : <ActivityIndicator size="small" color={colors.accent} />}
       <View style={styles.text}>
-        <Text style={styles.name} numberOfLines={1}>Downloading {name}</Text>
+        <Text style={styles.name} numberOfLines={1}>{verb} {name}</Text>
         <Text style={styles.detail}>{detail}</Text>
         <View style={styles.track}><View style={[styles.fill, { width: `${fraction * 100}%` }]} /></View>
       </View>
-      <Pressable onPress={cancelDownload} disabled={cancelled} hitSlop={8} style={styles.cancel} accessibilityRole="button" accessibilityLabel={`Cancel downloading ${name}`}>
+      <Pressable onPress={cancelDownload} disabled={cancelled} hitSlop={8} style={styles.cancel} accessibilityRole="button" accessibilityLabel={`Cancel ${verb.toLowerCase()} ${name}`}>
         <Text style={[styles.cancelText, cancelled && { color: colors.textFaint }]}>Cancel</Text>
       </Pressable>
     </View>

@@ -85,7 +85,7 @@ export default function RootLayout() {
 
 /**
  * The screens, and under them the download bar while a file comes down from
- * the computer, whatever screen is open. Not while typing: the keyboard covers
+ * the computer or goes up to it, whatever screen is open. Not while typing: the keyboard covers
  * that part of the window, and the composer must sit right on it.
  */
 function WithDownloadBar({ children }: { children: ReactNode }) {

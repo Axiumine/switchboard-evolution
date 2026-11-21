@@ -11,8 +11,9 @@ import { request, useConnection } from '@/store/connection';
 // hands it over a piece (2 MB) at a time, into the app's cache; then it goes
 // where the user says: on iOS through the share sheet (Save to Files,
 // AirDrop, another app), on Android into a folder picked in the system's
-// folder picker. Sharing a file goes through the share sheet on both. One
-// download or share at a time.
+// folder picker. Several files at once go into a folder picked first, on iOS
+// as on Android. Sharing a file goes through the share sheet on both. One
+// download, share or upload (upload.ts) at a time.
 //
 // It goes on whatever screen the user moves to (the bar is on every screen),
 // and keeps the screen on while it runs. When the connection drops (the phone
@@ -95,8 +96,15 @@ export function localFileName(name: string): string {
   return clean && clean !== '.' && clean !== '..' ? clean : 'download';
 }
 
-/** What a download has received so far, for the progress line; `waiting` while the computer is out of reach. */
-export type DownloadProgress = { name: string; received: number; size: number | null; cancelled: boolean; waiting: boolean };
+/**
+ * What a download (or an upload) has moved so far, for the progress line;
+ * `waiting` while the computer is out of reach. Of several files, `index` is
+ * the one on its way (from 1) of `count`.
+ */
+export type DownloadProgress = {
+  name: string; received: number; size: number | null; cancelled: boolean; waiting: boolean;
+  upload?: boolean; index?: number; count?: number;
+};
 
 export const useDownload = create<{ current: DownloadProgress | null }>(() => ({ current: null }));
 
@@ -109,10 +117,47 @@ export function downloadSupported(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
-// The Android folder picked last time, where the picker opens next.
+// The folder picked last time, where the picker opens next.
 let lastFolder: string | undefined;
 // Until the file is handed over too, not only downloaded.
 let busy = false;
+export const BUSY = 'Another download or upload is still running.';
+
+/** Run `fn` as the one download, share or upload; rejects at once while another runs. */
+export async function oneTransfer<T>(fn: () => Promise<T>): Promise<T> {
+  if (busy) throw new Error(BUSY);
+  busy = true;
+  try {
+    return await fn();
+  } finally {
+    busy = false;
+  }
+}
+
+/** Run `fn` with the screen kept on (asleep, the phone drops the connection); the bar goes when it ends. */
+export async function keptAwake<T>(fn: () => Promise<T>): Promise<T> {
+  const awake = activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    useDownload.setState({ current: null });
+    await awake;
+    deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+  }
+}
+
+/** The bar on a new file, nothing moved yet. A Cancel tapped on the file before still holds. */
+export function showInBar(name: string, more: Pick<DownloadProgress, 'upload' | 'index' | 'count'> = {}) {
+  useDownload.setState((s) => ({ current: { name, received: 0, size: null, cancelled: !!s.current?.cancelled, waiting: false, ...more } }));
+}
+
+/** What the bar's file needs to follow a transfer: its progress, a Cancel, a wait for the computer. */
+export const barProgress = {
+  onProgress: (received: number, size: number) => useDownload.setState((s) => (s.current ? { current: { ...s.current, received, size } } : s)),
+  cancelled: () => !!useDownload.getState().current?.cancelled,
+  waitForConnection: () => waitForComputer(),
+  onWaiting: (waiting: boolean) => useDownload.setState((s) => (s.current ? { current: { ...s.current, waiting } } : s)),
+};
 
 export type DownloadOutcome = 'saved' | 'shared' | 'cancelled';
 
@@ -132,23 +177,88 @@ export function freeName(name: string, taken: ReadonlySet<string>): string {
  * a folder to save it in on Android (under a free name, as a browser does).
  * Rejects with a message to show.
  */
-export async function downloadProjectFile(root: string, relativePath: string, name: string): Promise<DownloadOutcome> {
-  if (busy) throw new Error('Another download is still running.');
-  busy = true;
-  const dir = new Directory(Paths.cache, 'downloads');
-  try {
-    // Also clears what a download before left behind (the app quit while it ran).
-    const file = emptyFile(dir, name);
-    await fetchInto(file, root, relativePath, name);
-    await whenOnScreen();
-    return Platform.OS === 'android' ? await saveInFolder(file) : await share(file);
-  } catch (err) {
-    if (err instanceof DownloadCancelled) return 'cancelled';
-    throw err;
-  } finally {
-    busy = false;
-    try { if (dir.exists) dir.delete(); } catch {}
+export function downloadProjectFile(root: string, relativePath: string, name: string): Promise<DownloadOutcome> {
+  return oneTransfer(async () => {
+    const dir = new Directory(Paths.cache, 'downloads');
+    try {
+      // Also clears what a download before left behind (the app quit while it ran).
+      const file = emptyFile(dir, name);
+      await keptAwake(() => { showInBar(name); return fetchInto(file, root, relativePath); });
+      await whenOnScreen();
+      return Platform.OS === 'android' ? await saveInFolder(file) : await share(file);
+    } catch (err) {
+      if (err instanceof DownloadCancelled) return 'cancelled';
+      throw err;
+    } finally {
+      try { if (dir.exists) dir.delete(); } catch {}
+    }
+  });
+}
+
+/** A file to download among several: `folders` are the folders it goes in, under the one picked. */
+export type DownloadItem = { relativePath: string; name: string; folders: string[] };
+
+/** What came of several files: how many arrived, which did not and why, and whether Cancel stopped them. */
+export type TransferOutcome = { done: number; failed: { rel: string; error: string }[]; cancelled: boolean };
+
+/**
+ * Download several files of the computer into a folder the user picks on the
+ * phone (the system's folder picker, on iOS as on Android): each under a free
+ * name, inside the folders its `folders` name (made when missing). A file
+ * that fails does not stop the others; Cancel stops them all. Resolves null
+ * when the picker is closed without a folder.
+ */
+export function downloadProjectFiles(root: string, items: DownloadItem[]): Promise<TransferOutcome | null> {
+  return oneTransfer(async () => {
+    let folder: Directory;
+    try {
+      folder = await Directory.pickDirectoryAsync(lastFolder);
+    } catch {
+      // Closing the picker rejects.
+      return null;
+    }
+    lastFolder = folder.uri;
+    const dir = new Directory(Paths.cache, 'downloads');
+    const made = new Map<string, Directory>();
+    const outcome: TransferOutcome = { done: 0, failed: [], cancelled: false };
+    try {
+      await keptAwake(async () => {
+        for (const [i, item] of items.entries()) {
+          if (barProgress.cancelled()) { outcome.cancelled = true; break; }
+          showInBar(item.name, { index: i + 1, count: items.length });
+          try {
+            const file = emptyFile(dir, item.name);
+            await fetchInto(file, root, item.relativePath);
+            await saveInto(file, subfolder(folder, item.folders, made));
+            outcome.done++;
+          } catch (err: any) {
+            if (err instanceof DownloadCancelled) { outcome.cancelled = true; break; }
+            outcome.failed.push({ rel: item.relativePath, error: err?.message || String(err) });
+          }
+        }
+      });
+    } finally {
+      try { if (dir.exists) dir.delete(); } catch {}
+    }
+    return outcome;
+  });
+}
+
+/** The folder `names` lead to under `base`, each made when missing; `made` remembers them by path. */
+function subfolder(base: Directory, names: string[], made: Map<string, Directory>): Directory {
+  let dir = base;
+  let key = '';
+  for (const name of names) {
+    const clean = localFileName(name);
+    key += `/${clean}`;
+    let next = made.get(key);
+    if (!next) {
+      next = dir.list().find((entry): entry is Directory => entry instanceof Directory && entry.name === clean) ?? dir.createDirectory(clean);
+      made.set(key, next);
+    }
+    dir = next;
   }
+  return dir;
 }
 
 /** What a file's screen already holds: its text, or the bytes of an image. */
@@ -160,23 +270,21 @@ export type KnownContent = { text: string } | { base64: string };
  * as it is; anything else is downloaded first. The copy stays in the cache
  * until the next share: the app it went to may still be reading it.
  */
-export async function shareProjectFile(root: string, relativePath: string, name: string, known?: KnownContent): Promise<'shared' | 'cancelled'> {
-  if (busy) throw new Error('Another download is still running.');
-  busy = true;
-  try {
-    const file = emptyFile(new Directory(Paths.cache, 'shared'), name);
-    if (known && 'text' in known) await file.write(known.text);
-    else if (known) await file.write(known.base64, { encoding: 'base64' });
-    else await fetchInto(file, root, relativePath, name);
-    await whenOnScreen();
-    await share(file);
-    return 'shared';
-  } catch (err) {
-    if (err instanceof DownloadCancelled) return 'cancelled';
-    throw err;
-  } finally {
-    busy = false;
-  }
+export function shareProjectFile(root: string, relativePath: string, name: string, known?: KnownContent): Promise<'shared' | 'cancelled'> {
+  return oneTransfer(async () => {
+    try {
+      const file = emptyFile(new Directory(Paths.cache, 'shared'), name);
+      if (known && 'text' in known) await file.write(known.text);
+      else if (known) await file.write(known.base64, { encoding: 'base64' });
+      else await keptAwake(() => { showInBar(name); return fetchInto(file, root, relativePath); });
+      await whenOnScreen();
+      await share(file);
+      return 'shared';
+    } catch (err) {
+      if (err instanceof DownloadCancelled) return 'cancelled';
+      throw err;
+    }
+  });
 }
 
 /** A new empty file called `name` in `dir`, which loses whatever it held. */
@@ -188,24 +296,9 @@ function emptyFile(dir: Directory, name: string): File {
   return file;
 }
 
-/** Download a file of the computer into `file`, with its progress in the download bar. */
-async function fetchInto(file: File, root: string, relativePath: string, name: string) {
-  useDownload.setState({ current: { name, received: 0, size: null, cancelled: false, waiting: false } });
-  // Asleep, the phone drops the connection: the screen stays on until it is done.
-  const awake = activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
-  try {
-    await readFileChunks(root, relativePath, (base64) => file.write(base64, { encoding: 'base64', append: true }), {
-      request,
-      onProgress: (received, size) => useDownload.setState((s) => (s.current ? { current: { ...s.current, received, size } } : s)),
-      cancelled: () => !!useDownload.getState().current?.cancelled,
-      waitForConnection: waitForComputer,
-      onWaiting: (waiting) => useDownload.setState((s) => (s.current ? { current: { ...s.current, waiting } } : s)),
-    });
-  } finally {
-    useDownload.setState({ current: null });
-    await awake;
-    deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
-  }
+/** Download a file of the computer into `file`, with its progress in the bar (showInBar first). */
+async function fetchInto(file: File, root: string, relativePath: string) {
+  await readFileChunks(root, relativePath, (base64) => file.write(base64, { encoding: 'base64', append: true }), { request, ...barProgress });
 }
 
 /**
@@ -270,8 +363,13 @@ async function saveInFolder(file: File): Promise<DownloadOutcome> {
     return 'cancelled';
   }
   lastFolder = folder.uri;
+  await saveInto(file, folder);
+  return 'saved';
+}
+
+/** A copy of `file` in `folder`, under a free name, as a browser saves a download. */
+async function saveInto(file: File, folder: Directory) {
   const name = freeName(file.name, new Set(folder.list().map((entry) => entry.name)));
   if (name !== file.name) file.rename(name);
   await file.copy(folder);
-  return 'saved';
 }

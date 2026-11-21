@@ -152,6 +152,16 @@ allow('save-project-file', [isPath, isRelative, isString(2_000_000), optional(is
 // Rename or move to the Trash only; revealing in Finder would act on the Mac's screen.
 allow('manage-project-entry', [isPath, isRelative, oneOf('rename', 'trash'), optional(isString(255))], { local: true });
 allow('trash-project-entries', [isPath, arrayOf(isRelative, 5000)], { local: true });
+// A file from the phone into a folder, a piece at a time (remote-files.js): `upload` names it,
+// `last` puts it in the folder, `conflict` says what an entry of that name already there becomes.
+allow('upload-project-file-chunk', [isPath, isRelative, isString(255), fields({
+  upload: v => typeof v === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(v),
+  offset: isInt(0, Number.MAX_SAFE_INTEGER),
+  base64: optional(isBase64),
+  last: optional(isBool),
+  conflict: optional(oneOf('replace', 'keep-both')),
+  abort: optional(isBool),
+}, ['upload', 'offset'])], { local: true });
 // The explorer of the Files tab: a new file or folder (name may hold "/"), a copy next to an
 // entry, a copied or cut entry pasted into a folder of the same or another known root.
 allow('create-project-entry', [isPath, isRelative, isString(1000), oneOf('file', 'folder')], { local: true });

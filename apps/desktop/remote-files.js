@@ -9,7 +9,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { manageProjectEntry, trashProjectEntries, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
+const {
+  manageProjectEntry, trashProjectEntries, createProjectEntry, duplicateProjectEntry, pasteProjectEntry,
+  checkEntryName, entryExists, resolveTargetFolder,
+} = require('./file-management');
 const fileTimeline = require('./file-timeline');
 const projectSearch = require('./project-search');
 const { resolveProjectEntry, isViewableFile, previewType, readProjectFile, listProjectDirectory, MAX_PREVIEW_BYTES } = require('./project-files');
@@ -148,18 +151,131 @@ function readProjectFileChunk(projectPath, relativePath, offset = 0, { chunkByte
   }
 }
 
+// --- Uploads from a phone ---
+
+// A phone sends a file a piece at a time (one message each, well under the
+// protocol's frame limit). The pieces go into a part file under the data
+// folder, named after the upload; the last one moves it into the project
+// folder, so a file half sent never shows up there.
+const UPLOAD_ID = /^[A-Za-z0-9_-]{16,64}$/;
+// A part file nobody finished (the phone gave up, the app quit) goes after this long.
+const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
+const UPLOAD_INTERRUPTED = 'The upload was interrupted. Try again.';
+
+/** `name`, or "name (1).ext", "name (2).ext"… when `folder` has an entry of that name already. */
+function freeEntryName(folder, name) {
+  if (!entryExists(path.join(folder, name))) return name;
+  // extname is '' for ".env", so a dotfile keeps its whole name as the stem.
+  const ext = path.extname(name);
+  const stem = ext ? name.slice(0, -ext.length) : name;
+  for (let n = 1; n < 10000; n++) {
+    const candidate = `${stem} (${n})${ext}`;
+    if (!entryExists(path.join(folder, candidate))) return candidate;
+  }
+  throw new Error('Could not find a free name for the file');
+}
+
+function removeStaleUploads(dir, now = Date.now()) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return; }
+  for (const name of names) {
+    if (!name.endsWith('.part')) continue;
+    const file = path.join(dir, name);
+    try { if (now - fs.statSync(file).mtimeMs > STALE_UPLOAD_MS) fs.rmSync(file, { force: true }); } catch {}
+  }
+}
+
+/** The part file into the folder: a rename, or a copy when the folder is on another volume. */
+function moveIntoPlace(part, target) {
+  try {
+    fs.renameSync(part, target);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.copyFileSync(part, target);
+    fs.rmSync(part, { force: true });
+  }
+}
+
+/**
+ * One piece of a file a phone uploads into `folderRelative` of the project,
+ * as `name`. `piece` is { upload, offset, base64, last, conflict, abort }:
+ * pieces come in order from offset 0, and a piece sent again (its answer got
+ * lost) is written again at its offset. With `last` the file goes into the
+ * folder: beside an entry of that name ('keep-both', the default, as
+ * "name (1).ext") or in its place ('replace': the old file goes to the Trash
+ * through `trash`; a folder is never replaced). `abort` drops what came so
+ * far. Resolves { ok, received }, with { relativePath, name, size } after the
+ * last piece, or { ok: false, error }.
+ */
+async function uploadProjectFileChunk(projectPath, folderRelative, name, piece, { uploadsDir, trash }) {
+  try {
+    const { upload, offset, base64 = '', last = false, conflict = 'keep-both', abort = false } = piece || {};
+    if (typeof upload !== 'string' || !UPLOAD_ID.test(upload)) return { ok: false, error: 'Invalid upload' };
+    const part = path.join(uploadsDir, `${upload}.part`);
+    if (abort) {
+      fs.rmSync(part, { force: true });
+      return { ok: true, aborted: true };
+    }
+    if (!Number.isInteger(offset) || offset < 0) return { ok: false, error: 'Invalid upload' };
+    checkEntryName(name);
+    const { root, folder } = resolveTargetFolder(projectPath, folderRelative);
+    const data = Buffer.from(base64, 'base64');
+    if (offset === 0) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      removeStaleUploads(uploadsDir);
+      fs.writeFileSync(part, data);
+    } else {
+      let fd;
+      try {
+        fd = fs.openSync(part, 'r+');
+      } catch (err) {
+        if (err.code === 'ENOENT') return { ok: false, error: UPLOAD_INTERRUPTED };
+        throw err;
+      }
+      try {
+        if (fs.fstatSync(fd).size < offset) return { ok: false, error: UPLOAD_INTERRUPTED };
+        // A piece sent again replaces what it wrote the first time.
+        fs.ftruncateSync(fd, offset);
+        if (data.length) fs.writeSync(fd, data, 0, data.length, offset);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+    const received = offset + data.length;
+    if (!last) return { ok: true, received };
+    let target = path.join(folder, name);
+    if (entryExists(target)) {
+      if (conflict === 'replace') {
+        if (fs.lstatSync(target).isDirectory()) throw new Error(`A folder called "${name}" is already there`);
+        await trash(target);
+      } else {
+        target = path.join(folder, freeEntryName(folder, name));
+      }
+    }
+    moveIntoPlace(part, target);
+    return { ok: true, received, relativePath: path.relative(root, target), name: path.basename(target), size: received };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 /** `child` is `folder` or inside it (both real paths). */
 const isInside = (folder, child) => child === folder || child.startsWith(folder.endsWith(path.sep) ? folder : folder + path.sep);
+
+// Uploads finished lately, by id: the last piece sent again (its answer got
+// lost) gets the same answer instead of an interrupted upload.
+const FINISHED_UPLOADS_KEPT = 100;
 
 /**
  * File access for a phone, inside the folders `roots()` lists (project roots
  * and attached folders) and nowhere else, whatever root the phone names.
  * `readRoots()` are folders whose files a phone may also open and save,
  * without managing them (Claude's plans folder). `shell` (Electron's) moves
- * an item to the Trash.
+ * an item to the Trash. `uploadsDir` holds the files phones are uploading.
  */
-function createPhoneFiles({ roots, readRoots = () => [], shell }) {
+function createPhoneFiles({ roots, readRoots = () => [], shell, uploadsDir = null }) {
   const refused = { ok: false, error: 'Not a folder of a project' };
+  const finishedUploads = new Map();
   const known = (projectPath) => typeof projectPath === 'string' && roots().includes(projectPath);
   const readable = (projectPath) => known(projectPath) || (typeof projectPath === 'string' && readRoots().includes(projectPath));
   return {
@@ -218,6 +334,19 @@ function createPhoneFiles({ roots, readRoots = () => [], shell }) {
         return { ok: false, error: err.message };
       }
     },
+    /** A piece of a file the phone uploads into a folder (uploadProjectFileChunk); the phone has asked about a replace already. */
+    async upload(projectPath, folderRelative, name, piece) {
+      if (!known(projectPath)) return refused;
+      if (!uploadsDir) return { ok: false, error: 'This computer does not take uploads' };
+      const id = piece?.upload;
+      if (!piece?.abort && finishedUploads.has(id)) return finishedUploads.get(id);
+      const result = await uploadProjectFileChunk(projectPath, folderRelative, name, piece, { uploadsDir, trash: (p) => shell.trashItem(p) });
+      if (result.ok && result.relativePath) {
+        finishedUploads.set(id, result);
+        if (finishedUploads.size > FINISHED_UPLOADS_KEPT) finishedUploads.delete(finishedUploads.keys().next().value);
+      }
+      return result;
+    },
     /** Several entries to the Trash at once; the phone has asked its user already. */
     async trashMany(projectPath, relativePaths) {
       if (!known(projectPath)) return refused;
@@ -251,4 +380,4 @@ function createPhoneFiles({ roots, readRoots = () => [], shell }) {
   }
 }
 
-module.exports = { listFolders, createFolder, saveProjectFile, readProjectFileForPhone, readProjectFileChunk, createPhoneFiles };
+module.exports = { listFolders, createFolder, saveProjectFile, readProjectFileForPhone, readProjectFileChunk, uploadProjectFileChunk, createPhoneFiles };

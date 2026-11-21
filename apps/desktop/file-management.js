@@ -230,4 +230,5 @@ function pasteProjectEntry(sourceProjectPath, sourceRelative, targetProjectPath,
 module.exports = {
   manageProjectEntry, trashProjectEntries, resolveManagedEntry, revealFile, shareFile,
   createProjectEntry, duplicateProjectEntry, pasteProjectEntry, copyName,
+  checkEntryName, entryExists, resolveTargetFolder,
 };

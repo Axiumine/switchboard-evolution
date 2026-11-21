@@ -2,7 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 
 import { invertSelection, selectAll, trashQuestion } from '@/shared/vendor/file-selection';
 
-import { afterTrash, trashPicked } from '../selection';
+import type { FileEntry } from '../model';
+import { afterTrash, downloadItems, trashPicked } from '../selection';
 
 describe('trashPicked', () => {
   it('sends the shallowest ticks in one call to a computer that can take them', async () => {
@@ -48,5 +49,35 @@ describe('the shared selection helpers on the phone', () => {
     expect([...selectAll(visible)]).toEqual(visible);
     expect([...invertSelection(visible, new Set(['docs']))]).toEqual(['docs/a.md', 'b.md']);
     expect(trashQuestion([{ rel: 'docs', isDir: true }, { rel: 'b.md', isDir: false }]).title).toBe('Move 2 items to the Trash?');
+  });
+});
+
+describe('downloadItems', () => {
+  const entry = (relativePath: string, type: FileEntry['type'], size = 1): FileEntry => (
+    { name: relativePath.split('/').pop()!, relativePath, type, size, viewable: false, previewType: null }
+  );
+  const tree: Record<string, FileEntry[]> = {
+    docs: [entry('docs/img', 'directory'), entry('docs/a.md', 'file', 10), entry('docs/link', 'other')],
+    'docs/img': [entry('docs/img/logo.png', 'file', 20)],
+    empty: [],
+  };
+  const known = new Map([entry('docs', 'directory'), entry('readme.md', 'file', 5), entry('empty', 'directory'), entry('docs/a.md', 'file', 10)]
+    .map((e) => [e.relativePath, e] as const));
+  const listed: string[] = [];
+  const list = async (rel: string) => { listed.push(rel); return tree[rel] ?? []; };
+
+  it('takes a ticked file, and everything in a ticked folder into a folder of its name', async () => {
+    const items = await downloadItems(['readme.md', 'docs', 'docs/a.md', 'empty'], known, list);
+    expect(items).toEqual([
+      { relativePath: 'docs/a.md', name: 'a.md', folders: ['docs'], size: 10 },
+      { relativePath: 'docs/img/logo.png', name: 'logo.png', folders: ['docs', 'img'], size: 20 },
+      { relativePath: 'readme.md', name: 'readme.md', folders: [], size: 5 },
+    ]);
+    // docs/a.md is inside the ticked docs: listed once, not fetched twice; the link stays behind.
+    expect(listed).toEqual(['docs', 'docs/img', 'empty']);
+  });
+
+  it('stops past the most files it takes at once', async () => {
+    await expect(downloadItems(['docs'], known, list, { max: 1 })).rejects.toThrow('That is more than 1 files');
   });
 });
