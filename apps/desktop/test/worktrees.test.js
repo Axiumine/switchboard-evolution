@@ -621,3 +621,7 @@ test('worktreeChanges without a remote compares with the main worktree\'s branch
     t.cleanup();
   }
 });
+
+test('a new worktree can start an OpenCode session', () => {
+  assert.equal(worktrees.normalizeSettings({ startAfterCreate: 'opencode' }).startAfterCreate, 'opencode');
+});

@@ -1191,6 +1191,7 @@ body { display: flex; flex-direction: column; }
 .session-item.has-running-pty .session-mark-icon { opacity: 1; }
 
 .session-item.is-codex .session-mark-icon { color: #10a37f; }
+.session-item.is-opencode .session-mark-icon { color: #9b8cf2; }
 .session-item.is-terminal .session-mark-icon { color: #3ecf5a; }
 
 .session-status-dot {
@@ -1460,6 +1461,7 @@ body { display: flex; flex-direction: column; }
    not just the 6px dot beside it. */
 .session-item.needs-attention .session-mark-icon,
 .session-item.needs-attention.is-codex .session-mark-icon,
+.session-item.needs-attention.is-opencode .session-mark-icon,
 .session-item.needs-attention.is-terminal .session-mark-icon {
   color: #f0a050;
   opacity: 1;
@@ -4278,6 +4280,7 @@ body { display: flex; flex-direction: column; }
 /* Every harness mark is 16px so the labels line up; the base 18px predates
    there being more than one. */
 .popover-option-icon.codex-icon,
+.popover-option-icon.opencode-icon,
 .popover-option-icon.terminal-icon {
   width: 16px;
   height: 16px;
@@ -4285,6 +4288,10 @@ body { display: flex; flex-direction: column; }
 
 .popover-option-icon.codex-icon {
   color: #10a37f;
+}
+
+.popover-option-icon.opencode-icon {
+  color: #9b8cf2;
 }
 
 .popover-option-terminal .popover-option-icon,
@@ -5275,6 +5282,7 @@ body { display: flex; flex-direction: column; }
 .ws-chip--cli { height: 18px; padding: 0 6px; font-size: 10px; font-weight: 600; }
 .ws-chip--cli.claude { color: #a6abff; }
 .ws-chip--cli.codex { color: #2cc19e; }
+.ws-chip--cli.opencode { color: #9b8cf2; }
 
 .ws-actions {
   display: flex;
@@ -6861,6 +6869,7 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 /* Text-only menus do not need an empty icon column. */
 .ctx-menu:not(:has(.ctx-icon > *)) .ctx-icon { display: none; }
 .ctx-icon .codex-icon { color: #10a37f; }
+.ctx-icon .opencode-icon { color: #9b8cf2; }
 .ctx-item.danger .ctx-icon { color: #e05070; }
 .ctx-item.muted .ctx-icon, .ctx-item.disabled .ctx-icon { color: #6a6a80; }
 .ctx-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -7054,9 +7063,11 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 /* The CLI mark in session rows: the same logo the status bar uses, no word. */
 .pane-cli-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: #9090a8; }
 .pane-cli-icon.is-codex { color: #10a37f; }
+.pane-cli-icon.is-opencode { color: #9b8cf2; }
 .pane-cli-icon.is-terminal { color: #5ec46a; }
 .ws-chip--cli { padding: 0 5px; }
 .ws-chip--cli.codex { color: #10a37f; }
+.ws-chip--cli.opencode { color: #9b8cf2; }
 
 /* Track card rows: a hairline between sessions, so the card reads as rows instead of one block of text. */
 .tcard .tcard-session { margin: 0; padding: 9px 14px; border-radius: 0; position: relative; }

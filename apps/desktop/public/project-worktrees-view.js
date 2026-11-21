@@ -39,6 +39,7 @@ const WT_START_OPTIONS = [
   ['none', 'Nothing'],
   ['claude', 'A Claude session'],
   ['codex', 'A Codex session'],
+  ['opencode', 'An OpenCode session'],
   ['terminal', 'A terminal'],
 ];
 
@@ -631,12 +632,10 @@ async function wtStartSession(project, wt, runtime) {
 
 function wtSessionMenuItems(project, wt) {
   return [
-    { label: 'Claude', icon: ICONS.claude(14), onClick: () => wtStartSession(project, wt, 'claude') },
-    { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: () => wtStartSession(project, wt, 'codex') },
+    ...LAUNCH_CLIS.map(cli => ({ label: harnessLabel(cli), icon: harnessIcon(cli, 14, cliIconClass(cli)), onClick: () => wtStartSession(project, wt, cli) })),
     { label: 'Terminal', icon: ICONS.terminal(14), onClick: () => wtStartSession(project, wt, 'terminal') },
     { sep: true },
-    { label: 'Claude, configure…', muted: true, onClick: () => showNewSessionDialog(wtLaunchTarget(project, wt), 'claude') },
-    { label: 'Codex, configure…', muted: true, onClick: () => showNewSessionDialog(wtLaunchTarget(project, wt), 'codex') },
+    ...LAUNCH_CLIS.map(cli => ({ label: `${harnessLabel(cli)}, configure…`, muted: true, onClick: () => showNewSessionDialog(wtLaunchTarget(project, wt), cli) })),
   ];
 }
 

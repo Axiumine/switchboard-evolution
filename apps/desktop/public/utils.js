@@ -15,6 +15,39 @@ function shortProjectPath(projectPath) {
 // Session dialogs, schedules and global settings share the same CLI choices.
 const { PERMISSION_MODES, CODEX_SANDBOX_MODES, CODEX_APPROVAL_POLICIES } = SessionConfig;
 
+// --- CLIs ---
+// The CLIs a session can run, in the order every list shows them (the order of
+// main's registry, harnesses/index.js). Menus built by hand map over
+// LAUNCH_CLIS, so a new CLI needs a line here and an icon in icons.js.
+const CLIS = {
+  claude: { label: 'Claude', canFork: true },
+  codex: { label: 'Codex', canFork: true },
+  // Forking goes through OpenCode's service, which Switchboard does not use yet.
+  opencode: { label: 'OpenCode', canFork: false },
+};
+const LAUNCH_CLIS = Object.keys(CLIS);
+
+/** A CLI's name. Rows from before the runtime column existed are Claude's. */
+function harnessLabel(id) {
+  return CLIS[id || 'claude']?.label || String(id);
+}
+
+/** A CLI's mark; Claude's for anything unknown, as the lists always did. */
+function harnessIcon(id, size = 14, cls = '') {
+  const draw = CLIS[id] && ICONS[id] ? ICONS[id] : ICONS.claude;
+  return draw(size, cls);
+}
+
+/** The class that colours a CLI's mark in menus and popovers (Claude's carries its own colour). */
+function cliIconClass(id) {
+  return id && id !== 'claude' ? `${id}-icon` : '';
+}
+
+function cliCanFork(id) {
+  return CLIS[id || 'claude']?.canFork !== false;
+}
+// --- end CLIs ---
+
 // Mirror Claude CLI's project-folder naming. Must stay in sync with
 // encode-project-path.js (main process). Reverse-engineered from claude CLI 2.1.126.
 function encodeProjectPath(projectPath) {

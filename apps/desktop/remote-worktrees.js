@@ -46,7 +46,7 @@ const SETTINGS_PATCH = fields({
   copyIgnores: arrayOf(isText(500), 200),
   postCreateCmd: isText(COMMAND_LENGTH_MAX),
   preRemoveCmd: isText(COMMAND_LENGTH_MAX),
-  startAfterCreate: oneOf('none', 'claude', 'codex', 'terminal'),
+  startAfterCreate: oneOf('none', 'claude', 'codex', 'opencode', 'terminal'),
   // The same as SORT_ORDERS in worktrees.js.
   sortOrder: oneOf('default', 'modifiedDesc', 'modifiedAsc', 'createdDesc', 'createdAsc', 'nameAsc', 'nameDesc', 'changesFirst'),
   collapsedGroups: arrayOf(isText(1000), 100),
