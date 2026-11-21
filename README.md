@@ -2,6 +2,8 @@
 
 Run and manage your coding-agent sessions (Claude Code, Codex) across every project, from your computer and from your phone.
 
+Downloads, install notes and every release: **[vivi7.github.io/switchboard-evolution-site](https://vivi7.github.io/switchboard-evolution-site/)**.
+
 ![Switchboard Evolution](docs/screenshots/desktop-hero.png)
 
 Switchboard Evolution is a desktop app (macOS, Windows, Linux) and a phone app (Android, iOS) that work together:
@@ -29,6 +31,12 @@ Several of these were offered upstream as pull requests, and some are merged the
 | ![Compare commits](docs/screenshots/desktop-git-compare.png)<br>Compare commits step by step | ![Stage lines](docs/screenshots/desktop-git-staging.png)<br>Stage hunks or chosen lines |
 | ![Search and replace](docs/screenshots/desktop-files-search.png)<br>Search and replace across the project | ![Worktrees](docs/screenshots/desktop-worktrees.png)<br>Worktrees of every repository |
 | ![Task Manager](docs/screenshots/desktop-task-manager.png)<br>RAM per session, disk per project | |
+
+On the phone:
+
+| | | | |
+|---|---|---|---|
+| <img src="docs/screenshots/phone-projects.png" width="200" alt="Projects on the phone"><br>Projects, and who is waiting for you | <img src="docs/screenshots/phone-conversation.png" width="200" alt="A session on the phone"><br>A session: read it and pick it up | <img src="docs/screenshots/phone-git-graph.png" width="200" alt="Git Graph on the phone"><br>The Git Graph | <img src="docs/screenshots/phone-git-diff.png" width="200" alt="A diff on the phone"><br>Review a diff, stage hunks |
 
 All screenshots use made-up demo projects.
 
