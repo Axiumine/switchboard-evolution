@@ -459,3 +459,54 @@ test('a title cut off mid-record is dropped, not garbled', () => {
   assert.equal(report.state, 'busy');
   assert.equal(report.title, null);
 });
+
+// --- launch ---
+
+test('a new session is started on the id Switchboard chose, with its first prompt', () => {
+  assert.deepEqual(opencode.buildLaunchArgs({ sessionId: 'ses_x', isNew: true, options: { initialPrompt: 'Fix the login' } }),
+    ['--session', 'ses_x', '--prompt', 'Fix the login']);
+  assert.deepEqual(opencode.buildLaunchArgs({ sessionId: 'ses_x', isNew: true, options: null }), ['--session', 'ses_x']);
+});
+
+test('a resumed session is opened by id, and a first prompt is not sent again', () => {
+  assert.deepEqual(opencode.buildLaunchArgs({ sessionId: 'ses_x', isNew: false, options: { initialPrompt: 'again' } }),
+    ['--session', 'ses_x']);
+});
+
+test('skipping permissions is OpenCode\'s --auto; Claude-only options are ignored', () => {
+  assert.deepEqual(opencode.buildLaunchArgs({ sessionId: 'ses_x', isNew: false, options: {
+    dangerouslySkipPermissions: true, permissionMode: 'plan', addDirs: '/a,/b', model: 'opus', worktree: true, chrome: true,
+  } }), ['--session', 'ses_x', '--auto']);
+});
+
+test('new ids have OpenCode\'s shape and sort newest first, like its own', () => {
+  const ids = Array.from({ length: 50 }, () => opencode.newSessionId());
+  for (const sid of ids) assert.match(sid, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+  assert.equal(new Set(ids).size, ids.length);
+  // Descending: an id made later sorts before one made earlier.
+  const sorted = [...ids].sort();
+  assert.deepEqual(sorted, [...ids].reverse());
+});
+
+test('the time part matches OpenCode\'s generator for a given moment', () => {
+  // ~(ms * 0x1000 + counter), low 48 bits, as packages/schema/src/identifier.ts.
+  const ms = Date.parse('2026-11-21T09:06:53.228Z');
+  const expected = ((~(BigInt(ms) * 0x1000n + 1n)) & 0xffffffffffffn).toString(16).padStart(12, '0');
+  assert.equal(opencode.newSessionId(ms).slice(4, 16), expected);
+});
+
+test('a new session is matched once OpenCode has created it under the chosen id', () => {
+  assert.equal(opencode.needsIdDetection({ isNew: true }), true);
+  assert.equal(opencode.needsIdDetection({ isNew: false }), false);
+  assert.equal(opencode.readLaunchSignals('ses_new'), null, 'nothing until the first prompt creates the row');
+  addSession({ id: 'ses_new' });
+  const signals = opencode.readLaunchSignals('ses_new');
+  assert.deepEqual(signals, { sessionId: 'ses_new' });
+  assert.equal(opencode.matchesLaunch(signals, { tag: 'ses_new' }), true);
+  assert.equal(opencode.matchesLaunch(signals, { tag: 'ses_other' }), false);
+  assert.equal(opencode.matchesLaunch(null, { tag: 'ses_new' }), false);
+});
+
+test('fork waits for OpenCode\'s service: not offered yet', () => {
+  assert.equal(opencode.canFork, false);
+});

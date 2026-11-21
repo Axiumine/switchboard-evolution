@@ -53,14 +53,22 @@
       { key: 'codexEffort', label: 'Reasoning Effort', type: 'select', default: '', more: true, choices: CODEX_EFFORTS, modelField: 'codexModel', description: "Default uses Codex's own setting" },
       { key: 'dangerouslySkipPermissions', label: 'Bypass Approvals and Sandbox', type: 'boolean', default: false, description: 'Disables permission prompts and sandbox restrictions' },
     ],
+    // OpenCode's root command takes no model or directory flags: the model is
+    // chosen in OpenCode itself.
+    opencode: [
+      { key: 'dangerouslySkipPermissions', label: 'Auto-approve Permissions', type: 'boolean', default: false, description: 'Approves every permission that is not explicitly denied (--auto)' },
+    ],
   };
   const COMMON_FIELDS = [
     { key: 'preLaunchCmd', label: 'Pre-launch Command', type: 'text', default: '', more: true, wide: true, placeholder: 'e.g. aws-vault exec profile --', description: 'Prepended to the CLI command' },
-    { key: 'addDirs', label: 'Additional Directories', type: 'text', default: '', more: true, wide: true, placeholder: '/path/to/dir1, /path/to/dir2', description: 'Extra directories (comma-separated). Project attachments are included automatically.' },
+    // except: CLIs with no way to take the field.
+    { key: 'addDirs', label: 'Additional Directories', type: 'text', default: '', more: true, wide: true, placeholder: '/path/to/dir1, /path/to/dir2', description: 'Extra directories (comma-separated). Project attachments are included automatically.', except: ['opencode'] },
   ];
   const own = (o, key) => Object.prototype.hasOwnProperty.call(o || {}, key);
   const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
-  function fieldsFor(runtime) { return [...(FIELDS[runtime] || []), ...COMMON_FIELDS]; }
+  function fieldsFor(runtime) {
+    return [...(FIELDS[runtime] || []), ...COMMON_FIELDS.filter(f => !(f.except || []).includes(runtime))];
+  }
 
   /**
    * Keys of the optional fields (more: true) that wait behind "More options":

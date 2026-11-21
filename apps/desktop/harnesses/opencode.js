@@ -507,8 +507,68 @@ function parseStatusReport(payload) {
   };
 }
 
+// --- Launch ---
+//
+// `opencode --session <id>` opens that session, or creates it under exactly
+// that id when it does not exist yet. So a new session is launched on an id
+// chosen here, in OpenCode's own format. OpenCode only writes the row once
+// the first prompt is sent, though, and until then the window and the phones
+// know the session by the temporary id they launched it under: the session
+// is re-keyed when the row appears, through the same path as a Codex launch,
+// with the chosen id as the tag to match.
+
+const ID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+let lastIdMs = 0;
+let idCounter = 0;
+
+/**
+ * A session id the way OpenCode makes them (packages/schema/src/identifier.ts):
+ * 'ses_', twelve hex digits of time that count down, so newer ids sort first,
+ * and fourteen random base62 characters.
+ */
+function newSessionId(now = Date.now()) {
+  if (now !== lastIdMs) { lastIdMs = now; idCounter = 0; }
+  idCounter++;
+  const time = (~(BigInt(now) * 0x1000n + BigInt(idCounter))) & 0xffffffffffffn;
+  const bytes = require('crypto').randomBytes(14);
+  return 'ses_' + time.toString(16).padStart(12, '0') + Array.from(bytes, b => ID_CHARS[b % 62]).join('');
+}
+
+/** Only a new session has to wait for its row; a resume already has its id. */
+function needsIdDetection({ isNew }) {
+  return !!isNew;
+}
+
+/** What resolvePendingLaunches compares: the session, once OpenCode has created it. */
+function readLaunchSignals(sessionId) {
+  return get('SELECT id FROM session_v2 WHERE id = ?', sessionId) ? { sessionId } : null;
+}
+
+/** The row is ours when it carries the id the launch chose (its tag). */
+function matchesLaunch(signals, pending) {
+  return !!signals?.sessionId && signals.sessionId === pending?.tag;
+}
+
+// The root command has no --fork; forking goes through OpenCode's background
+// service, which Switchboard does not talk to yet.
+const canFork = false;
+
+/**
+ * Argv for the opencode binary. The project directory is the PTY's cwd, so it
+ * is not repeated. Claude's and Codex's options (permission modes, extra
+ * directories, model) have no OpenCode flag at the root and are ignored; the
+ * model is chosen in OpenCode itself.
+ */
+function buildLaunchArgs({ sessionId, isNew, options }) {
+  const args = ['--session', String(sessionId)];
+  if (isNew && options?.initialPrompt) args.push('--prompt', String(options.initialPrompt));
+  if (options?.dangerouslySkipPermissions) args.push('--auto');
+  return args;
+}
+
 module.exports = {
   id, label, binary, folderPrefix, groupsByProject,
+  buildLaunchArgs, newSessionId, needsIdDetection, readLaunchSignals, matchesLaunch, canFork,
   parseTitleState, titleFromTerminal, classifyNotification, parseStatusReport,
   available, dataDir, dbPath, sessionsRoot, watchPaths, closeDb,
   listFolders, folderPath, folderForProject, deriveProjectPath,

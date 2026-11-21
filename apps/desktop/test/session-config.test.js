@@ -168,3 +168,17 @@ test('resume with config shows and passes the settings of the CLI that wrote the
   assert.equal(options.permissionMode, undefined);
   assert.equal(options.chrome, undefined);
 });
+
+test('OpenCode offers auto-approve and the common launch prefix, not extra directories', () => {
+  const keys = SessionConfig.fieldsFor('opencode').map(f => f.key);
+  assert.deepEqual(keys, ['dangerouslySkipPermissions', 'preLaunchCmd']);
+  const auto = SessionConfig.fieldsFor('opencode')[0];
+  assert.equal(auto.type, 'boolean');
+  assert.ok(!auto.hidden, 'shown in the form');
+  // Other CLIs keep the common directories field.
+  assert.ok(SessionConfig.fieldsFor('codex').some(f => f.key === 'addDirs'));
+  assert.ok(SessionConfig.fieldsFor('claude').some(f => f.key === 'addDirs'));
+  assert.throws(() => SessionConfig.normalizeOverrides('opencode', { addDirs: '/x' }), /Unsupported/);
+  assert.deepEqual(SessionConfig.resolveOptions('opencode', { dangerouslySkipPermissions: true, addDirs: '/x', codexModel: 'm' }, {}),
+    { dangerouslySkipPermissions: true, preLaunchCmd: '' });
+});

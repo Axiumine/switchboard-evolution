@@ -2773,6 +2773,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   if (harness && !harness.buildLaunchArgs) {
     return { ok: false, error: `${harness.label} sessions cannot be launched yet` };
   }
+  if (harness && harness.canFork === false && sessionOptions?.forkFrom) {
+    return { ok: false, error: `${harness.label} sessions cannot be forked yet` };
+  }
 
   // Claude asks about every --add-dir it does not trust, again in every session.
   // Ask once here instead, while someone is at the desktop; a phone or a
@@ -2840,6 +2843,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     }
   }
 
+  // A CLI that takes an id it did not make (OpenCode) is started on one in its
+  // own format. The session stays under the id the caller knows until the CLI
+  // records it, and is then re-keyed onto this one (resolvePendingLaunches).
+  const launchId = (startFresh && harness?.newSessionId) ? harness.newSessionId() : sessionId;
+
   let ptyProcess;
   let mcpServer = null;
   try {
@@ -2867,7 +2875,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // Argv is built by the harness and quoted here, so a value can never be
       // spliced into the command line as shell syntax.
       const cliArgs = harness.buildLaunchArgs({
-        sessionId, isNew: startFresh, options: sessionOptions,
+        sessionId: launchId, isNew: startFresh, options: sessionOptions,
       });
 
       let claudeCmd = harness.binary;
@@ -2959,7 +2967,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // Set for a harness whose real session id only appears once its transcript
     // does; cleared by resolvePendingLaunches when the transcript is matched.
     pendingLaunch: (harness?.needsIdDetection?.({ isNew: startFresh, options: sessionOptions })) ? {
-      tag: harness.originatorTag ? harness.originatorTag(sessionId) : null,
+      // What identifies the launch once the CLI records it: the id it was
+      // started on, or the env tag a CLI copies into its transcript (codex).
+      tag: launchId !== sessionId ? launchId : (harness.originatorTag ? harness.originatorTag(sessionId) : null),
       // A fork is identified by its parent, not by our env tag — codex copies
       // the originator from the thread being forked.
       forkFrom: sessionOptions?.forkFrom || null,
@@ -3233,11 +3243,13 @@ function startProjectsWatcher() {
  * onto the real id — everything downstream (terminal data, exit, the renderer's
  * sidebar row) follows session.realSessionId, exactly as fork detection does.
  */
-function resolvePendingLaunches(candidatePaths) {
+function resolvePendingLaunches(candidatePaths, harnessId = null) {
   for (const [tempId, session] of [...activeSessions]) {
     if (session.exited || !session.pendingLaunch || session.realSessionId) continue;
     const harness = getHarness(session.runtime);
     if (!harness.matchesLaunch) continue;
+    // Candidates are one CLI's: a path, or an id for a database CLI.
+    if (harnessId && harness.id !== harnessId) continue;
 
     for (const filePath of candidatePaths) {
       const signals = harness.readLaunchSignals(filePath);
@@ -3285,6 +3297,7 @@ function sweepPendingLaunches() {
   }
 
   for (const [h, since] of roots) {
+    if (h.watchPaths) { resolvePendingLaunches(pendingLaunchTags(h), h.id); continue; }
     const candidates = [];
     // Claude's folders live under the injected PROJECTS_DIR, not its own root.
     const dirs = h.folderPrefix
@@ -3299,6 +3312,19 @@ function sweepPendingLaunches() {
     }
     resolvePendingLaunches(candidates);
   }
+}
+
+/**
+ * The ids a database CLI's pending launches were started on: its candidates,
+ * since its sessions have no file to turn up.
+ */
+function pendingLaunchTags(h) {
+  const tags = [];
+  for (const session of activeSessions.values()) {
+    if (session.exited || session.realSessionId || !session.pendingLaunch?.tag) continue;
+    if ((session.runtime || DEFAULT_HARNESS) === h.id) tags.push(session.pendingLaunch.tag);
+  }
+  return tags;
 }
 
 /** Is any session still waiting for its transcript to appear? */
@@ -3344,6 +3370,9 @@ function startDatabaseWatcher(h) {
 
   function flush() {
     timer = null;
+    // A launch waiting for its row is re-keyed before the row is listed, so the
+    // window learns the session's id in the same beat it appears.
+    if (hasPendingLaunches()) resolvePendingLaunches(pendingLaunchTags(h), h.id);
     let folders = [];
     try { folders = sessionCache.changedFolders(h); } catch (err) { log.error(`[harness-watch] ${h.id}:`, err.message); }
     for (const folder of folders) {
