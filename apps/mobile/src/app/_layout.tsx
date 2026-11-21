@@ -17,9 +17,12 @@ import { SidebarDivider } from '@/layout/SidebarDivider';
 import { isDuoModel } from '@/layout/hinge';
 import { queryClient } from '@/remote/query';
 import { useConnection } from '@/store/connection';
+import { useDonateUsage } from '@/store/donate';
 import { colors } from '@/theme';
 
 export default function RootLayout() {
+  // The time of use that brings back the donation box of the Projects tab.
+  useDonateUsage();
   useEffect(() => {
     useConnection.getState().init();
     // iOS drops the socket in the background; reconnect as soon as the app is back.

@@ -3,6 +3,7 @@ import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { DonateBox } from '@/components/DonateBox';
 import { RoutePicker } from '@/components/RoutePicker';
 import { useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -25,7 +26,7 @@ function describe(status: ReturnType<typeof useConnection.getState>['status']): 
  * The Settings tab: the paired computer with its dot (green while connected),
  * the way it is reached (local network, Cloudflare, ngrok), the versions of
  * the paired Switchboard Evolution and of this app side by side, the source
- * code on GitHub, and forgetting the computer.
+ * code on GitHub, forgetting the computer, and the donation box.
  */
 export default function SettingsScreen() {
   const desktop = useConnection((s) => s.desktop);
@@ -92,6 +93,8 @@ export default function SettingsScreen() {
       <Pressable onPress={confirmForget} style={styles.button} accessibilityRole="button">
         <Text style={[styles.buttonText, { color: colors.danger }]}>Forget this computer</Text>
       </Pressable>
+      {/* The donation box of the Projects tab, always here and without its X. */}
+      <DonateBox style={styles.donate} />
     </ScrollView>
   );
 }
@@ -125,4 +128,5 @@ const styles = StyleSheet.create({
   divider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: colors.border },
   button: { backgroundColor: colors.surface, borderRadius: 10, padding: spacing.md, alignItems: 'center', marginTop: spacing.sm },
   buttonText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
+  donate: { marginTop: spacing.md },
 });

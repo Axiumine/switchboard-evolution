@@ -39,6 +39,7 @@ const processViewer = document.getElementById('process-viewer');
 const globalSettingsBtn = document.getElementById('global-settings-btn');
 const addProjectBtn = document.getElementById('add-project-btn');
 const projectsContent = document.getElementById('projects-content');
+const donateBar = document.getElementById('donate-bar');
 const resortBtn = document.getElementById('resort-btn');
 const jsonlViewer = document.getElementById('jsonl-viewer');
 const jsonlViewerTitle = document.getElementById('jsonl-viewer-title');
@@ -1349,6 +1350,8 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     searchBar.style.display = 'none';
     // The grouping combo beside the field belongs to the Projects tab.
     searchBar.classList.remove('with-group');
+    // So does the donation box at its foot (donate-box.js).
+    if (donateBar) donateBar.hidden = tabName !== 'projects';
 
     // Sessions and Projects share the main area: the grid, the active
     // terminal, or the placeholder.

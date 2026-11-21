@@ -29,6 +29,7 @@ const modules = {
   'file-selection.js': 'apps/desktop/public/file-selection.js',
   'git-change-actions.js': 'apps/desktop/public/git-change-actions.js',
   'star-tints.js': 'apps/desktop/public/star-tints.js',
+  'donate.js': 'apps/desktop/public/donate.js',
 };
 
 const header = (file) =>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
+import { DonateBox } from '@/components/DonateBox';
 import { HeaderButton } from '@/components/HeaderButton';
 import {
   ArchivedToggle, CardEnd, DrawerSessionRow, FolderHead, GroupHead, MoreRow, NoneRow, ProjectListRow, SectionLabel, SectionToggle,
@@ -25,6 +26,7 @@ import { isLive, projectSearchResults, runningAmong } from '@/sessions/search-st
 import { useSessionSearch } from '@/sessions/useSessionSearch';
 import { projectSnoozed, snoozeWakeDescription } from '@/shared/vendor/snooze';
 import { request, useConnection } from '@/store/connection';
+import { useDonate, useDonateBoxDue } from '@/store/donate';
 import { colors, spacing } from '@/theme';
 
 /**
@@ -48,6 +50,8 @@ export default function ProjectsScreen() {
   const [creating, setCreating] = useState(false);
   const [grouping, setGrouping] = useState(false);
   const [actionsFor, setActionsFor] = useState<Session | null>(null);
+  const donateDue = useDonateBoxDue();
+  const closeDonate = useDonate((s) => s.close);
 
   const projects = useMemo(() => tree.data?.projects || [], [tree.data]);
   // The folders of the Sessions tab, for the sessions no project claims.
@@ -248,6 +252,8 @@ export default function ProjectsScreen() {
         contentContainerStyle={styles.list}
         refreshControl={pull}
       />
+      {/* Pinned below the list, which gets the height left (src/store/donate.ts says when). */}
+      {donateDue ? <DonateBox onClose={closeDonate} style={styles.donate} /> : null}
       <TextPrompt visible={creating} title="New project" confirm="Create" onClose={() => setCreating(false)} onSubmit={create} />
       <Sheet
         visible={grouping}
@@ -307,6 +313,7 @@ const styles = StyleSheet.create({
   groupPressed: { opacity: 0.6 },
   groupText: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
   list: { paddingBottom: spacing.xl },
+  donate: { marginHorizontal: spacing.sm, marginBottom: spacing.sm },
   empty: { color: colors.textFaint, textAlign: 'center', marginTop: spacing.xl },
   // A session found by the search, under its project.
   nested: { paddingLeft: spacing.xl + spacing.lg },

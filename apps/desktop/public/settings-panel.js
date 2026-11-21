@@ -375,6 +375,11 @@
         </div>
       </div>` : ''}
 
+      ${!isProject ? `<div class="settings-section">
+        <div class="settings-section-title">Support</div>
+        <div class="settings-donate" id="sv-donate"></div>
+      </div>` : ''}
+
       <div class="settings-btn-row">
         <button class="settings-cancel-btn" id="sv-cancel-btn">Cancel</button>
         <button class="settings-save-btn" id="sv-save-btn">Save Settings</button>
@@ -543,6 +548,10 @@
 
     const githubBtn = settingsViewerBody.querySelector('#sv-github-btn');
     if (githubBtn) githubBtn.addEventListener('click', () => window.api.openExternal(SWITCHBOARD_REPOSITORY_URL));
+
+    // The donation box of the Projects tab, always here and without its X (donate-box.js).
+    const donateSlot = settingsViewerBody.querySelector('#sv-donate');
+    if (donateSlot && typeof window.buildDonateBox === 'function') donateSlot.appendChild(window.buildDonateBox());
 
     // Check for updates button + current version + inline status
     const checkUpdatesBtn = settingsViewerBody.querySelector('#sv-check-updates-btn');
