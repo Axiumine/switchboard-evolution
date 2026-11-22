@@ -57,7 +57,7 @@ scripts/         sync-shared.mjs, upstream-sync.sh
 
 ## Build and run
 
-The desktop and the phone app share one version, 1.9.1 today, tagged `v1.9.1` when it is released. A version tag builds the desktop app for macOS, Windows and Linux and the Android APK on GitHub Actions, into a draft release ([releasing](apps/mobile/docs/releasing.md)). Locally, build from source on `master`:
+The desktop and the phone app share one version, 1.10.0 today, tagged `v1.10.0` when it is released. A version tag builds the desktop app for macOS, Windows and Linux and the Android APK on GitHub Actions, into a draft release ([releasing](apps/mobile/docs/releasing.md)). Locally, build from source on `master`:
 
 ```bash
 # desktop
