@@ -89,6 +89,7 @@ What "an app of its own" means:
 - Find and replace in the editor (CodeMirror). The editor bundles only the languages it highlights: 1.67 MB down to 0.98 MB.
 - Multi-select with one-step trash; Expand All and Collapse All.
 - In the viewer toolbar: Share (the macOS share menu), Reveal in Finder, Open in default app, and A− / A+ for the text size of the editor and the Markdown preview (on the phone too).
+- The sidebar's **Files** tab (Agent Files upstream): the agent files and any file dropped on the sidebar from any tab. The drop zone has two halves: open the file here, in the tab's editor, or in a window of its own. A filter shows All, Agent files or Opened files; any file can be pinned at the top, in an order changed by dragging, and stays in sight with every filter. An opened file can be taken off the list.
 
 ### 5. Projects and sessions
 
@@ -108,7 +109,7 @@ What "an app of its own" means:
 
 ### 7. Windows
 
-- One strip of sidebar tabs: Projects, Sessions, Plans, Agent Files, Stats, Task Manager, Settings.
+- One strip of sidebar tabs: Projects, Sessions, Plans, Files, Stats, Task Manager, Settings.
 - Stats and the Task Manager open in windows of their own, with a pin that keeps them on top.
 - Every project tab (Overview, Plan, Todos, Files, Git, Settings) can open in a window of its own, whose header has the other tabs to move it to one of them (on the phone too). Open windows come back at the next start.
 

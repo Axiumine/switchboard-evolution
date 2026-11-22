@@ -29,8 +29,8 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 - [ ] "Quit and Stop All Sessions…" asks for confirmation and stops every running session before quitting; a plain Quit leaves herdr-core sessions running (master) — `main.js` (`quitStoppingSessions`)
 - [ ] With remote access on, closing the window on macOS only hides it, and the sessions keep running (master) — `window-lifecycle.js` (`keepWindowOnClose`), event `window-visibility`
 - [ ] Closing the main window closes the tool and project windows too, and stops sessions that are not in herdr-core (master) — `main.js` (`mainWindow.on('closed')`)
-- [ ] The sidebar header shows one strip of icon tabs: Projects, Sessions, Plans, Agent Files, Stats, Task Manager, Global settings; on upstream Plans, Agent Files and Stats sit behind a "More" button (master) — `index.html` (`#sidebar-tabs`, `.sidebar-tab[data-tab]`)
-- [ ] Clicking a tab switches the sidebar content (Sessions, Projects, Plans, Agent Files, Stats list) and clears the search box — `app.js` (tab click handler, `activeTab`)
+- [ ] The sidebar header shows one strip of icon tabs: Projects, Sessions, Plans, Files, Stats, Task Manager, Global settings; on upstream Plans, Agent Files and Stats sit behind a "More" button, and Files is called Agent Files (master) — `index.html` (`#sidebar-tabs`, `.sidebar-tab[data-tab]`)
+- [ ] Clicking a tab switches the sidebar content (Sessions, Projects, Plans, Files, Stats list) and clears the search box — `app.js` (tab click handler, `activeTab`)
 - [ ] The app reopens on the last of Sessions or Projects (other tabs are not remembered) — `app.js` (`rememberedTab`, `localStorage.lastTab`)
 - [ ] Each tab shows a tooltip with its name; the Stats and Task Manager tooltips hold a pop-out button, and the pointer can travel from the tab onto the tooltip (master) — `sidebar-tips.js` (`data-tip`, `data-window`)
 - [ ] The Task Manager and Global settings tabs light up while their page is on screen, however it was closed (master) — `app.js` (`lightWhileShown`)
@@ -39,7 +39,7 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 - [ ] A dot on the expand button shows remote access is on while the sidebar is collapsed (master) — `remote-access.js` (`.remote-access-dot`)
 - [ ] The sidebar collapses and expands with its two buttons — `app.js` (`#sidebar-collapse-btn`, `#sidebar-expand-btn`)
 - [ ] Dragging the divider resizes the sidebar between 344 and 600 px (never narrower than the tab strip) and the width is saved — `app.js` (`#sidebar-resize-handle`, `SIDEBAR_MIN_WIDTH`, setting `global.sidebarWidth`)
-- [ ] The main area shows exactly one page at a time (placeholder, terminal area, grid, plan viewer, agent file viewer, stats, settings, Task Manager, transcript, project page) and opening one hides the others — `plans-memory-view.js` (`hideAllViewers`), `app.js`
+- [ ] The main area shows exactly one page at a time (placeholder, terminal area, grid, plan viewer, Files tab's editor, stats, settings, Task Manager, transcript, project page) and opening one hides the others — `plans-memory-view.js` (`hideAllViewers`), `app.js`
 - [ ] With nothing selected the main area says "Select a session from the sidebar to begin." — `index.html` (`#placeholder`)
 - [ ] The sidebar list refreshes by itself when session files change on disk, debounced, and not while another tab is showing — `app.js` (`onProjectsChanged`, `loadProjects`)
 - [ ] The window lays out in a project-window mode (no sidebar, no terminals) when opened with `?projectWindow=` (master) — `project-window.js` (`PROJECT_WINDOW`, `body.project-window`)
@@ -275,14 +275,18 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 - [ ] A find bar (Cmd/Ctrl+F style, previous, next, close, count) searches the rendered messages — `message-search.js` (`createMessageSearch`)
 - [ ] Opening a transcript highlights the session in the sidebar and in the project page — `jsonl-viewer.js`, `projects-view.js` (`onMessagesShown`)
 
-## 16. Plans and Agent Files tabs
+## 16. Plans and Files tabs
 
 - [ ] The Plans tab lists Claude's saved plans with title, file name and date; "No plans found" when empty — `plans-memory-view.js` (`renderPlans`, `buildPlanItem`), `main.js` (`get-plans`)
 - [ ] Clicking a plan opens it in the viewer to read or edit and save (Cmd+S), with preview toggle and the other viewer buttons — `plans-memory-view.js` (`openPlan`), `main.js` (`read-plan`, `save-plan`)
 - [ ] A plan has an "Adopt into a project as plan.md" button with a project menu (confirms before replacing an existing plan, offers to open the project) — `plans-memory-view.js` (`adoptPlanInto`)
-- [ ] The Agent Files tab lists memory and instruction files in a Global group and one group per project, collapsible with a count; each file shows name, path and date — `plans-memory-view.js` (`renderMemories`, `buildMemoryGroup`, `buildMemoryItem`), `main.js` (`get-memories`)
-- [ ] Clicking an agent file opens it in the viewer to edit and save — `plans-memory-view.js` (`openMemory`), `main.js` (`read-memory`, `save-memory`)
-- [ ] The search box filters plans and agent files (full text, titles only with Tt) on their tabs — `app.js` (search handler for `plans`, `memory`), `main.js` (`search`)
+- [ ] The Files tab (Agent Files upstream) lists memory and instruction files in a Global group and one group per project, collapsible with a count; each file shows name, path and date — `files-view.js` (`renderFiles`, `buildMemoryGroup`, `buildFileItem`), `main.js` (`get-memories`)
+- [ ] Clicking a file opens it in the viewer to edit and save; any kind the viewer previews (text, image, PDF, JSON tree), the others in their default app — `files-view.js` (`openFileHere`), `main.js` (`read-file-for-panel`, `save-memory`, `save-file-for-panel`)
+- [ ] The search box filters plans, and the Files tab's agent and opened files (full text, titles only with Tt) on their tabs — `app.js` (search handler for `plans`, `memory`), `main.js` (`search`, types `memory` and `opened`)
+- [ ] (master) Under the search box, a filter shows All files, Agent files or Opened files, kept across restarts — `files-list.js` (`buildFilesSections`, `loadFilesFilter`)
+- [ ] (master) A file dragged from outside the app over the sidebar, on any tab, turns it into a drop zone: the upper half opens the file in the Files tab's editor (the sidebar moves to Files), the lower half in a window of its own with a keep-on-top pin; folders are turned away — `files-drop.js`, `files-view.js` (`openDroppedFiles`), `file-window.js`, `main.js` (`add-opened-files`, `open-file-window`)
+- [ ] (master) Opened files are kept in an Opened group, most recent first; one taken off the list is forgotten, its pin too; a file no longer there says "File not found" — `opened-files.js`, `main.js` (`get-opened-files`, `remove-opened-file`)
+- [ ] (master) Any file of the tab can be pinned: a Pinned group at the top, in sight with every filter, ordered by dragging or with Move up / Move down in the row's menu — `files-view.js` (`bindPinnedDrag`, `showFileMenu`), `main.js` (`set-file-pinned`, `move-pinned-file`)
 
 ## 17. Stats
 
@@ -392,7 +396,7 @@ There are **169** handlers: 163 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `m
 | Git Worktrees | 18 (all master) | `get-project-worktrees`, `get-worktree-settings`, `set-worktree-settings`, `list-worktree-branches`, `suggest-worktree-path`, `worktree-create`, `worktree-run-post-create`, `worktree-remove`, `worktree-delete-branch`, `worktree-merged`, `worktree-lock`, `worktree-unlock`, `worktree-move`, `worktree-repair`, `worktree-prune-preview`, `worktree-prune`, `worktree-attach`, `worktree-detach` |
 | Files, viewer, IDE panel | 20 (10 master) | `mcp-diff-response`, `resolve-terminal-files`, `open-file-externally`, `read-file-for-panel`, `list-project-directory`, `manage-project-entry`, `read-project-file`, `save-file-for-panel`, `watch-file`, `unwatch-file` (upstream); (master) `share-file`, `create-project-entry`, `duplicate-project-entry`, `paste-project-entry`, `get-file-timeline`, `get-file-timeline-diff`, `get-file-at-commit`, `open-file-with-app`, `search-project-files`, `replace-in-project-files` |
 | System helpers | 4 (1 master) | `open-external`, `open-path`, `clipboard-write-text`; (master) `reveal-file` |
-| Plans and Agent Files | 6 | `get-plans`, `read-plan`, `save-plan`, `get-memories`, `read-memory`, `save-memory` |
+| Plans and Files tab | 12 (6 master) | `get-plans`, `read-plan`, `save-plan`, `get-memories`, `read-memory`, `save-memory`; (master) `get-opened-files`, `add-opened-files`, `remove-opened-file`, `set-file-pinned`, `move-pinned-file`, `open-file-window` |
 | Stats and usage | 4 | `get-stats`, `refresh-stats`, `get-usage`, `get-codex-usage` |
 | Search | 2 | `search`, `search-session-ids` |
 | Settings and CLIs | 8 (1 master) | `get-setting`, `set-setting`, `delete-setting`, `get-harnesses`, `get-codex-models`, `get-shell-profiles`, `get-effective-settings`; (master) `get-terminal-engine` |
@@ -431,7 +435,7 @@ Remote access is a whitelist: **130 methods** (80 in `remote-api.js`, 20 in `rem
 
 Phone events forwarded: `projects-changed`, `harnesses-changed`, `cli-busy-state`, `terminal-notification`, `process-exited`, `session-detected`, `session-forked`, `project-plan-changed`, `session-notices-changed`, `mcp-open-diff`, `mcp-close-tab`, `mcp-close-all-diffs`, `mcp-diff-resolved`, `task-output`, `task-state-changed`, `git-graph-repo-changed`, `git-graph-action-progress`. Terminal output goes only to the phones attached to that session.
 
-Not exposed to phones on purpose: native dialogs, Finder and reveal, the clipboard, the updater, settings read and write, remote-access control, window and tool-window control, plans and Agent Files, `save-plan`, `save-memory`, `adopt-plan`, `add-project-files`, `get-memories`.
+Not exposed to phones on purpose: native dialogs, Finder and reveal, the clipboard, the updater, settings read and write, remote-access control, window and tool-window control, plans and the Files tab, `save-plan`, `save-memory`, `adopt-plan`, `add-project-files`, `get-memories`, the opened and pinned files, `open-file-window`.
 
 ---
 
@@ -557,6 +561,6 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 12. **Classification doubts, tagged `(master?)`.** The avatars line: `git-graph-avatars.js` is new on master, but `main` has some avatar-related text, so the split is not certain. Lines that mix upstream and master parts (for example the Git Graph menus, where the copy items exist on `main` and everything else is master) are tagged master with the upstream part named in the line.
 13. **Master commits that cherry-pick upstream ones.** `git log main..master` lists some commits whose content is already on `main` (for example Custom Arguments, "Open in default app", the title-bar fix) because the histories diverged. They were decided by file contents, not by the log, and are untagged.
 14. **Phone methods with no direct call in the mobile source.** A text search of `apps/mobile/src` found no call to: `add-project-file-bytes`, `clear-git-graph-avatar-cache`, `create-git-graph-archive`, `create-project-file`, `export-git-graph-repo-config`, `get-active-sessions`, `get-active-terminals`, `get-app-version`, `get-codex-models`, `get-git-graph-avatar-url`, `get-git-graph-file-at-revision`, `get-git-graph-repo-config`, `get-git-graph-tag-details`, `get-git-graph-user-details`, `get-projects-root`, `get-schedule-context`, `get-session-last-message`, `get-worktree-settings`, `list-recent-project-files`, `list-schedules`, `list-templates`, `resolve-schedule-launch`, `save-project-brief`, `set-git-graph-avatars-gitlab-host`, `set-git-graph-global-preferences`, `set-git-graph-repo-config`, `start-task`, `stop-all-tasks`, `task-input`, `trust-git-graph-repo-config`. Some may be called through computed names. They are still allowed on the desktop, so the rewrite must keep them working; decide whether the mobile app should use them.
-15. **Mobile coverage of the desktop.** Mobile has no equivalent of: Git Graph repository settings and dialogs beyond the listed actions, Plans and Agent Files tabs, grid view, tool windows, remote-access setup, global settings. Confirm these stay desktop-only.
+15. **Mobile coverage of the desktop.** Mobile has no equivalent of: Git Graph repository settings and dialogs beyond the listed actions, Plans and Files tabs, grid view, tool windows, remote-access setup, global settings. Confirm these stay desktop-only.
 16. **Transcript viewer on the phone.** The desktop's JSONL viewer and the mobile chat view render the same data differently (the desktop reads `read-session-jsonl`, the phone `read-session-entries` and `read-session-tail`). Confirm both must show tool results, images and plan cards at parity.
 17. **Branding.** The window title uses the product name, while data names stay `switchboard` (data folder, `switchboard://` links, `SWITCHBOARD_*` variables). Confirm the new UI keeps showing "Switchboard" in the places that quote those names (for example "Switchboard" in settings text and the "not in Switchboard any more" note).

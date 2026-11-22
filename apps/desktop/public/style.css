@@ -9252,3 +9252,86 @@ body.project-window .ws-body:has(> .note-window-body) { padding: 0; overflow: hi
   border-top-color: transparent;
   animation: spin-dot 0.8s linear infinite;
 }
+
+/* ========== FILES TAB (files-view.js, files-drop.js) ========== */
+/* The filter combo, right under the search field. */
+#files-filters {
+  display: flex;
+  padding: 0 16px 10px;
+  margin-top: -6px;
+}
+#files-filters .session-filter-select { flex: 1 1 auto; }
+
+/* An opened file's row: the icon of its type, where agent files have a brain. */
+.memory-file-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+}
+.memory-file-icon .file-type-icon { width: 15px; height: 15px; }
+
+/* A file no longer where it was opened from. */
+.memory-item.is-missing .session-summary,
+.memory-item.is-missing .session-id { opacity: 0.5; }
+.memory-item.is-missing .session-meta { color: #c98a5e; }
+
+/* Pin and remove on a row; a pinned row's pin stays lit. */
+.files-pin-btn.on { color: #a6abff; }
+.files-remove-btn:hover { color: #ff7b8a; background: rgba(255,90,110,0.1); }
+
+/* Pinned rows are moved by dragging them: a line shows where one would go. */
+.files-pinned-group .memory-item[draggable="true"] { cursor: grab; }
+.memory-item.is-dragging { opacity: 0.4; }
+.memory-item.drop-before .session-row { box-shadow: 0 -2px 0 0 #8088ff; }
+.memory-item.drop-after .session-row { box-shadow: 0 2px 0 0 #8088ff; }
+
+/* A file dragged over the sidebar from outside the app: two halves, open here
+   or in a window of its own. Fixed over the sidebar's box (files-drop.js). */
+#sidebar-drop-overlay {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  box-sizing: border-box;
+  background: rgba(17,17,24,0.94);
+}
+#sidebar-drop-overlay[hidden] { display: none; }
+.sidebar-drop-half {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px dashed rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: #8a8aa2;
+  text-align: center;
+  padding: 12px;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+/* The halves' content never takes the drag events: only the sidebar counts them. */
+.sidebar-drop-half * { pointer-events: none; }
+.sidebar-drop-half.is-over {
+  border-color: rgba(128,136,255,0.7);
+  background: rgba(128,136,255,0.12);
+  color: #d4d6ff;
+}
+.sidebar-drop-title { font-size: 14px; font-weight: 600; }
+.sidebar-drop-hint { font-size: 12px; opacity: 0.75; }
+
+/* A file in a window of its own (file-window.html). */
+body.file-window #file-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #111118;
+}
+body.file-window .viewer-panel-editor,
+body.file-window .markdown-preview { flex: 1; min-height: 0; }
+.viewer-toolbar-controls .tool-window-btn { margin-left: 2px; }

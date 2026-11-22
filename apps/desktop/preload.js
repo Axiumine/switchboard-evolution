@@ -12,6 +12,13 @@ contextBridge.exposeInMainWorld('api', {
   getMemories: () => ipcRenderer.invoke('get-memories'),
   readMemory: (filePath) => ipcRenderer.invoke('read-memory', filePath),
   saveMemory: (filePath, content) => ipcRenderer.invoke('save-memory', filePath, content),
+  // The Files tab's opened and pinned files (main.js, opened-files.js).
+  getOpenedFiles: () => ipcRenderer.invoke('get-opened-files'),
+  addOpenedFiles: (paths) => ipcRenderer.invoke('add-opened-files', paths),
+  removeOpenedFile: (filePath) => ipcRenderer.invoke('remove-opened-file', filePath),
+  setFilePinned: (filePath, pinned) => ipcRenderer.invoke('set-file-pinned', filePath, pinned),
+  movePinnedFile: (filePath, toIndex) => ipcRenderer.invoke('move-pinned-file', filePath, toIndex),
+  openFileWindow: (filePath) => ipcRenderer.invoke('open-file-window', filePath),
   getProjects: (showArchived) => ipcRenderer.invoke('get-projects', showArchived),
   getHarnesses: () => ipcRenderer.invoke('get-harnesses'),
   getCodexModels: () => ipcRenderer.invoke('get-codex-models'),

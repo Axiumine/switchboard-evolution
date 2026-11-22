@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<!-- A file in a window of its own (main.js openFileWindow): the editor of the
+     sidebar's Files tab for that file alone, with file-window.js in place of
+     app.js. -->
+<body class="tm-window file-window">
+  <div id="file-window"></div>
+  <button id="tool-window-pin" class="tool-window-btn" type="button" aria-pressed="false"></button>
+  <script src="codemirror-bundle.js"></script>
+  <script src="icons.js"></script>
+  <script src="utils.js"></script>
+  <script src="tool-window.js"></script>
+  <script src="viewer-toolbar.js"></script>
+  <script src="jsonc-parser-bundle.js"></script>
+  <script src="json-reader.js"></script>
+  <script src="viewer-panel.js"></script>
+  <script src="file-actions.js"></script>
+  <script src="file-window.js"></script>
+</body>
+</html>

@@ -81,7 +81,8 @@ const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslS
 const { scanSchedules } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 const { resolveEffectiveSettings } = require('./resolve-effective-settings');
-const { listProjectDirectory, readProjectFile, readPreviewFile, openFileExternally, resolveProjectEntry } = require('./project-files');
+const { listProjectDirectory, readProjectFile, readPreviewFile, openFileExternally, resolveProjectEntry, isViewableFile, previewType } = require('./project-files');
+const openedFiles = require('./opened-files');
 const { manageProjectEntry, trashProjectEntries, revealFile, shareFile, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
 const FileSelection = require('./public/file-selection');
 const fileTimeline = require('./file-timeline');
@@ -296,7 +297,7 @@ function createWindow() {
     taskManager.shutdown();
     // They close with the main window, and open again with the next one.
     freezeOpenWindows();
-    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows]) if (!win.isDestroyed()) win.close();
+    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows, ...viewerFileWindows]) if (!win.isDestroyed()) win.close();
     mainWindow = null;
   });
 }
@@ -1326,6 +1327,72 @@ ipcMain.handle('save-memory', (_event, filePath, content) => {
   }
 });
 
+// --- IPC: the Files tab's opened and pinned files (opened-files.js) ---
+// Opened: files dropped on the sidebar (files-drop.js). Pinned: any file of
+// the tab, kept at its top in the order the user gives.
+function readOpenedFilesState() {
+  return openedFiles.normalizeOpenedFiles(getSetting(openedFiles.OPENED_FILES_SETTING));
+}
+
+function describeOpenedFilesState(state) {
+  return openedFiles.describeOpenedFiles(state, { home: os.homedir() });
+}
+
+/** The text of the opened files in the search index, as get-memories does for agent files. */
+function indexOpenedFiles(state) {
+  try {
+    deleteSearchType('opened');
+    const entries = [];
+    for (const { filePath } of state.opened) {
+      try {
+        if (!['text', 'html'].includes(previewType(filePath))) continue;
+        const stat = fs.statSync(filePath);
+        if (!isViewableFile(filePath, stat)) continue;
+        entries.push({
+          id: filePath, type: 'opened', folder: null,
+          title: `${path.basename(filePath)} ${path.dirname(filePath)}`,
+          body: fs.readFileSync(filePath, 'utf8'),
+        });
+      } catch {}
+    }
+    upsertSearchEntries(entries);
+  } catch {}
+}
+
+function saveOpenedFilesState(state, { reindex = false } = {}) {
+  setSetting(openedFiles.OPENED_FILES_SETTING, state);
+  if (reindex) indexOpenedFiles(state);
+  return describeOpenedFilesState(state);
+}
+
+ipcMain.handle('get-opened-files', () => {
+  const state = readOpenedFilesState();
+  indexOpenedFiles(state);
+  return describeOpenedFilesState(state);
+});
+
+ipcMain.handle('add-opened-files', (_event, paths) => {
+  const { files, rejected } = openedFiles.checkDroppedPaths(paths);
+  const state = files.length ? openedFiles.addOpened(readOpenedFilesState(), files) : readOpenedFilesState();
+  const described = files.length ? saveOpenedFilesState(state, { reindex: true }) : describeOpenedFilesState(state);
+  return { ...described, added: files, rejected };
+});
+
+ipcMain.handle('remove-opened-file', (_event, filePath) => {
+  if (!openedFiles.isFilePath(filePath)) return describeOpenedFilesState(readOpenedFilesState());
+  return saveOpenedFilesState(openedFiles.removeOpened(readOpenedFilesState(), filePath), { reindex: true });
+});
+
+ipcMain.handle('set-file-pinned', (_event, filePath, pinned) => {
+  if (!openedFiles.isFilePath(filePath)) return describeOpenedFilesState(readOpenedFilesState());
+  return saveOpenedFilesState(openedFiles.setPinned(readOpenedFilesState(), filePath, !!pinned));
+});
+
+ipcMain.handle('move-pinned-file', (_event, filePath, toIndex) => {
+  if (!openedFiles.isFilePath(filePath)) return describeOpenedFilesState(readOpenedFilesState());
+  return saveOpenedFilesState(openedFiles.movePinned(readOpenedFilesState(), filePath, toIndex));
+});
+
 // --- IPC: search ---
 ipcMain.handle('search-session-ids', (_event, query, sessionIds) => {
   if (typeof query !== 'string' || !Array.isArray(sessionIds) || sessionIds.some(id => typeof id !== 'string')) return [];
@@ -1856,6 +1923,33 @@ function openGitFileWindow(projectId, repoPath, file) {
 
 ipcMain.handle('open-git-file-window', (_event, projectId, repoPath, file) => openGitFileWindow(projectId, repoPath, file));
 
+// --- Any file in a window of its own ---
+// A file dropped on the sidebar's "Open in new window" half (files-drop.js),
+// or popped out of the Files tab's editor: file-window.html, an editor for
+// that file alone, which can stay above the others with its pin. A new window
+// for each file, a little lower and to the right of the one before. Not
+// opened again at the next start; they close with the main window.
+const viewerFileWindows = new Set();
+const FILE_WINDOW_SPEC = { title: 'File', width: 1000, height: 760, minWidth: 480, minHeight: 320, onTop: false };
+
+// The editor reloads the file when it changes on disk (viewer-panel.js).
+addSink((channel, args) => {
+  if (channel !== 'file-changed') return;
+  for (const win of viewerFileWindows) if (!win.isDestroyed()) win.webContents.send(channel, ...args);
+});
+
+function openFileWindow(filePath) {
+  const file = openedFiles.existingFilePath(filePath);
+  if (!file) return false;
+  const win = createPageWindow('file', { ...FILE_WINDOW_SPEC, title: path.basename(file) }, { offset: 24 * viewerFileWindows.size });
+  viewerFileWindows.add(win);
+  win.loadFile(path.join(__dirname, 'public', 'file-window.html'), { query: { file } });
+  win.on('closed', () => viewerFileWindows.delete(win));
+  return true;
+}
+
+ipcMain.handle('open-file-window', (_event, filePath) => openFileWindow(filePath));
+
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When
 // the app quits, or the main window closes and takes the others with it,
@@ -1911,6 +2005,7 @@ function toolWindowKindOf(webContents) {
   for (const [key, win] of projectWindows) if (!win.isDestroyed() && win.webContents === webContents) return `project-${key.split('\n')[1]}`;
   for (const win of compareWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-compare';
   for (const win of fileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-file';
+  for (const win of viewerFileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'file';
   return null;
 }
 
