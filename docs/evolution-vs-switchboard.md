@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.9.0 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.9.1 (November 2026).
 
 ## At a glance
 
@@ -30,13 +30,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 20 Nov | Switchboard Evolution 1.7.0 | One version for the desktop and the phone app, and the repository goes public. |
 | 20 Nov | Switchboard Evolution 1.8.0 | A Note for each project, text size in the editor, the RAM of each session on its row, and tabs in a project's window. |
 | 21 Nov | Switchboard Evolution 1.9.0 | New icons for both apps: the computer's terminal with the phone in front of it. In the phone's Files tab, upload several files from the phone, and download several ticked files and folders at once. |
+| 22 Nov | Switchboard Evolution 1.9.1 | OpenCode as the third CLI, beside Claude Code and Codex, on the desktop and the phone. A project's plan and its todos on two tabs of their own. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.9.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.9.1, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
