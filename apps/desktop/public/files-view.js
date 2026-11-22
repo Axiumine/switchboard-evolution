@@ -243,9 +243,11 @@ function buildFileItem(file, { agent, opened, pinned }) {
 
 function offerRemoveMissing(file, { opened, pinned }) {
   if (!opened && !pinned) return;
-  const what = opened ? 'Remove it from the list?' : 'Unpin it?';
+  const what = !opened ? 'Unpin it?'
+    : pinned ? 'It is pinned. Are you sure you want to remove it from the list?'
+    : 'Remove it from the list?';
   if (!confirm(`${file.filename} is no longer at\n${file.filePath}\n\n${what}`)) return;
-  if (opened) removeFileFromList(file.filePath);
+  if (opened) removeFileFromList(file.filePath, { confirmed: true });
   else toggleFilePinned(file.filePath, false);
 }
 
@@ -333,8 +335,18 @@ async function moveFilePinned(filePath, toIndex) {
   catch (err) { alert(err.message || 'Could not move the file.'); }
 }
 
-/** As if the file had never been opened in the app. The file itself stays where it is. */
-async function removeFileFromList(filePath) {
+function isPinnedFilePath(filePath) {
+  return cachedOpenedFiles.pinned.some(f => f.filePath === filePath);
+}
+
+/**
+ * As if the file had never been opened in the app. The file itself stays where
+ * it is. A pinned file is unpinned too, so it asks first, unless the caller
+ * already did (`confirmed`).
+ */
+async function removeFileFromList(filePath, { confirmed = false } = {}) {
+  if (!confirmed && isPinnedFilePath(filePath)
+    && !confirm(`“${fileBaseName(filePath)}” is pinned. Are you sure you want to remove it from the list?\n\nIt is unpinned too. The file itself stays on disk.`)) return;
   try { applyOpenedFiles(await window.api.removeOpenedFile(filePath)); }
   catch (err) { alert(err.message || 'Could not remove the file from the list.'); }
 }

@@ -285,7 +285,7 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 - [ ] The search box filters plans, and the Files tab's agent and opened files (full text, titles only with Tt) on their tabs — `app.js` (search handler for `plans`, `memory`), `main.js` (`search`, types `memory` and `opened`)
 - [ ] (master) Under the search box, a filter shows All files, Agent files or Opened files, kept across restarts — `files-list.js` (`buildFilesSections`, `loadFilesFilter`)
 - [ ] (master) A file dragged from outside the app over the sidebar, on any tab, turns it into a drop zone: the upper half opens the file in the Files tab's editor (the sidebar moves to Files), the lower half in a window of its own with a keep-on-top pin; folders are turned away — `files-drop.js`, `files-view.js` (`openDroppedFiles`), `file-window.js`, `main.js` (`add-opened-files`, `open-file-window`)
-- [ ] (master) Opened files are kept in an Opened group, most recent first; one taken off the list is forgotten, its pin too; a file no longer there says "File not found" — `opened-files.js`, `main.js` (`get-opened-files`, `remove-opened-file`)
+- [ ] (master) Opened files are kept in an Opened group, most recent first; one taken off the list is forgotten, its pin too, and a pinned one asks for confirmation first; a file no longer there says "File not found" — `opened-files.js`, `files-view.js` (`removeFileFromList`), `main.js` (`get-opened-files`, `remove-opened-file`)
 - [ ] (master) Any file of the tab can be pinned: a Pinned group at the top, in sight with every filter, ordered by dragging or with Move up / Move down in the row's menu — `files-view.js` (`bindPinnedDrag`, `showFileMenu`), `main.js` (`set-file-pinned`, `move-pinned-file`)
 
 ## 17. Stats
