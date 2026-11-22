@@ -17,7 +17,7 @@ import { useProjectTab } from '@/components/project/useProjectTab';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import { openNote } from '@/notes/panel';
-import { PROJECT_TABS, type ProjectTab } from '@/projects/tabs';
+import { PROJECT_TABS, planTabMeta, type ProjectTab } from '@/projects/tabs';
 import { removeProject, toggleProjectDone } from '@/projects/flows';
 import { ProjectSessionContext } from '@/projects/open-session';
 import { act, useMinute, useProject, useProjectPlan } from '@/projects/queries';
@@ -29,7 +29,7 @@ import { openWindow, useCanOpenWindows } from '@/windows/open';
 import { WINDOW_TABS } from '@/windows/window-spec';
 
 /**
- * One project, on the desktop's tabs: Overview, Session, Plan, Files, Git
+ * One project, on the desktop's tabs: Overview, Session, Plan, Todos, Files, Git
  * (Changes, History, Worktrees) and Settings. A session opened in the project
  * shows on the Session tab, under the project's header and tabs. A sideways
  * swipe goes to the tab next to the open one (SwipeTabs).
@@ -65,7 +65,7 @@ export default function ProjectScreen() {
   }
 
   const snoozed = projectSnoozed(project, now);
-  const meta = plan.data && !plan.data.error && plan.data.plan.total ? { plan: `${plan.data.plan.done}/${plan.data.plan.total}` } : undefined;
+  const meta = planTabMeta(plan.data);
 
   const projectOptions: SheetOption[] = [
     { label: 'New session…', onPress: () => router.push({ pathname: '/new', params: { target: `p:${project.id}` } }) },
@@ -84,7 +84,8 @@ export default function ProjectScreen() {
 
   const bodies: Record<ProjectTab, ReactNode> = {
     overview: <OverviewTab project={project} now={now} run={run} onRename={setRename} onRefresh={refresh} />,
-    plan: <PlanTab project={project} plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
+    plan: <PlanTab project={project} part="plan" plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
+    todos: <PlanTab project={project} part="todos" plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
     files: <FilesTab project={project} />,
     git: <GitTab project={project} active={tab === 'git'} />,
     settings: <SettingsTab project={project} now={now} run={run} onSelectTab={selectTab} />,

@@ -109,7 +109,7 @@ What "an app of its own" means:
 
 - One strip of sidebar tabs: Projects, Sessions, Plans, Agent Files, Stats, Task Manager, Settings.
 - Stats and the Task Manager open in windows of their own, with a pin that keeps them on top.
-- Every project tab (Overview, Plan, Files, Git, Settings) can open in a window of its own, whose header has the other tabs to move it to one of them (on the phone too). Open windows come back at the next start.
+- Every project tab (Overview, Plan, Todos, Files, Git, Settings) can open in a window of its own, whose header has the other tabs to move it to one of them (on the phone too). Open windows come back at the next start.
 
 ### 8. Under the hood
 

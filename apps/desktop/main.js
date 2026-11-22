@@ -1739,7 +1739,7 @@ function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inacti
 // and whether it stays on top. They close with the main window. A tab's
 // window can move to another tab (switch-project-window-tab). 'note' is the
 // project's note.md (public/note-panel.js), in a smaller window.
-const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'files', 'git', 'settings', 'note']);
+const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'todos', 'files', 'git', 'settings', 'note']);
 const PROJECT_WINDOW_SPEC = { title: 'Switchboard', width: 1000, height: 760, minWidth: 520, minHeight: 360, onTop: false };
 const NOTE_WINDOW_SPEC = { title: 'Note', width: 560, height: 640, minWidth: 340, minHeight: 260, onTop: false };
 // What a project window asks the main window to do (app.js runFromProjectWindow).

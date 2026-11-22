@@ -10,16 +10,19 @@ import { TextPrompt } from '../TextPrompt';
 import type { StartRequest } from './StartSheet';
 import { Section, SectionLink } from './Section';
 
-type File = 'plan' | 'todos';
+/** Which part of the plan data a section shows: the phases (plan-tracker.md) or the todos (todos.md). */
+export type PlanPart = 'plan' | 'todos';
+type File = PlanPart;
 type Selected = { file: File; item: PlanItem; phase?: Phase };
 
 /**
- * The plan's phases (plan-tracker.md) and the todos (todos.md): tick, add,
- * edit, or start a session on any of them.
+ * The plan's phases (plan-tracker.md, `part` 'plan') or the todos (todos.md,
+ * `part` 'todos'): tick, add, edit, or start a session on any of them.
  */
-export function PlanSection({ projectId, data, onChanged, onStart }: {
+export function PlanSection({ projectId, data, part, onChanged, onStart }: {
   projectId: string;
   data: ProjectPlan;
+  part: PlanPart;
   onChanged: () => void;
   onStart: (start: StartRequest) => void;
 }) {
@@ -46,51 +49,56 @@ export function PlanSection({ projectId, data, onChanged, onStart }: {
 
   return (
     <>
-      <Section title={plan.total ? `Plan · ${plan.done} of ${plan.total} done` : 'Plan'}>
-        {!data.hasTracker ? (
-          <Text style={styles.empty}>No plan tracker yet. Ask a session to write plan-tracker.md, or add the first item.</Text>
-        ) : null}
-        {plan.phases.map((phase) => phase.single ? (
-          <ItemRow
-            key={phase.line}
-            item={{ line: phase.line, text: phase.title, done: phase.done }}
-            onTick={(done) => tick('plan', { line: phase.line, text: phase.title }, done)}
-            onLongPress={() => setSelected({ file: 'plan', item: { line: phase.line, text: phase.title, done: phase.done }, phase })}
-          />
-        ) : (
-          <View key={phase.line}>
-            <Pressable
-              onPress={() => setOpen((o) => ({ ...o, [phase.line]: !isOpen(phase) }))}
-              onLongPress={() => setSelectedPhase(phase)}
-              style={({ pressed }) => [styles.phase, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: isOpen(phase) }}
-            >
-              <Check done={phase.done} onPress={() => tick('plan', { line: phase.line, text: phase.title }, !phase.done)} />
-              <Text style={[styles.phaseTitle, phase.done && styles.doneText]} numberOfLines={2}>{phase.title}</Text>
-              <Text style={styles.count}>{phase.ticked}/{phase.items.length}</Text>
-              <Ionicons name={isOpen(phase) ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textFaint} />
-            </Pressable>
-            {isOpen(phase) ? phase.items.map((item) => (
-              <ItemRow
-                key={item.line}
-                item={item}
-                indent
-                onTick={(done) => tick('plan', item, done)}
-                onLongPress={() => setSelected({ file: 'plan', item, phase })}
-              />
-            )) : null}
-          </View>
-        ))}
-        <SectionLink label="Add to the plan…" onPress={() => setAdding('plan')} />
-      </Section>
-
-      <Section title={todos.length ? `Todos · ${todos.filter((t) => !t.done).length} open` : 'Todos'}>
-        {todos.map((item) => (
-          <ItemRow key={item.line} item={item} onTick={(done) => tick('todos', item, done)} onLongPress={() => setSelected({ file: 'todos', item })} />
-        ))}
-        <SectionLink label="Add a todo…" onPress={() => setAdding('todos')} />
-      </Section>
+      {part === 'plan' ? (
+        <Section title={plan.total ? `Plan · ${plan.done} of ${plan.total} done` : 'Plan'}>
+          {!data.hasTracker ? (
+            <Text style={styles.empty}>No plan tracker yet. Ask a session to write plan-tracker.md, or add the first item.</Text>
+          ) : null}
+          {plan.phases.map((phase) => phase.single ? (
+            <ItemRow
+              key={phase.line}
+              item={{ line: phase.line, text: phase.title, done: phase.done }}
+              onTick={(done) => tick('plan', { line: phase.line, text: phase.title }, done)}
+              onLongPress={() => setSelected({ file: 'plan', item: { line: phase.line, text: phase.title, done: phase.done }, phase })}
+            />
+          ) : (
+            <View key={phase.line}>
+              <Pressable
+                onPress={() => setOpen((o) => ({ ...o, [phase.line]: !isOpen(phase) }))}
+                onLongPress={() => setSelectedPhase(phase)}
+                style={({ pressed }) => [styles.phase, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isOpen(phase) }}
+              >
+                <Check done={phase.done} onPress={() => tick('plan', { line: phase.line, text: phase.title }, !phase.done)} />
+                <Text style={[styles.phaseTitle, phase.done && styles.doneText]} numberOfLines={2}>{phase.title}</Text>
+                <Text style={styles.count}>{phase.ticked}/{phase.items.length}</Text>
+                <Ionicons name={isOpen(phase) ? 'chevron-down' : 'chevron-forward'} size={14} color={colors.textFaint} />
+              </Pressable>
+              {isOpen(phase) ? phase.items.map((item) => (
+                <ItemRow
+                  key={item.line}
+                  item={item}
+                  indent
+                  onTick={(done) => tick('plan', item, done)}
+                  onLongPress={() => setSelected({ file: 'plan', item, phase })}
+                />
+              )) : null}
+            </View>
+          ))}
+          <SectionLink label="Add to the plan…" onPress={() => setAdding('plan')} />
+        </Section>
+      ) : (
+        <Section title={todos.length ? `Todos · ${todos.filter((t) => !t.done).length} open` : 'Todos'}>
+          {!todos.length ? (
+            <Text style={styles.empty}>Nothing open. Any session can add to todos.md, or add one here.</Text>
+          ) : null}
+          {todos.map((item) => (
+            <ItemRow key={item.line} item={item} onTick={(done) => tick('todos', item, done)} onLongPress={() => setSelected({ file: 'todos', item })} />
+          ))}
+          <SectionLink label="Add a todo…" onPress={() => setAdding('todos')} />
+        </Section>
+      )}
 
       <Sheet
         visible={!!selected}

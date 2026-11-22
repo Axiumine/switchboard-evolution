@@ -38,7 +38,8 @@ export function ProjectWindow({ projectId, tab, onTab }: { projectId: string; ta
 
   const bodies: Record<WindowTab, ReactNode> = {
     overview: <OverviewTab project={project} now={now} run={run} onRename={setRename} onRefresh={refresh} />,
-    plan: <PlanTab project={project} plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
+    plan: <PlanTab project={project} part="plan" plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
+    todos: <PlanTab project={project} part="todos" plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
     files: <FilesTab project={project} />,
     git: <GitTab project={project} active={tab === 'git'} />,
     // Another tab chosen from here shows in this window; Session stays in the main one.

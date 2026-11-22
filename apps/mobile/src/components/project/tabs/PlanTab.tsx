@@ -4,27 +4,32 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text } from 'react-native';
 import { usePullRefresh } from '@/components/PullRefresh';
 import type { Project, ProjectPlan } from '@/projects/model';
 import { colors, spacing } from '@/theme';
-import { PlanSection } from '../PlanSection';
+import { PlanSection, type PlanPart } from '../PlanSection';
 import { StartSheet, type StartRequest } from '../StartSheet';
 import { useTabScroll } from '../useTabScroll';
 
-/** The plan's phases and the todos, with the sheet that starts a session on one of them. */
-export function PlanTab({ project, plan, loading, onChanged, onRefresh }: {
+/**
+ * The Plan tab (`part` 'plan', the plan's phases) or the Todos tab ('todos'),
+ * as on the desktop, with the sheet that starts a session on one of them.
+ * Both read the same plan data.
+ */
+export function PlanTab({ project, part, plan, loading, onChanged, onRefresh }: {
   project: Project;
+  part: PlanPart;
   plan: (ProjectPlan & { error?: string }) | undefined;
   loading: boolean;
   onChanged: () => void;
   onRefresh: () => unknown;
 }) {
   const pull = usePullRefresh(onRefresh);
-  const scroll = useTabScroll(project.id, 'plan');
+  const scroll = useTabScroll(project.id, part);
   const [start, setStart] = useState<StartRequest | null>(null);
 
   return (
     <>
       <ScrollView {...scroll} refreshControl={pull}>
         {plan && !plan.error ? (
-          <PlanSection projectId={project.id} data={plan} onChanged={onChanged} onStart={setStart} />
+          <PlanSection projectId={project.id} data={plan} part={part} onChanged={onChanged} onStart={setStart} />
         ) : plan?.error ? <Text style={styles.empty}>{plan.error}</Text>
           : loading ? <ActivityIndicator style={{ margin: spacing.lg }} color={colors.accent} /> : null}
       </ScrollView>

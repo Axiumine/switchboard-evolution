@@ -204,11 +204,11 @@ The project's **Settings** tab is a list of rows: the name, the start folder, fo
 
 ![Project View snooze](build/project-view-snooze.png)
 
-### Plan tab
+### Plan and Todos tabs
 
 ![Project View plan and todos](build/project-view-plan.png)
 
-The Plan tab shows the phases in `plan-tracker.md` with their items, the todos, and which sessions started or finished each one. Tick items in place, or start a session on a phase or a todo: it opens with that item as its first prompt, filed under the project. A plan written in Claude Code's plan mode can be adopted into a project from the Plans list.
+The Plan tab shows the phases in `plan-tracker.md` with their items, the Todos tab the todos in `todos.md`, and both show which sessions started or finished each one. Tick items in place, or start a session on a phase or a todo: it opens with that item as its first prompt, filed under the project. A plan written in Claude Code's plan mode can be adopted into a project from the Plans list.
 
 ### Worktrees
 

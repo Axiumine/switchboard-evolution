@@ -1,4 +1,4 @@
-export type ProjectTab = 'overview' | 'session' | 'plan' | 'files' | 'git' | 'settings';
+export type ProjectTab = 'overview' | 'session' | 'plan' | 'todos' | 'files' | 'git' | 'settings';
 
 /**
  * The project page's tabs, in the desktop's order. Session shows the session
@@ -8,10 +8,25 @@ export const PROJECT_TABS: readonly { key: ProjectTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'session', label: 'Session' },
   { key: 'plan', label: 'Plan' },
+  { key: 'todos', label: 'Todos' },
   { key: 'files', label: 'Files' },
   { key: 'git', label: 'Git' },
   { key: 'settings', label: 'Settings' },
 ];
+
+/**
+ * The notes after the Plan and Todos tabs, as on the desktop: the phases done
+ * of all (`3/7`) and the number of open todos. Nothing for a tab with nothing
+ * to count, or while the plan is not there.
+ */
+export function planTabMeta(data: { error?: string; plan: { done: number; total: number }; todos: { done: boolean }[] } | undefined): Partial<Record<ProjectTab, string>> | undefined {
+  if (!data || data.error) return undefined;
+  const meta: Partial<Record<ProjectTab, string>> = {};
+  if (data.plan.total) meta.plan = `${data.plan.done}/${data.plan.total}`;
+  const open = data.todos.filter((t) => !t.done).length;
+  if (open) meta.todos = String(open);
+  return Object.keys(meta).length ? meta : undefined;
+}
 
 /** How far a sideways swipe on the project page must go to change tab, in dp; or how far at least, when fast. */
 export const SWIPE_DISTANCE = 64;

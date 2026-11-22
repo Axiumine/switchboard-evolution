@@ -190,7 +190,9 @@ function saveProjectsUi() {
   if (projectsUi.otherOpen) sessionStorage.setItem('projects.otherOpen', '1'); else sessionStorage.removeItem('projects.otherOpen');
 }
 
-const PROJECT_WORKSPACE_TABS = new Set(['overview', 'session', 'plan', 'files', 'git', 'settings']);
+const PROJECT_WORKSPACE_TABS = new Set(['overview', 'session', 'plan', 'todos', 'files', 'git', 'settings']);
+// The two tabs drawn from the project's plan data (get-project-plan): the phases and the todos.
+const PLAN_TABS = new Set(['plan', 'todos']);
 
 function projectTab(projectOrId = projectsUi.selectedProjectId) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
@@ -1766,7 +1768,8 @@ function renderOverview() {
       <div class="ws-tabs">
         ${tabWithWindow('overview', `<button type="button" class="ws-tab ${tabName === 'overview' ? 'active' : ''}" data-tab="overview">Overview</button>`)}
         ${showSessionTab ? `<button type="button" class="ws-tab ws-tab--session ${tabName === 'session' ? 'active' : ''}" data-tab="session" title="${escapeHtml(tabSession ? sessionTitle(tabSession) : 'The open session')}">Session${stateDot(sessionTabState(project), 'ws-tab-dot')}</button>` : ''}
-        ${tabWithWindow('plan', `<button type="button" class="ws-tab ${tabName === 'plan' ? 'active' : ''}" data-tab="plan" title="Phases from plan-tracker.md and the todos, with the sessions that worked on them">Plan <span class="ws-tab-meta" id="ws-tab-plan-meta"></span></button>`)}
+        ${tabWithWindow('plan', `<button type="button" class="ws-tab ${tabName === 'plan' ? 'active' : ''}" data-tab="plan" title="Phases from plan-tracker.md, with the sessions that worked on them">Plan <span class="ws-tab-meta" id="ws-tab-plan-meta"></span></button>`)}
+        ${tabWithWindow('todos', `<button type="button" class="ws-tab ${tabName === 'todos' ? 'active' : ''}" data-tab="todos" title="The todos from todos.md, with the sessions that worked on them">Todos <span class="ws-tab-meta" id="ws-tab-todos-meta"></span></button>`)}
         ${tabWithWindow('files', `<button type="button" class="ws-tab ${tabName === 'files' ? 'active' : ''}" data-tab="files" title="The project folder: brief, plan, todos and anything else the project keeps">Files</button>`)}
         ${tabWithWindow('git', `<button type="button" class="ws-tab ${tabName === 'git' ? 'active' : ''}" data-tab="git" title="Working changes, the commit graph with its actions (branch, merge, rebase, stash and more) and the worktrees">Git</button>`)}
         ${tabWithWindow('settings', `<button type="button" class="ws-tab ${tabName === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>`)}
@@ -1781,7 +1784,7 @@ function renderOverview() {
   else if (tabName === 'session') body.replaceChildren();
   else if (tabName === 'settings') renderSettings(project, body);
   else if (tabName === 'files') renderFilesTab(project, body);
-  else if (tabName === 'plan') renderPlanTab(project, body);
+  else if (PLAN_TABS.has(tabName)) renderPlanTab(project, body, tabName);
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.compare) renderGitCompareWindow(project, body);
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.file) renderGitFileWindow(project, body);
   else if (tabName === 'git') renderProjectGitWorkspace(project, body);
@@ -1812,8 +1815,8 @@ function renderOverview() {
 
 // --- A tab of the project in a window of its own (project-window.js) ---
 // Every tab but Session, whose terminal stays in the main window.
-const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', files: 'Files', git: 'Git', settings: 'Settings' };
-const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'files', 'git', 'settings'];
+const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', todos: 'Todos', files: 'Files', git: 'Git', settings: 'Settings' };
+const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'todos', 'files', 'git', 'settings'];
 
 /**
  * A tab chosen in a tab's window: the window moves to it (main.js keeps it
@@ -1901,10 +1904,14 @@ function showProjectWindow() {
   showProjectOverview();
 }
 
+/** The notes after the Plan and Todos tabs: phases done of all, and the open todos. */
 function renderPlanMeta(project) {
-  const meta = projectViewer?.querySelector('#ws-tab-plan-meta');
+  const planMeta = projectViewer?.querySelector('#ws-tab-plan-meta');
   const plan = parsePlan(fileContent(project, 'plan-tracker.md'));
-  if (meta) meta.textContent = plan.phases.length ? `${plan.done}/${plan.phases.length}` : '';
+  if (planMeta) planMeta.textContent = plan.phases.length ? `${plan.done}/${plan.phases.length}` : '';
+  const todosMeta = projectViewer?.querySelector('#ws-tab-todos-meta');
+  const open = parseTodos(fileContent(project, 'todos.md')).filter(t => !t.done).length;
+  if (todosMeta) todosMeta.textContent = open ? String(open) : '';
 }
 
 function renderOverviewBody(project, body) {
@@ -2182,12 +2189,13 @@ function openProjectFileInEditor(project, name) {
   showProjectTab(project, 'files');
 }
 
-// --- Plan tab: phases from plan-tracker.md, the todos, and who worked on what ---
+// --- Plan and Todos tabs: phases from plan-tracker.md, the todos, and who worked on what ---
 //
 // Data comes from main (get-project-plan): the parsed tracker and todos plus
-// the plan_links rows that say which session started or ticked an item. A
-// phase or a todo can start a session with the item as its first prompt; the
-// session is filed in the project (and a chosen track) and linked to the item.
+// the plan_links rows that say which session started or ticked an item. The
+// two tabs share it: Plan shows the phases, Todos the todos. A phase or a
+// todo can start a session with the item as its first prompt; the session is
+// filed in the project (and a chosen track) and linked to the item.
 
 const planTabState = new Map(); // projectId → { data, error, expanded: Set<phase line>, showDone }
 
@@ -2282,43 +2290,52 @@ function linkedBadge(project, data, kind, text) {
   return badge;
 }
 
-/** What the Plan tab draws from, so a refetch that changed nothing draws nothing. */
-function planSignature(state) {
+/**
+ * What the Plan tab ('plan') or the Todos tab ('todos') draws from, so a
+ * refetch that changed nothing there draws nothing.
+ */
+function planSignature(state, tab) {
   const data = state.data;
   if (!data) return 'error:' + (state.error || '');
+  const file = tab === 'todos' ? 'todos' : 'plan';
   return JSON.stringify([
-    (data.plan?.phases || []).map(p => [p.line, p.title, p.done, (p.items || []).map(i => [i.line, i.text, i.done])]),
-    (data.todos || []).map(t => [t.line, t.text, t.done]),
-    (data.links || []).map(l => [l.file, l.itemText, l.sessionId, l.kind]),
+    file === 'plan'
+      ? (data.plan?.phases || []).map(p => [p.line, p.title, p.done, (p.items || []).map(i => [i.line, i.text, i.done])])
+      : (data.todos || []).map(t => [t.line, t.text, t.done]),
+    (data.links || []).filter(l => l.file === file).map(l => [l.itemText, l.sessionId, l.kind]),
   ]);
 }
 
-function renderPlanTab(project, body) {
+/** The Plan tab ('plan', the phases) or the Todos tab ('todos'). */
+function renderPlanTab(project, body, tab) {
   const state = planState(project);
   // Only the first look at a project has nothing to show. A refresh keeps what
   // is on screen — a running session writes constantly, and blanking the tab
   // each time made the todos flicker away and took any open field with them.
-  if (state.data || state.error) renderPlanBody(project, body, state);
-  else body.innerHTML = '<div class="ws-plan"><div class="ws-card-text muted">Loading the plan…</div></div>';
-  const before = planSignature(state);
+  if (state.data || state.error) renderPlanBody(project, body, state, tab);
+  else body.innerHTML = `<div class="ws-plan"><div class="ws-card-text muted">${tab === 'todos' ? 'Loading the todos…' : 'Loading the plan…'}</div></div>`;
+  const before = planSignature(state, tab);
   loadProjectPlan(project).then(() => {
-    if (selectedProject()?.id !== project.id || projectTab(project) !== 'plan') return;
+    if (selectedProject()?.id !== project.id || projectTab(project) !== tab) return;
     if (!projectViewer.contains(body)) return;
-    // Redraw only when the plan or the todos actually moved, so a field being
+    // Redraw only when what the tab shows actually moved, so a field being
     // typed into survives a refresh that changed nothing. A field that is open
     // holds the redraw off entirely; the next refresh picks it up.
     if (editingInPage()) return;
-    if (planSignature(state) !== before || (!state.data && !state.error)) renderPlanBody(project, body, state);
+    if (planSignature(state, tab) !== before || (!state.data && !state.error)) renderPlanBody(project, body, state, tab);
     renderPlanMeta(project);
   });
 }
 
-function renderPlanBody(project, body, state) {
+function renderPlanBody(project, body, state, tab) {
+  if (tab === 'todos') renderTodosBody(project, body, state);
+  else renderPhasesBody(project, body, state);
+}
+
+/** The Plan tab: the phases of plan-tracker.md, with plan.md and the tracker a click away. */
+function renderPhasesBody(project, body, state) {
   const data = state.data;
   const plan = data?.plan || { phases: [], done: 0, total: 0, next: null };
-  const todos = data?.todos || [];
-  const open = todos.filter(t => !t.done);
-  const doneTodos = todos.filter(t => t.done);
   const pct = plan.total ? Math.round((plan.done / plan.total) * 100) : 0;
 
   body.innerHTML = `
@@ -2333,16 +2350,6 @@ function renderPlanBody(project, body, state) {
         </div>
         ${plan.total ? `<div class="ws-progress"><div class="ws-progress-fill" style="width:${pct}%"></div></div>` : ''}
         <div class="ws-phases" id="ws-phases"></div>
-      </div>
-      <div class="ws-card ws-plan-card">
-        <div class="ws-card-h">
-          <span class="ws-card-title">Todos</span>
-          <span class="ws-card-meta">${open.length ? `${open.length} open` : ''}${doneTodos.length ? ` · ${doneTodos.length} done` : ''}</span>
-          <span class="ws-flex"></span>
-          ${doneTodos.length ? `<button type="button" class="ws-ghost ws-ghost--sm ws-ghost--muted" id="plan-todo-done">${state.showDone ? 'Hide done' : `Show ${doneTodos.length} done`}</button>` : ''}
-          <button type="button" class="ws-ghost ws-ghost--sm" id="plan-todo-add">${PICONS.plus(11)}<span>Add</span></button>
-        </div>
-        <div class="ws-todos" id="ws-plan-todos"></div>
       </div>
     </div>`;
 
@@ -2359,16 +2366,45 @@ function renderPlanBody(project, body, state) {
   } else {
     plan.phases.forEach((phase, index) => phasesEl.appendChild(buildPhaseRow(project, state, phase, index)));
   }
+}
+
+/** The Todos tab: the lines of todos.md, open first, the done ones on request. */
+function renderTodosBody(project, body, state) {
+  const data = state.data;
+  const todos = data?.todos || [];
+  const open = todos.filter(t => !t.done);
+  const doneTodos = todos.filter(t => t.done);
+
+  body.innerHTML = `
+    <div class="ws-plan">
+      <div class="ws-card ws-plan-card">
+        <div class="ws-card-h">
+          <span class="ws-card-title">Todos</span>
+          <span class="ws-card-meta">${open.length ? `${open.length} open` : ''}${doneTodos.length ? ` · ${doneTodos.length} done` : ''}</span>
+          <span class="ws-flex"></span>
+          ${doneTodos.length ? `<button type="button" class="ws-ghost ws-ghost--sm ws-ghost--muted" id="plan-todo-done">${state.showDone ? 'Hide done' : `Show ${doneTodos.length} done`}</button>` : ''}
+          <button type="button" class="ws-ghost ws-ghost--sm" id="plan-open-todos" title="The todos as written">todos.md</button>
+          <button type="button" class="ws-ghost ws-ghost--sm" id="plan-todo-add">${PICONS.plus(11)}<span>Add</span></button>
+        </div>
+        <div class="ws-todos" id="ws-plan-todos"></div>
+      </div>
+    </div>`;
+
+  body.querySelector('#plan-open-todos').onclick = () => openProjectFileInEditor(project, 'todos.md');
 
   const todosEl = body.querySelector('#ws-plan-todos');
-  const shown = state.showDone ? todos : open;
-  if (!shown.length) {
-    todosEl.innerHTML = `<div class="ws-card-text muted">${todos.length ? 'Everything is done.' : 'Nothing open. Any session can add to todos.md, or add one here.'}</div>`;
+  if (state.error) {
+    todosEl.innerHTML = `<div class="ws-card-text muted">${escapeHtml(state.error)}</div>`;
+  } else {
+    const shown = state.showDone ? todos : open;
+    if (!shown.length) {
+      todosEl.innerHTML = `<div class="ws-card-text muted">${todos.length ? 'Everything is done.' : 'Nothing open. Any session can add to todos.md, or add one here.'}</div>`;
+    }
+    for (const item of shown) todosEl.appendChild(buildTodoRow(project, state, item));
   }
-  for (const item of shown) todosEl.appendChild(buildTodoRow(project, state, item));
 
   const toggleDone = body.querySelector('#plan-todo-done');
-  if (toggleDone) toggleDone.onclick = () => { state.showDone = !state.showDone; renderPlanBody(project, body, state); };
+  if (toggleDone) toggleDone.onclick = () => { state.showDone = !state.showDone; renderTodosBody(project, body, state); };
   body.querySelector('#plan-todo-add').onclick = () => {
     if (todosEl.querySelector('.ws-todo-input')) return;
     const input = document.createElement('input');
@@ -2381,7 +2417,7 @@ function renderPlanBody(project, body, state) {
       const text = input.value.trim();
       if (!text) return;
       input.disabled = true;
-      if (await appendTodo(project, text)) { await loadProjectPlan(project); renderPlanBody(project, body, state); }
+      if (await appendTodo(project, text)) { await loadProjectPlan(project); renderTodosBody(project, body, state); }
       else input.disabled = false;
     };
     todosEl.prepend(input);
@@ -2536,8 +2572,9 @@ async function reloadPlanAndRender(project, state) {
   await loadProjectPlan(project);
   await loadProjectFiles(project, { force: true });
   const body = projectViewer?.querySelector('#ws-body');
-  if (!body || selectedProject()?.id !== project.id || projectTab(project) !== 'plan') return;
-  renderPlanBody(project, body, state);
+  const tab = projectTab(project);
+  if (!body || selectedProject()?.id !== project.id || !PLAN_TABS.has(tab)) return;
+  renderPlanBody(project, body, state, tab);
   renderPlanMeta(project);
 }
 
@@ -2545,8 +2582,8 @@ async function reloadPlanAndRender(project, state) {
 window.api.onProjectPlanChanged?.((projectId) => {
   const project = findTreeProject(projectId);
   if (!project) return;
-  // The cached plan is kept: renderPlanTab refetches and only redraws when the
-  // plan or the todos actually moved, so the tab never blanks.
+  // The cached plan is kept: renderPlanTab refetches and only redraws when
+  // what its tab shows actually moved, so the tab never blanks.
   loadProjectFiles(project, { force: true }).then(() => {
     // The row and the drawer count plan phases and todos for any project, selected or not.
     refreshProjectCounts(projectId);
@@ -2554,7 +2591,8 @@ window.api.onProjectPlanChanged?.((projectId) => {
     if (projectsUi.working) { renderPlanMeta(project); return; }
     if (projectViewer && projectViewer.style.display !== 'none') {
       if (editingInPage()) return;
-      if (projectTab(project) === 'plan') renderPlanTab(project, projectViewer.querySelector('#ws-body'));
+      const tab = projectTab(project);
+      if (PLAN_TABS.has(tab)) renderPlanTab(project, projectViewer.querySelector('#ws-body'), tab);
       else renderOverview();
     }
   });

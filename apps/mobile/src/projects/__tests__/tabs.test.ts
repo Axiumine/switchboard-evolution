@@ -1,11 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { GIT_VIEWS, PROJECT_TABS, parseGitView, parseSessionView, parseTab, swipeTab } from '../tabs';
+import { GIT_VIEWS, PROJECT_TABS, parseGitView, parseSessionView, parseTab, planTabMeta, swipeTab } from '../tabs';
 
 describe('parseTab', () => {
   it('returns a known key as it is', () => {
     expect(parseTab('git')).toBe('git');
     expect(parseTab('plan')).toBe('plan');
+    expect(parseTab('todos')).toBe('todos');
     expect(parseTab('session')).toBe('session');
   });
 
@@ -34,12 +35,31 @@ describe('parseGitView', () => {
 });
 
 describe('PROJECT_TABS', () => {
-  it('lists the six tabs in the desktop order', () => {
-    expect(PROJECT_TABS.map((t) => t.label)).toEqual(['Overview', 'Session', 'Plan', 'Files', 'Git', 'Settings']);
+  it('lists the seven tabs in the desktop order', () => {
+    expect(PROJECT_TABS.map((t) => t.label)).toEqual(['Overview', 'Session', 'Plan', 'Todos', 'Files', 'Git', 'Settings']);
   });
 
   it('puts Changes, History and Worktrees under Git', () => {
     expect(GIT_VIEWS.map((v) => v.label)).toEqual(['Changes', 'History', 'Worktrees']);
+  });
+});
+
+describe('planTabMeta', () => {
+  const data = (done: number, total: number, todos: boolean[]) => ({ plan: { done, total }, todos: todos.map((d) => ({ done: d })) });
+
+  it('notes the phases done on Plan and the open todos on Todos', () => {
+    expect(planTabMeta(data(3, 7, [false, true, false]))).toEqual({ plan: '3/7', todos: '2' });
+  });
+
+  it('leaves out a tab with nothing to count', () => {
+    expect(planTabMeta(data(0, 0, [false]))).toEqual({ todos: '1' });
+    expect(planTabMeta(data(1, 2, [true]))).toEqual({ plan: '1/2' });
+    expect(planTabMeta(data(0, 0, []))).toBeUndefined();
+  });
+
+  it('is nothing while the plan is loading or could not be read', () => {
+    expect(planTabMeta(undefined)).toBeUndefined();
+    expect(planTabMeta({ ...data(1, 2, [false]), error: 'gone' })).toBeUndefined();
   });
 });
 
@@ -58,7 +78,8 @@ describe('swipeTab', () => {
   const swipe = (dx: number, { dy = 0, vx = 0 } = {}) => ({ dx, dy, vx });
 
   it('goes to the next tab for a swipe to the left and to the one before for a swipe to the right', () => {
-    expect(swipeTab(tabs, 'plan', swipe(-80))).toBe('files');
+    expect(swipeTab(tabs, 'plan', swipe(-80))).toBe('todos');
+    expect(swipeTab(tabs, 'todos', swipe(-80))).toBe('files');
     expect(swipeTab(tabs, 'plan', swipe(80))).toBe('overview');
     // Session is skipped when it is not in the bar, and taken when it is.
     expect(swipeTab(tabs, 'overview', swipe(-80))).toBe('plan');
@@ -72,13 +93,13 @@ describe('swipeTab', () => {
 
   it('takes a short swipe only when it is fast', () => {
     expect(swipeTab(tabs, 'plan', swipe(-40))).toBeNull();
-    expect(swipeTab(tabs, 'plan', swipe(-40, { vx: -900 }))).toBe('files');
+    expect(swipeTab(tabs, 'plan', swipe(-40, { vx: -900 }))).toBe('todos');
     expect(swipeTab(tabs, 'plan', swipe(-20, { vx: -2000 }))).toBeNull();
   });
 
   it('leaves a move that went more up or down than sideways', () => {
     expect(swipeTab(tabs, 'plan', swipe(-80, { dy: 70 }))).toBeNull();
-    expect(swipeTab(tabs, 'plan', swipe(-80, { dy: 40 }))).toBe('files');
+    expect(swipeTab(tabs, 'plan', swipe(-80, { dy: 40 }))).toBe('todos');
   });
 
   it('does nothing for a tab that is not in the bar', () => {

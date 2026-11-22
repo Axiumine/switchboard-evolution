@@ -77,8 +77,8 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 - [ ] A new project is created in the projects folder from a template (one folder per template with `template.json`) — `projects.js` (`createProject`), `templates/`, `main.js` (`create-project`, `list-templates`)
 - [ ] The project page header shows the mark, the name, a status chip (Snoozed, done) and state dot, one chip per attached folder (branch, mode, dirty marker) and a "+ folder" chip — `projects-view.js` (`renderOverview`, `folderChipHtml`, `#ws-add-folder`)
 - [ ] The header has Tasks (the project's runnable tasks), Schedules, "New session" (CLI menu) and a ⋯ project menu — `projects-view.js` (`#ws-tasks`, `#ws-schedules`, `#ws-new`, `#ws-more`)
-- [ ] The tab strip is Overview, Plan with a done/total count, Files, Git, Settings (the Session tab, shown only while a session is open in the project, is in section 5) — `projects-view.js` (`PROJECT_WORKSPACE_TABS`, `.ws-tab`, `#ws-tab-plan-meta`)
-- [ ] Overview, Plan, Files, Git and Settings each have a button beside the tab that opens that tab in a window of its own (master) — `projects-view.js` (`tabWithWindow`, `.ws-tab-window`)
+- [ ] The tab strip is Overview, Plan with a done/total count, Todos with the open count, Files, Git, Settings (the Session tab, shown only while a session is open in the project, is in section 5) — `projects-view.js` (`PROJECT_WORKSPACE_TABS`, `.ws-tab`, `#ws-tab-plan-meta`, `#ws-tab-todos-meta`)
+- [ ] Overview, Plan, Todos, Files, Git and Settings each have a button beside the tab that opens that tab in a window of its own (master) — `projects-view.js` (`tabWithWindow`, `.ws-tab-window`)
 - [ ] Choosing a folder to attach asks for in place or worktree (and a branch name when the project uses its own branch per repo), then attaches — `projects-view.js` (`attachFolderAsk`, `attachFolderFlow`, `askRepoMode`)
 - [ ] Detaching a folder explains what stays on disk, offers to remove a worktree checkout and to force it, then detaches (master) — `projects-view.js` (`confirmDetachFolder`, `detachFolderFlow`)
 
@@ -105,14 +105,14 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 - [ ] Leaving the tab and coming back restores the same session; the Session tab shows a state dot (master) — `projects-view.js` (`rememberProjectSession`, `sessionTabState`)
 - [ ] Session ids re-key correctly when a pending session gets its real id or a session is forked (master) — `projects-view.js` (`rekeyProjectSessionState`), `app.js` (`onSessionDetected`, `onSessionForked`)
 
-## 6. Project page: Plan tab
+## 6. Project page: Plan and Todos tabs
 
-- [ ] The Plan tab shows phases from plan-tracker.md with their items, tick state, `n/m` counts and a "next" marker, and the todos from todos.md — `projects-view.js` (`renderPlanTab`, `renderPlanBody`, `buildPhaseRow`, `buildTodoRow`)
+- [ ] The Plan tab shows phases from plan-tracker.md with their items, tick state, `n/m` counts and a "next" marker; the Todos tab shows the todos from todos.md — `projects-view.js` (`renderPlanTab`, `renderPhasesBody`, `renderTodosBody`, `buildPhaseRow`, `buildTodoRow`)
 - [ ] Ticking a phase, an item or a todo writes the file; double-click edits the text in place (Enter saves, Escape cancels) — `projects-view.js` (`toggleFileLine`, `editItemInline`), `main.js` (`set-plan-item`, `edit-plan-item`)
 - [ ] "Add a todo" and adding to the plan append a line — `projects-view.js` (`appendTodo`), `main.js` (`append-plan-item`)
 - [ ] "Start" on a phase, an item or a todo opens a menu (Claude, Codex, OpenCode, or in a track) that starts a session with the item as its first prompt and links the session to it — `projects-view.js` (`showStartItemMenu`, `phasePrompt`, `todoPrompt`, `startItemRows`)
 - [ ] An item shows "n sessions" linked to it (started or ticked by); a click opens the session or lists them — `projects-view.js` (`linkedBadge`), `main.js` (`get-project-plan`, table `plan_links`)
-- [ ] Buttons open plan.md ("the plan as written") and plan-tracker.md ("the phases Switchboard reads") in the editor; a toggle shows or hides the done todos — `projects-view.js` (`#plan-open-plan`, `#plan-open-tracker`, `#plan-todo-done`, `planState.showDone`)
+- [ ] Buttons open plan.md ("the plan as written") and plan-tracker.md ("the phases Switchboard reads") from the Plan tab, and todos.md from the Todos tab, in the editor; a toggle shows or hides the done todos — `projects-view.js` (`#plan-open-plan`, `#plan-open-tracker`, `#plan-open-todos`, `#plan-todo-done`, `planState.showDone`)
 - [ ] A plan from Claude's plans folder can be adopted into a project as plan.md (replace asked when one exists) — `plans-memory-view.js` (`adoptPlanInto`), `main.js` (`adopt-plan`)
 
 ## 7. Project page: Files tab
@@ -350,7 +350,7 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 
 - [ ] The Stats and Task Manager tab tooltips open that page in its own window; the window position and its on-top choice are remembered (master) — `sidebar-tips.js`, `main.js` (`openToolWindow`, `open-tool-window`, `saveToolWindowSettings`)
 - [ ] A pin button in the window header keeps it above other windows or lets it go behind (master) — `tool-window.js` (`setupWindowPin`), `main.js` (`get-window-on-top`, `set-window-on-top`)
-- [ ] A project tab (Overview, Plan, Files, Git, Settings) opens in a window of its own with a header that names the project and tab, and its own pin (master) — `projects-view.js` (`showProjectWindow`, `projectWindowHeaderHtml`), `project-window.js`, `main.js` (`open-project-window`)
+- [ ] A project tab (Overview, Plan, Todos, Files, Git, Settings) opens in a window of its own with a header that names the project and tab, and its own pin (master) — `projects-view.js` (`showProjectWindow`, `projectWindowHeaderHtml`), `project-window.js`, `main.js` (`open-project-window`)
 - [ ] A session opened or started from a project window opens in the main window, which comes forward (master) — `project-window.js` (`PROJECT_WINDOW_RUN`), `main.js` (`project-window-run`), `app.js` (`onProjectWindowRun`)
 - [ ] The Task Manager's Open from its own window shows the session or task output in the main window (master) — `task-manager-window.js`, `main.js` (`task-manager-open-owner`), `process-viewer.js` (`onTaskManagerOpenOwner`)
 - [ ] The project window says "This project is not in Switchboard any more." when its project is gone (master) — `projects-view.js` (`showProjectWindow`)
@@ -419,7 +419,7 @@ Remote access is a whitelist: **130 methods** (80 in `remote-api.js`, 20 in `rem
 | `attach-terminal`, `detach-terminal`, `fit-terminal`, `unfit-terminal` (local), `terminal-input` | Terminal output and input on a phone (sections 14, 21) |
 | `get-project-tree`, `get-projects-root`, `list-templates`, `create-project`, `update-project`, `delete-project`, `create-track`, `update-track`, `delete-track`, `attach-project-folder`, `detach-project-folder` | Projects list, New project, header, Settings tab, Overview tracks (sections 2, 3, 4, 11) |
 | `list-folders`, `create-folder` (local) | A folder picker for new projects and attaching, with a New Folder button (sections 3, 21) |
-| `get-project-plan`, `set-plan-item` (local), `edit-plan-item` (local), `append-plan-item`, `create-project-file`, `save-project-brief` | Plan tab and the Plan and Todos cards (sections 4, 6) |
+| `get-project-plan`, `set-plan-item` (local), `edit-plan-item` (local), `append-plan-item`, `create-project-file`, `save-project-brief` | Plan and Todos tabs and the Plan and Todos cards (sections 4, 6) |
 | `list-recent-project-files`, `list-project-directory`, `read-project-file`, `locate-file`, `read-project-file-chunk`, `upload-project-file-chunk`, `save-project-file`, `manage-project-entry`, `trash-project-entries`, `create-project-entry`, `duplicate-project-entry`, `paste-project-entry`, `get-file-timeline`, `get-file-timeline-diff`, `add-project-file-bytes`, `save-session-attachment`, `search-project-files`, `replace-in-project-files` (all local except `list-recent-project-files`) | Files tab explorer, viewer, download, upload, Timeline, Search and replace, Added Files, attachments to a chat (sections 4, 7) |
 | `list-schedules`, `create-schedule`, `update-schedule`, `delete-schedule`, `resolve-schedule-launch`, `run-schedule` (local), `get-schedule-context` | Schedules (section 13) |
 | `get-project-git-status`, `get-project-git-info`, `get-project-git-diff`, `stage-project-git-files`, `stage-project-git-lines` | Git Changes and staging (section 8) |
@@ -472,10 +472,10 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 
 ## `project/[id]/index.tsx` (Project)
 
-- [ ] Tabs Overview, Session (when a session is open), Plan with `done/total`, Files, Git, Settings; each is built on first visit and kept — `project/[id]/index.tsx`, `components/project/ProjectTabBar.tsx`
+- [ ] Tabs Overview, Session (when a session is open), Plan with `done/total`, Todos with the open count, Files, Git, Settings; each is built on first visit and kept — `project/[id]/index.tsx`, `components/project/ProjectTabBar.tsx`
 - [ ] Project ⋯ sheet: New session…, Rename…, New track…, Attach a folder…, Snooze… (presets) / Wake now, Mark as done / Reopen (asks about running work), Settings, Remove project… — `project/[id]/index.tsx` (`projectOptions`), `projects/flows.ts`
 - [ ] Overview: a section per track (⋯ sheet: New session here…, Rename…, Mark as done / Reopen, Delete track…), Other sessions, Schedules (New, and per schedule Run now, Edit…, Pause / Resume, Delete…), Files (project folder and each attached folder), Attach a folder… — `components/project/tabs/OverviewTab.tsx`
-- [ ] Plan: phases and items with tick, long-press for "Start a session on this" and Edit…, "Add to the plan…", todos with "Add a todo…" — `components/project/tabs/PlanTab.tsx`, `components/project/PlanSection.tsx`
+- [ ] Plan: phases and items with tick, long-press for "Start a session on this" and Edit…, "Add to the plan…"; Todos: the todos, the same way, with "Add a todo…" — `components/project/tabs/PlanTab.tsx` (`part`), `components/project/PlanSection.tsx`
 - [ ] Files: tree per root with New file, New folder, Paste, Collapse folders, and per-entry Open, Open in Terminal, Add file to Chat / New Chat, Open Timeline, Cut, Copy, Paste, Copy Path, Copy Relative Path, Rename…, Duplicate, Download, Delete; per folder Upload Files… and Upload Photos… (several at once, Replace or Keep Both for names already there); Enable Selection in the folder's ⋯ for Download N Selected… (into a folder picked on the phone, ticked folders with what is in them) and Delete N Selected… — `components/project/tabs/FilesTab.tsx`, `files/download.ts`, `files/upload.ts`
 - [ ] Git: Changes (branch, changes, latest commits), History (a Git Graph link per folder), Worktrees view — `components/project/tabs/GitTab.tsx`, `components/project/tabs/WorktreesTab.tsx`
 - [ ] Settings: Name, Project folder, Sessions start in, Folders (Show in Files, Copy path, Detach…), Worktree branch and "Same in every repo", Tracks (rename, folder, CLI, Done/Reopen, Delete…), Wake now, Mark as done, Remove project… — `components/project/tabs/SettingsTab.tsx`
