@@ -417,6 +417,7 @@ const gitGraphAvatars = require('./git-graph-avatars');
 require('./remote-git-graph');
 // What of the Worktrees tab a paired phone may use.
 require('./remote-worktrees');
+require('./remote-knowledge');
 // What of the Pull Requests tab a paired phone may use.
 require('./remote-pull-requests');
 // What of the Task Manager a paired phone may use.
