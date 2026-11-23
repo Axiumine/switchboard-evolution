@@ -72,6 +72,9 @@ export default function RootLayout() {
             <Stack.Screen name="worktrees/folder" options={{ title: 'Worktree folder' }} />
             <Stack.Screen name="worktrees/changes" options={{ title: 'Uncommitted and unpushed' }} />
             <Stack.Screen name="pulls/merge" options={{ title: 'Merge pull request' }} />
+            {/* A pull request's page on GitHub: over the tab (Open here), or on a screen of its own. */}
+            <Stack.Screen name="pulls/web" options={{ title: 'Pull request', presentation: 'modal' }} />
+            <Stack.Screen name="pulls/web-full" options={{ title: 'Pull request' }} />
           </Stack>
           <SidebarDivider />
         </WithDownloadBar>

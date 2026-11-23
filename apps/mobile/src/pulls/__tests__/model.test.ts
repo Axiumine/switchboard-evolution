@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   ACTION_COPY, badges, canEdit, DEFAULT_FILE_VIEW, DEFAULT_FILTER, emptyText, errorTitle, FILE_TOOLS, fileRows, filterLabel, isDefaultFilter, menuActions, mergeBlock,
-  mergeLists, mergeWarnings, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, webUrl, whenText,
+  mergeLists, mergeWarnings, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, webUrl, whenText, inAppWebUrl,
   type PullRequest, type PullRequestFile, type PullRequestRepo,
 } from '../model';
 
@@ -93,6 +93,14 @@ describe('rows', () => {
     expect(webUrl(pr(4, { url: 'https://github.com/acme/widgets/pull/4' }))).toBe('https://github.com/acme/widgets/pull/4');
     expect(webUrl(pr(4))).toBeNull();
     expect(webUrl(pr(4, { url: 'javascript:alert(1)' }))).toBeNull();
+  });
+
+  it('shows its page inside the app only over https, as the desktop', () => {
+    expect(inAppWebUrl('https://github.com/acme/widgets/pull/4')).toBe('https://github.com/acme/widgets/pull/4');
+    expect(inAppWebUrl('https://git.example.com/acme/widgets/pull/4/files#diff-1')).toBe('https://git.example.com/acme/widgets/pull/4/files#diff-1');
+    for (const url of ['http://github.com/acme/widgets/pull/4', 'javascript:alert(1)', 'file:///etc/hosts', 'https://', 'https:// github.com', '', undefined, 42, `https://github.com/${'a'.repeat(2048)}`]) {
+      expect(inAppWebUrl(url)).toBeNull();
+    }
   });
 
   it('says when it was opened, merged or closed', () => {

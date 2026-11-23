@@ -288,6 +288,16 @@ export function webUrl(pr: Pick<PullRequest, 'url'>): string | null {
   return typeof pr.url === 'string' && /^https?:\/\//i.test(pr.url) ? pr.url : null;
 }
 
+/**
+ * An address the page may show inside the app (PullRequestWebPage, a window
+ * of its own): https only and not too long, as on the desktop; null otherwise.
+ * Other addresses still go to the browser.
+ */
+export function inAppWebUrl(url: unknown): string | null {
+  if (typeof url !== 'string' || url.length > 2048 || !/^https:\/\/[^/\s?#]+/i.test(url) || /\s/.test(url)) return null;
+  return url;
+}
+
 // --- An open pull request's files ---
 
 /** How the files are laid out; a tree at first, as on the desktop. Every diff starts closed. */

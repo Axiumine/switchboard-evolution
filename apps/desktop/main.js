@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerSaveBlocker, protocol, safeStorage, screen, shell, ShareMenu } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu } = require('electron');
 // Capture every IPC handler as it is registered, so the remote-access server
 // can call the same functions. Must run before the first registration below.
 require('./ipc-registry').install(ipcMain);
@@ -10,6 +10,7 @@ const { createRemoteProtocol } = require('./remote-protocol');
 const { createRemoteAuth } = require('./remote-auth');
 const { createRemoteApi } = require('./remote-api');
 const { createRemoteServer, reachableAddresses, pairingLink } = require('./remote-server');
+const webPage = require('./web-page');
 const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
@@ -191,6 +192,8 @@ function createWindow() {
       nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       contextIsolation: true,
+      // A pull request's page on GitHub, in a panel (web-page.js checks every one).
+      webviewTag: true,
     },
   });
   // index.html's <title> would rename the window back to "Switchboard".
@@ -297,7 +300,7 @@ function createWindow() {
     taskManager.shutdown();
     // They close with the main window, and open again with the next one.
     freezeOpenWindows();
-    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows, ...viewerFileWindows]) if (!win.isDestroyed()) win.close();
+    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows, ...viewerFileWindows, ...webWindows.keys()]) if (!win.isDestroyed()) win.close();
     mainWindow = null;
   });
 }
@@ -1780,6 +1783,8 @@ function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inacti
       nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       contextIsolation: true,
+      // Only the pages that show a pull request's page on GitHub (web-page.js).
+      webviewTag: !!spec.webview,
     },
   });
   if (saved.onTop ?? spec.onTop) win.setAlwaysOnTop(true, 'floating');
@@ -1815,7 +1820,8 @@ function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inacti
 // window can move to another tab (switch-project-window-tab). 'note' is the
 // project's note.md (public/note-panel.js), in a smaller window.
 const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'todos', 'files', 'git', 'settings', 'note']);
-const PROJECT_WINDOW_SPEC = { title: 'Switchboard', width: 1000, height: 760, minWidth: 520, minHeight: 360, onTop: false };
+// webview: the Git tab's Pull Requests can open a pull request's page in a panel.
+const PROJECT_WINDOW_SPEC = { title: 'Switchboard', width: 1000, height: 760, minWidth: 520, minHeight: 360, onTop: false, webview: true };
 const NOTE_WINDOW_SPEC = { title: 'Note', width: 560, height: 640, minWidth: 340, minHeight: 260, onTop: false };
 // What a project window asks the main window to do (app.js runFromProjectWindow).
 const PROJECT_WINDOW_RUN = new Set(['openSession', 'showSession', 'launchNewSession', 'openRawTerminalSession']);
@@ -1958,6 +1964,34 @@ function openFileWindow(filePath) {
 
 ipcMain.handle('open-file-window', (_event, filePath) => openFileWindow(filePath));
 
+// --- A pull request's page on GitHub in a window of its own ---
+// From the icon before Merge in the Pull Requests view, or from the panel that
+// shows the page inside the app (public/web-page-view.js): web-window.html, a
+// <webview> with its toolbar, which can stay above the others with its pin.
+// The same address already in a window brings that one forward; any other
+// opens a new one, a little lower and to the right. Not opened again at the
+// next start; they close with the main window.
+const webWindows = new Map(); // BrowserWindow → the address it opened on
+const WEB_WINDOW_SPEC = { title: 'Pull request', width: 1200, height: 860, minWidth: 520, minHeight: 360, onTop: false, webview: true };
+
+function openWebWindow(url, title) {
+  if (!webPage.isWebPageUrl(url)) return false;
+  for (const [win, opened] of webWindows) {
+    if (!win.isDestroyed() && opened === url) {
+      bringForward(win);
+      return true;
+    }
+  }
+  const name = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || WEB_WINDOW_SPEC.title;
+  const win = createPageWindow('web-page', { ...WEB_WINDOW_SPEC, title: name }, { offset: 24 * webWindows.size });
+  webWindows.set(win, url);
+  win.loadFile(path.join(__dirname, 'public', 'web-window.html'), { query: { url, title: name } });
+  win.on('closed', () => webWindows.delete(win));
+  return true;
+}
+
+ipcMain.handle('open-web-window', (_event, url, title) => openWebWindow(url, title));
+
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When
 // the app quits, or the main window closes and takes the others with it,
@@ -2014,6 +2048,7 @@ function toolWindowKindOf(webContents) {
   for (const win of compareWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-compare';
   for (const win of fileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-file';
   for (const win of viewerFileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'file';
+  for (const win of webWindows.keys()) if (!win.isDestroyed() && win.webContents === webContents) return 'web-page';
   return null;
 }
 
@@ -3673,6 +3708,7 @@ function startScheduleTicker() {
 
   app.whenReady().then(() => {
     protocol.handle(PREVIEW_SCHEME, handlePreviewAssetRequest);
+    webPage.setupWebPages({ app, session: electronSession, shell, clipboard, Menu, log });
     buildMenu();
     initializeHiddenProjectTimestamps();
     sessionsReady = startTerminalEngine();

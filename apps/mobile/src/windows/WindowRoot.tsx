@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import ProcessesScreen from '@/app/(tabs)/processes';
 import StatsScreen from '@/app/(tabs)/stats';
 import { NoteEditor } from '@/components/notes/NoteEditor';
+import { PullRequestWebPage } from '@/components/pulls/PullRequestWebPage';
 import { useProject } from '@/projects/queries';
 import { queryClient } from '@/remote/query';
 import { colors } from '@/theme';
@@ -56,6 +57,7 @@ function Window({ spec }: { spec: WindowSpec }) {
         {spec.kind === 'note' ? <NoteEditor projectId={spec.projectId} /> : null}
         {spec.kind === 'stats' ? <StatsScreen /> : null}
         {spec.kind === 'processes' ? <ProcessesScreen /> : null}
+        {spec.kind === 'web' ? <PullRequestWebPage url={spec.url} /> : null}
       </View>
     </WindowNavigation>
   );

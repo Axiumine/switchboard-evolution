@@ -1,10 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { LINE_STYLES, mono } from '@/components/git/diff-style';
 import { usePullRefresh } from '@/components/PullRefresh';
+import { openInAppBrowser } from '@/components/pulls/PullRequestWebPage';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { useGitInfo } from '@/git/info-query';
 import { diffLines } from '@/git/model';
@@ -13,15 +15,17 @@ import type { Project } from '@/projects/model';
 import { useProjectUi } from '@/projects/ui-store';
 import {
   ACTION_COPY, badges, canEdit, DEFAULT_FILTER, emptyText, errorTitle, FILE_TOOLS, fileLetter, fileRows, filterLabel, isDefaultFilter, menuActions, mergeBlock,
-  mergeLists, noPatchText, pagedWords, pageStates, PR_FILTERS, prStatus, summaryText, toggleFilter, webUrl, whenText,
+  inAppWebUrl, mergeLists, noPatchText, pagedWords, pageStates, PR_FILTERS, prStatus, summaryText, toggleFilter, webUrl, whenText,
   type Badge, type ConfirmAction, type PrFilterKey, type PrStatus, type PullRequest, type PullRequestFile, type PullRequestRepo,
 } from '@/pulls/model';
 import {
   runPullRequestAction, setPullFileView, setPullNotice, useOpenPullRequests, usePagedPullRequests, usePullFileView, usePullNotice, usePullRequestFiles, type Notice,
 } from '@/pulls/queries';
+import { openPullRequestWindow, windowActionLabel } from '@/pulls/web';
 import { relativeTime } from '@/sessions/model';
 import { useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
+import { useCanOpenWindows } from '@/windows/open';
 import { RepoChips } from '../RepoChips';
 import { useTabScroll } from '../useTabScroll';
 
@@ -291,6 +295,51 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
   );
 }
 
+/**
+ * The icons before Merge, on every pull request with a web address, closed and
+ * merged ones too, as on the desktop: Copy the address, Open here (a sheet with
+ * the page), Open in a window of its own (where windows sit side by side, else
+ * full screen), and the browser inside the app. The page shows in the app only
+ * over https; without it, Copy and the browser only.
+ */
+function PullRequestLinkTools({ pr }: { pr: PullRequest }) {
+  const canOpenWindows = useCanOpenWindows();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1200);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const url = webUrl(pr);
+  if (!url) return null;
+  const inside = inAppWebUrl(url);
+  const title = `#${pr.number} ${pr.title}`;
+  const tool = (icon: keyof typeof Ionicons.glyphMap, label: string, onPress: () => void, tint?: string) => (
+    <Pressable
+      key={label}
+      onPress={onPress}
+      hitSlop={2}
+      style={({ pressed }) => [styles.linkTool, pressed && styles.pressedButton]}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, pull request ${pr.number}`}
+      accessibilityHint={label === 'Copy the address' ? url : undefined}
+    >
+      <Ionicons name={icon} size={17} color={tint ?? colors.textDim} />
+    </Pressable>
+  );
+  return (
+    <View style={styles.linkTools}>
+      {tool(copied ? 'checkmark' : 'link-outline', 'Copy the address', () => {
+        Clipboard.setStringAsync(url).catch(() => {});
+        setCopied(true);
+      }, copied ? colors.running : undefined)}
+      {inside ? tool('browsers-outline', 'Open here', () => router.push({ pathname: '/pulls/web', params: { url: inside, title } })) : null}
+      {inside ? tool('open-outline', windowActionLabel(canOpenWindows), () => openPullRequestWindow(inside, title, canOpenWindows)) : null}
+      {tool('globe-outline', 'Open in the browser', () => openInAppBrowser(url))}
+    </View>
+  );
+}
+
 const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folder, remote, onMerge, onMore }: {
   pr: PullRequest; repo: PullRequestRepo | undefined; projectId: string; folder: string; remote: string | undefined;
   onMerge: (pr: PullRequest) => void; onMore: (pr: PullRequest) => void;
@@ -299,20 +348,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
   const status = prStatus(pr);
   const icon = STATE_ICONS[status];
   const block = mergeBlock(pr, repo);
-  const url = webUrl(pr);
-  // Every pull request opens on GitHub from the button before Merge, closed and merged ones too.
-  const browser = url ? (
-    <Pressable
-      onPress={() => { Linking.openURL(url).catch(() => {}); }}
-      hitSlop={4}
-      style={({ pressed }) => [styles.moreIcon, pressed && styles.pressedButton]}
-      accessibilityRole="link"
-      accessibilityLabel={`Open pull request ${pr.number} in the browser`}
-      accessibilityHint={url}
-    >
-      <Ionicons name="open-outline" size={17} color={colors.textDim} />
-    </Pressable>
-  ) : null;
+  const linkTools = <PullRequestLinkTools pr={pr} />;
   return (
     <View style={styles.item}>
       <Pressable
@@ -341,7 +377,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
         </View>
         {pr.state === 'OPEN' ? (
           <View style={styles.rowActions}>
-            {browser}
+            {linkTools}
             <Pressable
               onPress={() => onMerge(pr)}
               style={({ pressed }) => [styles.mergeButton, block && styles.mergeOff, pressed && styles.pressedButton]}
@@ -355,7 +391,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
               <Ionicons name="ellipsis-horizontal" size={18} color={colors.textDim} />
             </Pressable>
           </View>
-        ) : browser ? <View style={styles.rowActions}>{browser}</View> : null}
+        ) : webUrl(pr) ? <View style={styles.rowActions}>{linkTools}</View> : null}
       </Pressable>
       {expanded ? <PullRequestFiles projectId={projectId} folder={folder} remote={remote} pr={pr} /> : null}
     </View>
@@ -555,6 +591,8 @@ const styles = StyleSheet.create({
   add: { color: colors.running },
   del: { color: colors.danger },
   rowActions: { alignItems: 'flex-end', gap: spacing.sm },
+  linkTools: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  linkTool: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   mergeButton: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 34, paddingHorizontal: spacing.sm + 2, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(128,136,255,0.4)', backgroundColor: 'rgba(128,136,255,0.12)' },
   mergeOff: { borderColor: colors.border, backgroundColor: 'transparent' },
   mergeText: { color: colors.accent, fontSize: 13, fontWeight: '600' },

@@ -4,6 +4,8 @@
 // the list 10 at a time when the filter asks for them. A row opens on its
 // changed files and their diffs. Merge sits on the row, and its "…" menu has
 // Convert to draft (or Ready for review) and Close; each of them asks first.
+// Before Merge, icons copy the pull request's address and open its page on
+// GitHub: in a panel, in a window of its own (web-page-view.js), or in the browser.
 // gh runs in main (pull-requests.js); this file paints and asks.
 
 const projectPullRequestsTabState = new Map();
@@ -285,13 +287,36 @@ function prWebUrl(pr) {
   return pr && typeof pr.url === 'string' && /^https?:\/\//i.test(pr.url) ? pr.url : null;
 }
 
+/**
+ * The icons before Merge, on every pull request with a web address, closed and
+ * merged ones too: Copy the address, Open here (a panel with the page inside
+ * the app), Open in a window of its own, Open in the browser. The page shows
+ * inside the app only over https (web-page-view.js); without it, only the
+ * first and the last.
+ */
+function prLinkToolsHtml(pr) {
+  const url = prWebUrl(pr);
+  if (!url) return '';
+  const inside = /^https:\/\//i.test(url);
+  const tool = (act, label, icon) => `<button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="${act}" title="${prAttr(label)}" aria-label="${prAttr(`${label} (#${pr.number})`)}">${icon}</button>`;
+  return `<span class="pr-link-tools" role="group" aria-label="Pull request #${pr.number} on GitHub">${[
+    tool('copy-url', `Copy the address: ${url}`, PICONS.link(13)),
+    inside ? tool('view', 'Open here', PICONS.panel(13)) : '',
+    inside ? tool('window', 'Open in a window of its own', PICONS.popOut(13)) : '',
+    tool('browser', 'Open in the browser', PICONS.globe(13)),
+  ].join('')}</span>`;
+}
+
+/** The title the page's panel and window carry. */
+function prWebTitle(pr) {
+  return `#${pr.number} ${pr.title || ''}`.trim();
+}
+
 function prRowHtml(pr, { expanded = false, repo = null, now = new Date() } = {}) {
   const status = prStatus(pr);
   const block = prMergeBlock(pr, repo);
   const branches = `${pr.head} → ${pr.base}`;
-  // Every pull request opens on GitHub from the button before Merge, closed and merged ones too.
-  const link = prWebUrl(pr) ? `
-          <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="browser" title="${prAttr(`Open in the browser: ${pr.url}`)}" aria-label="Open #${pr.number} in the browser">${PICONS.open(13)}</button>` : '';
+  const link = prLinkToolsHtml(pr);
   // A disabled button shows no tooltip of its own: the reason sits on its wrapper.
   const actions = link + (pr.state === 'OPEN' ? `
           <span class="pr-merge-wrap"${block ? ` title="${prAttr(block)}"` : ''}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-merge-btn" data-act="merge"${block ? ' disabled' : ''}>${PR_ICONS.merged(12)}<span>Merge</span></button></span>
@@ -677,12 +702,35 @@ function prPaintList(project, state, body) {
   scroller.scrollTop = scrollTop;
 }
 
+/** The icons before Merge (prLinkToolsHtml). */
+function prWireLinkTools(item, pr) {
+  const url = prWebUrl(pr);
+  if (!url) return;
+  const on = (act, run) => {
+    const button = item.querySelector(`.pr-link-tools [data-act="${act}"]`);
+    if (button) button.onclick = (e) => { e.stopPropagation(); run(button); };
+  };
+  on('copy-url', (button) => {
+    window.api?.writeClipboard?.(url);
+    clearTimeout(button._copiedTimer);
+    button.innerHTML = PICONS.check(13);
+    button.classList.add('is-done');
+    button._copiedTimer = setTimeout(() => {
+      button.innerHTML = PICONS.link(13);
+      button.classList.remove('is-done');
+    }, 1200);
+  });
+  on('view', () => openWebPagePanel({ url, title: prWebTitle(pr) }));
+  on('window', () => window.api?.openWebWindow?.(url, prWebTitle(pr)));
+  on('browser', () => window.api?.openExternal?.(url));
+}
+
 function prWireItem(project, state, repoPath, item, pr) {
   const data = prRepoState(project.id, state, repoPath);
   const row = item.querySelector('.pr-row');
   const toggle = () => prToggle(project, state, repoPath, item, pr);
   row.onclick = (e) => {
-    if (e.target.closest('[data-act="merge"], [data-act="more"], [data-act="browser"], .pr-merge-wrap')) return;
+    if (e.target.closest('[data-act="merge"], [data-act="more"], .pr-link-tools, .pr-merge-wrap')) return;
     toggle();
   };
   row.onkeydown = (e) => {
@@ -690,8 +738,7 @@ function prWireItem(project, state, repoPath, item, pr) {
     e.preventDefault();
     toggle();
   };
-  const browser = item.querySelector('[data-act="browser"]');
-  if (browser) browser.onclick = (e) => { e.stopPropagation(); if (prWebUrl(pr)) window.api?.openExternal?.(pr.url); };
+  prWireLinkTools(item, pr);
   const merge = item.querySelector('[data-act="merge"]');
   if (merge) merge.onclick = (e) => { e.stopPropagation(); prMergeDialog(project, state, repoPath, pr); };
   const more = item.querySelector('[data-act="more"]');
@@ -1123,7 +1170,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     PR_FILTERS, PR_DEFAULT_FILTER, PR_PAGE_SIZE,
     prStatus, prVisible, prPageStates, prMergeLists, prFilterLabel, prIsDefaultFilter, prToggleFilter, prEmptyText,
-    prCanEdit, prMergeBlock, prRowMenuItems, prWebUrl, prFileRows, prFileView, prFilesToolsHtml, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
+    prCanEdit, prMergeBlock, prRowMenuItems, prWebUrl, prLinkToolsHtml, prWebTitle, prFileRows, prFileView, prFilesToolsHtml, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
     prPatchHtml, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,
   };
 }

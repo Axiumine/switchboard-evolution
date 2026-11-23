@@ -120,18 +120,29 @@ test('Merge is on only for an open pull request that may be merged, and says why
   }
 });
 
-test('the button before Merge opens the pull request in the browser, closed and merged ones too', () => {
+test('before Merge, four icons copy the address and open the page here, in a window or in the browser, closed and merged ones too', () => {
   const ctx = loadContext();
   const url = 'https://github.com/acme/widgets/pull/4';
   const open = ctx.prRowHtml(pr(4, { url }), { repo: REPO });
-  assert.match(open, new RegExp(`data-act="browser" title="Open in the browser: ${url.replace(/[./]/g, '\\$&')}" aria-label="Open #4 in the browser"><svg data-icon="open">`));
-  const acts = [...open.matchAll(/data-act="(browser|merge|more)"/g)].map(m => m[1]);
-  assert.deepEqual(acts, ['browser', 'merge', 'more']);
-  assert.match(ctx.prRowHtml(pr(4, { url, state: 'MERGED' }), { repo: REPO }), /data-act="browser"/);
-  // No web address from gh, or not a web one: no button.
-  assert.doesNotMatch(ctx.prRowHtml(pr(4), { repo: REPO }), /data-act="browser"/);
+  const acts = [...open.matchAll(/data-act="(copy-url|view|window|browser|merge|more)"/g)].map(m => m[1]);
+  assert.deepEqual(acts, ['copy-url', 'view', 'window', 'browser', 'merge', 'more']);
+  const quoted = url.replace(/[./]/g, '\\$&');
+  assert.match(open, new RegExp(`data-act="copy-url" title="Copy the address: ${quoted}" aria-label="Copy the address: ${quoted} \\(#4\\)"><svg data-icon="link">`));
+  assert.match(open, /data-act="view" title="Open here" aria-label="Open here \(#4\)"><svg data-icon="panel">/);
+  assert.match(open, /data-act="window" title="Open in a window of its own" aria-label="Open in a window of its own \(#4\)"><svg data-icon="popOut">/);
+  assert.match(open, /data-act="browser" title="Open in the browser" aria-label="Open in the browser \(#4\)"><svg data-icon="globe">/);
+  for (const state of ['CLOSED', 'MERGED']) {
+    const done = ctx.prRowHtml(pr(4, { url, state }), { repo: REPO });
+    assert.deepEqual([...done.matchAll(/data-act="(copy-url|view|window|browser|merge|more)"/g)].map(m => m[1]), ['copy-url', 'view', 'window', 'browser'], state);
+  }
+  // No web address from gh, or not a web one: no icons.
+  assert.doesNotMatch(ctx.prRowHtml(pr(4), { repo: REPO }), /pr-link-tools|data-act="browser"/);
   assert.equal(ctx.prWebUrl({ url: 'javascript:alert(1)' }), null);
   assert.equal(ctx.prWebUrl({ url }), url);
+  // Over plain http the page does not show inside the app: copy and the browser only.
+  const plainHttp = ctx.prLinkToolsHtml(pr(4, { url: 'http://git.example.com/acme/widgets/pull/4' }));
+  assert.deepEqual([...plainHttp.matchAll(/data-act="([a-z-]+)"/g)].map(m => m[1]), ['copy-url', 'browser']);
+  assert.equal(ctx.prWebTitle(pr(4, { url })), '#4 Change 4');
 });
 
 test('a row\'s badges: conflicts, the review and the checks', () => {

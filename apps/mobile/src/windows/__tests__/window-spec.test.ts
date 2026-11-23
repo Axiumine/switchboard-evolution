@@ -15,6 +15,15 @@ describe('a window spec', () => {
     expect(parseWindowSpec('{"kind":"note","projectId":""}')).toBeNull();
   });
 
+  it('reads a pull request\'s page back, over https only', () => {
+    const url = 'https://github.com/acme/widgets/pull/4';
+    expect(parseWindowSpec(JSON.stringify({ kind: 'web', url, title: '#4 Add filters' }))).toEqual({ kind: 'web', url, title: '#4 Add filters' });
+    expect(parseWindowSpec(JSON.stringify({ kind: 'web', url }))).toEqual({ kind: 'web', url, title: '' });
+    expect(parseWindowSpec(JSON.stringify({ kind: 'web', url: 'http://github.com/acme/widgets/pull/4' }))).toBeNull();
+    expect(parseWindowSpec(JSON.stringify({ kind: 'web', url: 'javascript:alert(1)' }))).toBeNull();
+    expect(parseWindowSpec('{"kind":"web"}')).toBeNull();
+  });
+
   it('is nothing for what it does not know: no window then, rather than a broken one', () => {
     expect(parseWindowSpec(undefined)).toBeNull();
     expect(parseWindowSpec('not json')).toBeNull();
@@ -34,5 +43,7 @@ describe('a window spec', () => {
     expect(windowTitle({ kind: 'note', projectId: 'p1' })).toBe('Note');
     expect(windowTitle({ kind: 'stats' })).toBe('Stats');
     expect(windowTitle({ kind: 'processes' })).toBe('Task Manager');
+    expect(windowTitle({ kind: 'web', url: 'https://github.com/acme/widgets/pull/4', title: '#4 Add filters' })).toBe('#4 Add filters');
+    expect(windowTitle({ kind: 'web', url: 'https://github.com/acme/widgets/pull/4', title: '' })).toBe('Pull request');
   });
 });

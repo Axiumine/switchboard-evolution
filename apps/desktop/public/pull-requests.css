@@ -124,6 +124,9 @@
 .pr-badge--checks-wait { color: #e0c27a; background: rgba(224,194,122,0.09); }
 
 .pr-actions { display: flex; align-items: center; gap: 4px; }
+/* Before Merge: Copy the address, Open here, Open in a window, Open in the browser. */
+.pr-link-tools { display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; }
+.pr-link-tools .ws-btn--icon.is-done { color: #59d46d; }
 .pr-merge-wrap { display: inline-flex; }
 .pr-merge-btn { gap: 5px; }
 .pr-merge-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
