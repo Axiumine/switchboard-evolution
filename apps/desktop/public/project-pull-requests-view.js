@@ -501,7 +501,8 @@ const PR_STATUS_LETTERS = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R
 
 function prPatchHtml(file) {
   if (file.patch) {
-    const lines = typeof gitDiffLines === 'function' ? gitDiffLines(file.patch) : escapeHtml(file.patch);
+    // The code in the editors' colours, by the file's language.
+    const lines = typeof gitDiffLines === 'function' ? gitDiffLines(file.patch, { filename: file.path }) : escapeHtml(file.patch);
     return `<pre class="git-diff">${lines}</pre>`;
   }
   let text = 'A binary file, or a diff GitHub does not show.';

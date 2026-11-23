@@ -250,14 +250,14 @@ function prdEditorKey(message) {
   return message.kind === 'description' ? 'edit:description' : `edit:${message.id}`;
 }
 
-/** The last lines of a thread's diff hunk, where the comment was made. */
-function prdHunkHtml(hunk, lines = 5) {
+/** The last lines of a thread's diff hunk, where the comment was made, its code in the editors' colours by `path`. */
+function prdHunkHtml(hunk, lines = 5, path = '') {
   const all = String(hunk || '').split('\n');
   const head = all[0] && all[0].startsWith('@@') ? [all[0]] : [];
   const tail = all.slice(head.length).slice(-lines);
   if (!tail.length) return '';
   const text = [...head, ...tail].join('\n');
-  return `<pre class="git-diff pr-thread-hunk">${typeof gitDiffLines === 'function' ? gitDiffLines(text) : escapeHtml(text)}</pre>`;
+  return `<pre class="git-diff pr-thread-hunk">${typeof gitDiffLines === 'function' ? gitDiffLines(text, { filename: path }) : escapeHtml(text)}</pre>`;
 }
 
 function prdThreadHtml(thread, { prAuthor = '', now = new Date(), d, drafts }) {
@@ -288,7 +288,7 @@ function prdThreadHtml(thread, { prAuthor = '', now = new Date(), d, drafts }) {
         </button>
         ${flags}
       </div>
-      ${open ? prdHunkHtml(thread.diffHunk) : ''}
+      ${open ? prdHunkHtml(thread.diffHunk, 5, thread.path) : ''}
       ${comments}
       ${open ? `<div class="pr-thread-actions">${reply}${replying ? '' : resolveBtn}</div>` : ''}
     </div>`;

@@ -288,15 +288,64 @@ function gitOverviewHtml(repo) {
     </section>`;
 }
 
-function gitDiffLines(diff) {
-  return String(diff || '').split('\n').map((line) => {
+/**
+ * A unified diff as lines, green the added ones and red the removed ones.
+ * With `filename`, and the editors' highlighter loaded (codemirror-setup.js,
+ * cmHighlightLines), the code takes the editors' colours instead and the lines
+ * keep only their green and red backgrounds (gitDiffCodeLines).
+ */
+function gitDiffLines(diff, { filename = '' } = {}) {
+  const lines = String(diff || '').split('\n');
+  const code = filename ? gitDiffCodeLines(lines, filename) : null;
+  return lines.map((line, i) => {
     let cls = '';
     if (line.startsWith('@@')) cls = ' hunk';
     else if (line.startsWith('+') && !line.startsWith('+++')) cls = ' add';
     else if (line.startsWith('-') && !line.startsWith('---')) cls = ' remove';
     else if (/^(diff --git|index |--- |\+\+\+ |new file|deleted file|similarity index|rename (from|to))/.test(line)) cls = ' header';
+    if (code && code[i] !== null) {
+      // Inside a hunk the first character is the line's kind, whatever follows it.
+      const kind = line[0] === '+' ? ' add' : line[0] === '-' ? ' remove' : '';
+      return `<span class="git-diff-line code${kind}"><span class="git-diff-sign">${escapeHtml(line[0] || ' ')}</span>${code[i]}</span>`;
+    }
     return `<span class="git-diff-line${cls}">${line ? escapeHtml(line) : ' '}</span>`;
   }).join('');
+}
+
+/**
+ * The code of a diff's hunks in the editors' colours: one HTML string per
+ * line of `lines` inside a hunk, null for the others (headers, @@ lines, "\ No
+ * newline"). Each hunk's old side (its context and removed lines) and new
+ * side (its context and added lines) are coloured as wholes, so a comment or a
+ * string over several lines stays one. Null when the file's language is not
+ * one the editors highlight.
+ */
+function gitDiffCodeLines(lines, filename) {
+  const highlight = typeof window !== 'undefined' ? window.cmHighlightLines : null;
+  if (typeof highlight !== 'function') return null;
+  const out = new Array(lines.length).fill(null);
+  let i = 0;
+  while (i < lines.length) {
+    if (!lines[i].startsWith('@@')) { i++; continue; }
+    const before = [];
+    const after = [];
+    let j = i + 1;
+    for (; j < lines.length && !lines[j].startsWith('@@') && !lines[j].startsWith('diff --git '); j++) {
+      const kind = lines[j][0];
+      if (kind === '-') before.push(j);
+      else if (kind === '+') after.push(j);
+      else if (kind === ' ' || lines[j] === '') { before.push(j); after.push(j); }
+    }
+    // The new side last: a context line shows as it reads now.
+    for (const rows of [before, after]) {
+      if (!rows.length) continue;
+      const html = highlight(rows.map(r => lines[r].slice(1)).join('\n'), filename);
+      if (!Array.isArray(html)) return null;
+      rows.forEach((r, k) => { out[r] = html[k] ?? ''; });
+    }
+    i = j;
+  }
+  return out;
 }
 
 /** What a diff's file header says, in words: new, deleted, renamed, mode changed, binary. */

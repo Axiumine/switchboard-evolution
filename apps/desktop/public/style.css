@@ -6226,6 +6226,15 @@ body { display: flex; flex-direction: column; }
 .git-diff-line.hunk { color: #8992dc; background: rgba(100,112,215,0.07); }
 .git-diff-line.add { color: #91d19d; background: rgba(58,155,76,0.075); }
 .git-diff-line.remove { color: #e2939e; background: rgba(185,63,82,0.075); }
+/* The code of a diff in the editors' colours (gitDiffLines with a file name):
+   Dracula's text, the line's green or red as its background only, the + or -
+   in front keeping its colour. */
+.git-diff-line.code { color: #f8f8f2; }
+.git-diff-line.code.add { background: rgba(58,155,76,0.14); }
+.git-diff-line.code.remove { background: rgba(185,63,82,0.14); }
+.git-diff-sign { color: #6f6f86; }
+.git-diff-line.add .git-diff-sign { color: #91d19d; }
+.git-diff-line.remove .git-diff-sign { color: #e2939e; }
 
 /* Staging: lists by side with stage / unstage buttons, and a diff whose
    hunks and lines can be staged on their own. */

@@ -4,8 +4,9 @@ import { defaultKeymap, standardKeymap, indentWithTab, history, historyKeymap, s
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { highlightSelectionMatches, selectNextOccurrence, selectSelectionMatches } from '@codemirror/search';
-import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
-import { tags } from '@lezer/highlight';
+import { dracula, draculaHighlightStyle } from '@ddietr/codemirror-themes/theme/dracula';
+import { tags, highlightCode } from '@lezer/highlight';
+import { StyleModule } from 'style-mod';
 import TextSearchLib from './text-search.js';
 import { MergeView, unifiedMergeView } from '@codemirror/merge';
 import { javascript } from '@codemirror/lang-javascript';
@@ -605,13 +606,61 @@ function markdownSupport() {
 
 // ── Language Detection ───────────────────────────────────────────────
 
-/** The language of a file by its name, then its extension; Markdown when it is none of them. */
-function getLanguageExt(filename) {
+/** The entry of CODE_LANGUAGES for a file, by its name, then its extension; null when it is none of them. */
+function languageEntry(filename) {
   const base = (filename || '').split(/[\\/]/).pop();
   const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : '';
-  const lang = CODE_LANGUAGES.find(l => l.filename && l.filename.test(base))
-    || CODE_LANGUAGES.find(l => l.extensions && l.extensions.includes(ext));
+  return CODE_LANGUAGES.find(l => l.filename && l.filename.test(base))
+    || CODE_LANGUAGES.find(l => l.extensions && l.extensions.includes(ext))
+    || null;
+}
+
+/** The language of a file by its name, then its extension; Markdown when it is none of them. */
+function getLanguageExt(filename) {
+  const lang = languageEntry(filename);
   return lang ? lang.support() : markdownSupport();
+}
+
+// ── Code in the editor's colours, outside an editor ─────────────────
+// A diff drawn as text (the Pull Requests view's, gitDiffLines in
+// project-git-view.js) shows its code as the editors here do: the file's
+// language parses it and Dracula's highlight style colours it. A file of a
+// language Switchboard does not know stays plain.
+
+const highlightSupports = new Map(); // language name → its LanguageSupport, made once
+// The languages with /* */ comments: a piece of a file (a diff's hunk) that
+// starts on a comment's " * " lines is read as if the comment opened before it.
+const BLOCK_COMMENT_LANGUAGES = new Set(['JavaScript', 'JSX', 'TypeScript', 'TSX', 'CSS', 'Rust', 'Go', 'Java', 'C++', 'SQL']);
+let draculaStyleMounted = false;
+const MAX_HIGHLIGHT = 512 * 1024;
+
+const escapeCode = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * `code` as HTML, one string per line, in the editor's colours for a file
+ * named `filename`; null when the language is not one Switchboard highlights
+ * (or the text is too long to parse here). `code` may be a piece of a file.
+ */
+function highlightCodeLines(code, filename) {
+  const entry = languageEntry(filename);
+  const text = String(code ?? '');
+  if (!entry || text.length > MAX_HIGHLIGHT) return null;
+  if (!highlightSupports.has(entry.name)) highlightSupports.set(entry.name, entry.support());
+  const support = highlightSupports.get(entry.name);
+  // The highlight style's rules reach the page with an editor; without one yet, here.
+  if (!draculaStyleMounted && draculaHighlightStyle.module && typeof document !== 'undefined') {
+    StyleModule.mount(document, draculaHighlightStyle.module);
+    draculaStyleMounted = true;
+  }
+  const first = text.split('\n').find(line => line.trim());
+  const inComment = BLOCK_COMMENT_LANGUAGES.has(entry.name) && !!first && /^\s*\*/.test(first);
+  const source = inComment ? `/*\n${text}` : text;
+  const lines = [''];
+  highlightCode(source, support.language.parser.parse(source), draculaHighlightStyle, (piece, classes) => {
+    lines[lines.length - 1] += classes ? `<span class="${classes}">${escapeCode(piece)}</span>` : escapeCode(piece);
+  }, () => lines.push(''));
+  if (inComment) lines.shift();
+  return lines;
 }
 
 // ── Read-Only File Viewer ───────────────────────────────────────────
@@ -784,6 +833,7 @@ window.createReadOnlyViewer = createReadOnlyViewer;
 window.createEditableViewer = createEditableViewer;
 window.createMergeViewer = createMergeViewer;
 window.createUnifiedMergeViewer = createUnifiedMergeViewer;
+window.cmHighlightLines = highlightCodeLines;
 window.CMEditorView = EditorView;
 window.CMEditorState = EditorState;
 window.CMMergeView = MergeView;

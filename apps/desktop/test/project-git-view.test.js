@@ -650,3 +650,50 @@ test('Exit Edit Mode drops the editor and what was not saved, and reads the diff
   assert.equal(calls.filter(c => c[0] === 'save').length, 0);
   assert.deepEqual(plain(calls.at(-1)), ['refresh']);
 });
+
+// --- A diff's code in the editors' colours ---
+
+const DIFF = [
+  'diff --git a/x.js b/x.js',
+  '--- a/x.js',
+  '+++ b/x.js',
+  '@@ -1,3 +1,3 @@',
+  ' const a = 1;',
+  '-const b = 2;',
+  '+const b = 3;',
+  '\\ No newline at end of file',
+  '@@ -10,2 +10,2 @@ function f() {',
+  '-old',
+  '+new',
+].join('\n');
+
+test('a diff with a file name has its code coloured by the editors: each hunk\'s old and new sides as wholes, the lines keeping their kind', () => {
+  const ctx = loadContext();
+  const calls = [];
+  ctx.window.cmHighlightLines = (code, filename) => { calls.push([code, filename]); return code.split('\n').map(l => `[${l}]`); };
+  const html = ctx.gitDiffLines(DIFF, { filename: 'src/x.js' });
+  assert.deepEqual(calls, [
+    ['const a = 1;\nconst b = 2;', 'src/x.js'],
+    ['const a = 1;\nconst b = 3;', 'src/x.js'],
+    ['old', 'src/x.js'],
+    ['new', 'src/x.js'],
+  ]);
+  const lines = html.match(/<span class="git-diff-line[^"]*">.*?<\/span>(?=<span class="git-diff-line|$)/g);
+  assert.equal(lines.length, 11);
+  assert.equal(lines[0], '<span class="git-diff-line header">diff --git a/x.js b/x.js</span>');
+  assert.equal(lines[3], '<span class="git-diff-line hunk">@@ -1,3 +1,3 @@</span>');
+  assert.equal(lines[4], '<span class="git-diff-line code"><span class="git-diff-sign"> </span>[const a = 1;]</span>');
+  assert.equal(lines[5], '<span class="git-diff-line code remove"><span class="git-diff-sign">-</span>[const b = 2;]</span>');
+  assert.equal(lines[6], '<span class="git-diff-line code add"><span class="git-diff-sign">+</span>[const b = 3;]</span>');
+  assert.equal(lines[7], '<span class="git-diff-line">\\ No newline at end of file</span>');
+  assert.equal(lines[10], '<span class="git-diff-line code add"><span class="git-diff-sign">+</span>[new]</span>');
+});
+
+test('a diff stays green and red as text without a file name, a highlighter, or a language the editors know', () => {
+  const ctx = loadContext();
+  const plain = ctx.gitDiffLines(DIFF);
+  assert.match(plain, /<span class="git-diff-line add">\+const b = 3;<\/span>/);
+  assert.equal(ctx.gitDiffLines(DIFF, { filename: 'x.js' }), plain);
+  ctx.window.cmHighlightLines = () => null;
+  assert.equal(ctx.gitDiffLines(DIFF, { filename: 'notes.unknown' }), plain);
+});
