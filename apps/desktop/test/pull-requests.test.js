@@ -37,8 +37,7 @@ function node(number, extra = {}) {
     closedAt: null, mergedAt: null, author: { login: 'dev-one' },
     headRefName: `feature-${number}`, headRefOid: HEAD, baseRefName: 'main', isCrossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, viewerDidAuthor: true,
-    id: `PR_${number}`, viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, viewerCanUpdateBranch: true,
-    mergeStateStatus: 'BEHIND', totalCommentsCount: 2, allCommits: { totalCount: 3 },
+    id: `PR_${number}`, viewerCanUpdate: true, viewerCanReopen: false,
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
     ...extra,
   };
@@ -133,18 +132,41 @@ test('every open pull request is read, 100 at a time, through gh api graphql', a
     createdAt: result.items[100].createdAt, closedAt: null, mergedAt: null, author: 'dev-one',
     head: 'feature-101', headOid: HEAD, base: 'main', crossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, checks: 'SUCCESS', viewerDidAuthor: true,
-    viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, viewerCanUpdateBranch: true,
-    mergeStateStatus: 'BEHIND', comments: 2, commitCount: 3,
+    viewerCanUpdate: true, viewerCanReopen: false,
   });
-  // What the detail's tabs and the title's pencil need comes with the list.
-  assert.match(calls[0].input.query, /viewerCanUpdate viewerCanClose viewerCanReopen viewerCanUpdateBranch mergeStateStatus totalCommentsCount/);
-  assert.match(calls[0].input.query, /allCommits: commits \{ totalCount \}/);
+  // The pencil and Reopen need these; what GitHub computes per pull request stays out of the list.
+  assert.match(calls[0].input.query, /viewerCanUpdate viewerCanReopen/);
+  assert.doesNotMatch(calls[0].input.query, /mergeStateStatus|viewerCanUpdateBranch|totalCommentsCount/);
+});
+
+test('when GitHub gives up on a page of 100, the same page comes again in smaller ones', async () => {
+  const calls = setup({
+    answer: (_args, opts) => {
+      const { first } = JSON.parse(opts.input).variables;
+      if (first > 25) return { code: 1, stdout: '', stderr: 'gh: HTTP 502: Bad Gateway' };
+      return page([node(1)], { totalCount: 1 });
+    },
+  });
+  const result = await pr.listOpen(DIR);
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.map(c => c.input.variables.first), [100, 50, 25]);
+  // Not a time-out: no second try.
+  const refused = setup({ answer: () => ({ code: 1, stdout: '', stderr: 'gh: HTTP 403: Forbidden' }) });
+  assert.equal((await pr.listOpen(DIR)).ok, undefined);
+  assert.equal(refused.length, 1);
 });
 
 test('open pull requests stop at 1000 and say so', async () => {
-  const calls = setup({ answer: () => page([node(1)], { hasNextPage: true, endCursor: 'more' }) });
-  const result = await pr.listOpen(DIR);
+  const full = Array.from({ length: 100 }, (_, i) => node(i + 1));
+  let calls = setup({ answer: () => page(full, { hasNextPage: true, endCursor: 'more' }) });
+  let result = await pr.listOpen(DIR);
   assert.equal(calls.length, 10);
+  assert.equal(result.items.length, 1000);
+  assert.equal(result.truncated, true);
+  // Pages that never fill up still stop.
+  calls = setup({ answer: () => page([node(1)], { hasNextPage: true, endCursor: 'more' }) });
+  result = await pr.listOpen(DIR);
+  assert.equal(calls.length, 40);
   assert.equal(result.truncated, true);
 });
 

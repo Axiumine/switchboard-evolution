@@ -39,7 +39,9 @@ const FILES_TIMEOUT_MS = 60_000;
 const ACTION_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const OPEN_PAGE_SIZE = 100;
-const MAX_OPEN_PAGES = 10; // at most 1000 open pull requests
+const MIN_OPEN_PAGE_SIZE = 25;
+const MAX_OPEN = 1000; // open pull requests listed at most
+const MAX_OPEN_REQUESTS = 40; // 1000 in pages of 25, the smallest
 const MAX_PAGE_SIZE = 100;
 const MAX_PATCH_BYTES = 4 * 1024 * 1024; // all the patches of one pull request together
 const MAX_FILES = 3000; // what GitHub itself lists at most
@@ -267,8 +269,7 @@ const PR_FIELDS = `id number title url state isDraft createdAt closedAt mergedAt
         author { login }
         headRefName headRefOid baseRefName isCrossRepository
         additions deletions changedFiles mergeable reviewDecision viewerDidAuthor
-        viewerCanUpdate viewerCanClose viewerCanReopen viewerCanUpdateBranch mergeStateStatus totalCommentsCount
-        allCommits: commits { totalCount }
+        viewerCanUpdate viewerCanReopen
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
 const LIST_QUERY = `query($owner: String!, $repo: String!, $states: [PullRequestState!], $first: Int!, $after: String) {
@@ -335,14 +336,12 @@ function normalizePullRequest(node) {
     reviewDecision: node.reviewDecision || null, // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED
     checks: (commit && commit.statusCheckRollup && commit.statusCheckRollup.state) || null,
     viewerDidAuthor: !!node.viewerDidAuthor,
-    // What GitHub lets this account do, and the counts of the detail's tabs.
+    // The pencil beside the title, Reopen in the "…" menu. The rest of what an
+    // open pull request needs (merge state, counts) comes with its
+    // conversation (pull-request-detail.js): computed by GitHub for each pull
+    // request, it would make a page of 100 too slow for GitHub's time limit.
     viewerCanUpdate: !!node.viewerCanUpdate,
-    viewerCanClose: !!node.viewerCanClose,
     viewerCanReopen: !!node.viewerCanReopen,
-    viewerCanUpdateBranch: !!node.viewerCanUpdateBranch,
-    mergeStateStatus: node.mergeStateStatus || 'UNKNOWN', // BEHIND | BLOCKED | CLEAN | DIRTY | DRAFT | HAS_HOOKS | UNSTABLE | UNKNOWN
-    comments: node.totalCommentsCount || 0,
-    commitCount: (node.allCommits && node.allCommits.totalCount) || 0,
   };
 }
 
@@ -386,10 +385,17 @@ async function listOpen(dir, { remote = null } = {}) {
   let info = null;
   let totalCount = 0;
   let hasNextPage = false;
-  for (let page = 0; page < MAX_OPEN_PAGES; page++) {
+  let size = OPEN_PAGE_SIZE;
+  for (let request = 0; request < MAX_OPEN_REQUESTS && items.length < MAX_OPEN; request++) {
     const answer = await graphql(target, LIST_QUERY, {
-      owner: target.owner, repo: target.repo, states: ['OPEN'], first: OPEN_PAGE_SIZE, after,
+      owner: target.owner, repo: target.repo, states: ['OPEN'], first: Math.min(size, MAX_OPEN - items.length), after,
     });
+    // A busy repository can make GitHub give up on 100 at once (a 502 or 504
+    // after about ten seconds): the same page again, in smaller ones.
+    if (!answer.ok && size > MIN_OPEN_PAGE_SIZE && isGitHubTimeout(answer.error)) {
+      size = Math.max(MIN_OPEN_PAGE_SIZE, Math.floor(size / 2));
+      continue;
+    }
     if (!answer.ok) return { ...answer, ...targetSummary(target) };
     const repository = answer.data.repository;
     if (!info) info = repositoryInfo(repository);
@@ -401,6 +407,11 @@ async function listOpen(dir, { remote = null } = {}) {
     if (!hasNextPage || !after) break;
   }
   return { ok: true, ...targetSummary(target), repo: info, items, totalCount, truncated: hasNextPage };
+}
+
+/** GitHub, or gh, gave up waiting: worth asking again for less. */
+function isGitHubTimeout(error) {
+  return /HTTP 50[234]|Bad Gateway|Gateway Time-?out|did not answer within|timed? ?out|Something went wrong while executing your query/i.test(String(error || ''));
 }
 
 function validCursor(value) {
