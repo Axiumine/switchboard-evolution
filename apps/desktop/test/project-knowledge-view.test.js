@@ -24,7 +24,7 @@ function load() {
     window: {},
     console,
   });
-  vm.runInContext(`${escapeAttrSource}\n${source}\nthis.api = { knState, knFolder, knRelPath, knGateHtml, knSubnavHtml, knTableHtml, knFolderCardHtml, knStatusSignature, knowledgeTabs };`, context);
+  vm.runInContext(`${escapeAttrSource}\n${source}\nthis.api = { knState, knFolder, knRelPath, knGateHtml, knGateSignature, knSubnavHtml, knTableHtml, knFolderCardHtml, knStatusSignature, knowledgeTabs };`, context);
   return context.api;
 }
 
@@ -88,6 +88,9 @@ test('a folder without a graph asks to index it; a running job says so; an index
   s.status.folders[0].job = { state: 'failed', error: 'disk full' };
   assert.match(api.knGateHtml(proj, s, '/work/api'), /Indexing failed: disk full/);
   assert.equal(api.knGateHtml(proj, s, '/work/web'), null);
+  s.status.folders[1].job = { state: 'running', kind: 'refresh' };
+  assert.equal(api.knGateHtml(proj, s, '/work/web'), null, 'a refresh of a graph there leaves the view on screen');
+  s.status.folders[1].job = null;
   s.view = 'settings';
   assert.equal(api.knGateHtml(proj, s, '/work/api'), null, 'Settings opens even before a first index');
   const none = project([]);
@@ -135,4 +138,19 @@ test('the status signature moves with what the tab shows, not with the rest', ()
   const moved = JSON.parse(JSON.stringify(a));
   moved.folders[0].job = { state: 'running' };
   assert.notEqual(api.knStatusSignature(a), api.knStatusSignature(moved));
+});
+
+
+test('a refresh of an indexed folder changes the bar, not what decides the view', () => {
+  const api = load();
+  const proj = project(['/work/api']);
+  const s = api.knState(proj);
+  s.view = 'search';
+  s.status = { binary: BIN, folders: [ready('/work/api', 'api')] };
+  const before = api.knGateSignature(proj, s);
+  s.status.folders[0].job = { state: 'running', kind: 'refresh', mode: 'full' };
+  assert.equal(api.knGateSignature(proj, s), before);
+  assert.match(api.knSubnavHtml(proj, s), /kn-busy/);
+  s.status.folders[0].indexed = false;
+  assert.notEqual(api.knGateSignature(proj, s), before, 'a graph gone is a new page');
 });

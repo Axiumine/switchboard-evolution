@@ -114,6 +114,11 @@ function setupWebPages({ app, session, shell, clipboard, Menu, log }) {
       event.preventDefault();
       openExternal(url);
     });
+    // A server that redirects elsewhere is held to the same rule.
+    contents.on('will-redirect', (event, url) => {
+      if (contents.session === lensSession ? isLensUrl(url) : isWebPageUrl(url)) return;
+      event.preventDefault();
+    });
     contents.on('context-menu', (_e, params) => {
       const items = webPageMenuItems(params, { openExternal, copy: (text) => clipboard.writeText(text) });
       if (items.length) Menu.buildFromTemplate(items).popup();

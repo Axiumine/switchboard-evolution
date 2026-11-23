@@ -124,12 +124,24 @@ function knSubnavHtml(project, s) {
   </div>`;
 }
 
-/** Draw the tab into the project page's body. */
-function renderKnowledgeTab(project, body) {
+/**
+ * What decides which page the view shows (the gate) or that Overview and
+ * Settings, which show the status itself, must be drawn again. A change in
+ * anything else (a refresh's job, when a folder was indexed) only redraws
+ * the bar, so what is typed in a view and its focus stay.
+ */
+function knGateSignature(project, s) {
+  const folder = knFolder(project, s);
+  const f = knFolderStatus(s, folder);
+  const st = s.status;
+  return JSON.stringify([
+    s.error, !!st, st?.binary?.found?.ok, st?.binary?.download, st?.client?.halted, knFolders(project).length, folder,
+    !!f?.indexed, !!(f?.job && KnowledgeModel.jobActive(f.job) && !f.indexed), !f?.indexed && f?.job?.state === 'failed',
+  ]);
+}
+
+function knWireSubnav(project, body) {
   const s = knState(project);
-  if (!KN_VIEW_IDS.includes(s.view) || (!knViewRenderers[s.view] && s.view !== 'overview' && s.view !== 'settings')) s.view = 'overview';
-  body.className = 'ws-body git-workspace-body kn-body';
-  body.innerHTML = `${knSubnavHtml(project, s)}<div class="git-workspace-view kn-view" id="kn-view" role="tabpanel"></div>`;
   body.querySelectorAll('[data-kn-view]').forEach(btn => {
     btn.onclick = () => {
       if (s.view === btn.dataset.knView) return;
@@ -141,10 +153,20 @@ function renderKnowledgeTab(project, body) {
   if (select) select.onchange = () => { s.folder = select.value; renderKnowledgeTab(project, body); };
   const reindex = body.querySelector('[data-kn-act="reindex"]');
   if (reindex) reindex.onclick = () => knIndex(project, knFolder(project, s), body);
+}
+
+/** Draw the tab into the project page's body. */
+function renderKnowledgeTab(project, body) {
+  const s = knState(project);
+  if (!KN_VIEW_IDS.includes(s.view) || (!knViewRenderers[s.view] && s.view !== 'overview' && s.view !== 'settings')) s.view = 'overview';
+  body.className = 'ws-body git-workspace-body kn-body';
+  body.innerHTML = `${knSubnavHtml(project, s)}<div class="git-workspace-view kn-view" id="kn-view" role="tabpanel"></div>`;
+  knWireSubnav(project, body);
+  s.gateSig = knGateSignature(project, s);
   knRenderView(project, body.querySelector('#kn-view'), body);
   if (s.stale || !s.status) {
     knLoadStatus(project).then(changed => {
-      if (changed && knVisible(project, body)) renderKnowledgeTab(project, body);
+      if (changed && knVisible(project, body)) knStatusChanged(project);
     }).catch(() => {});
   }
 }
@@ -152,6 +174,22 @@ function renderKnowledgeTab(project, body) {
 function knRedraw(project) {
   const body = projectViewer?.querySelector('#ws-body.kn-body');
   if (body && knVisible(project, body)) renderKnowledgeTab(project, body);
+}
+
+/** After the status changed: the whole tab when the gate or a status view needs it, else only the bar. */
+function knStatusChanged(project) {
+  const body = projectViewer?.querySelector('#ws-body.kn-body');
+  if (!body || !knVisible(project, body)) return;
+  const s = knState(project);
+  const bar = body.querySelector('.kn-subnav');
+  if (!bar || s.view === 'overview' || s.view === 'settings' || knGateSignature(project, s) !== s.gateSig) {
+    renderKnowledgeTab(project, body);
+    return;
+  }
+  const holder = document.createElement('div');
+  holder.innerHTML = knSubnavHtml(project, s);
+  bar.replaceWith(holder.firstElementChild);
+  knWireSubnav(project, body);
 }
 
 /** Where the tab is not usable yet: no CBM, an old one, no folders, a folder without a graph. */
@@ -169,7 +207,8 @@ function knGateHtml(project, s, folder) {
   }
   if (s.view === 'settings' || s.view === 'lens') return null;
   const fstatus = knFolderStatus(s, folder);
-  if (fstatus?.job && KnowledgeModel.jobActive(fstatus.job)) {
+  // Only a first index hides the view; a refresh of a graph there is shown in the bar.
+  if (fstatus?.job && KnowledgeModel.jobActive(fstatus.job) && !fstatus.indexed) {
     return `<div class="kn-notice kn-notice--busy"><div class="kn-notice-title"><span class="kn-busy" aria-hidden="true"></span>${escapeHtml(KnowledgeModel.jobText(fstatus.job))}</div>
       <div class="kn-notice-text">codebase-memory-mcp is reading <span class="mono">${escapeHtml(pathBasename(folder))}</span>. A large repository takes a minute or two the first time; afterwards only what changed is read again.</div></div>`;
   }
@@ -179,7 +218,7 @@ function knGateHtml(project, s, folder) {
     const modes = KnowledgeModel.INDEX_MODES.map(m => `<option value="${m.id}"${m.id === mode ? ' selected' : ''}>${escapeHtml(m.label)} · ${escapeHtml(m.hint)}</option>`).join('');
     return `<div class="kn-notice">
       <div class="kn-notice-title">${escapeHtml(pathBasename(folder))} has no code graph yet</div>
-      <div class="kn-notice-text">Indexing reads the source of <span class="mono">${escapeHtml(folder)}</span> into a graph of its functions, classes, routes and the calls between them, kept by codebase-memory-mcp on this computer. Nothing leaves it.</div>
+      <div class="kn-notice-text">Indexing reads the source of <span class="mono">${escapeHtml(folder)}</span> into a graph of its functions, classes, routes and the calls between them, kept by codebase-memory-mcp on this computer. The graph stays there.</div>
       ${failed}
       <div class="kn-notice-actions">
         <select class="ws-select" data-kn-field="mode" aria-label="Index mode">${modes}</select>
@@ -672,7 +711,7 @@ function knOnChanged(payload) {
     const project = typeof selectedProject === 'function' ? selectedProject() : null;
     if (!project || !ids.includes(project.id) || projectTab(project) !== 'knowledge') return;
     const changed = await knLoadStatus(project);
-    if (changed) knRedraw(project);
+    if (changed) knStatusChanged(project);
   }, 250);
 }
 

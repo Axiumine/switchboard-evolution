@@ -24,6 +24,8 @@ const STOP_GRACE_MS = 2000;
 // Crashes in this window that stop the automatic restarts until reset().
 const CRASH_WINDOW_MS = 60_000;
 const CRASH_LIMIT = 3;
+// locate() runs the binary's --version synchronously: its answer stands this long.
+const LOCATE_TTL_MS = 15_000;
 
 class CbmError extends Error {
   constructor(message, code, data) {
@@ -61,6 +63,7 @@ function createCbmClient({
   callTimeoutMs = CALL_TIMEOUT_MS,
   startTimeoutMs = START_TIMEOUT_MS,
   now = () => Date.now(),
+  locateTtlMs = LOCATE_TTL_MS,
 } = {}) {
   const events = new EventEmitter();
   let child = null;
@@ -71,8 +74,23 @@ function createCbmClient({
   let lastError = null;
   let crashes = [];
   let halted = false;
+  let located = null; // { at, found }
   let schemas = new Map(); // tool → Set of argument names, from tools/list
   const pending = new Map();
+
+  /** The binary, found again at most every locateTtlMs (reset() and a start look again). */
+  function find({ fresh = false } = {}) {
+    if (!fresh && located && now() - located.at < locateTtlMs) return located.found;
+    const found = locate();
+    located = { at: now(), found };
+    return found;
+  }
+
+  function crashed() {
+    const at = now();
+    crashes = crashes.filter(t => at - t < CRASH_WINDOW_MS).concat(at);
+    if (crashes.length >= CRASH_LIMIT) halted = true;
+  }
 
   function failPending(err) {
     for (const { reject, timer } of pending.values()) {
@@ -126,7 +144,7 @@ function createCbmClient({
   }
 
   async function start() {
-    const found = locate();
+    const found = find({ fresh: true });
     if (!found) throw new CbmError('codebase-memory-mcp is not installed', 'cbm-missing');
     if (!found.ok) throw new CbmError(`codebase-memory-mcp ${found.version} is too old for this app`, 'cbm-old', { version: found.version });
     let proc;
@@ -154,9 +172,7 @@ function createCbmClient({
       lastError = `codebase-memory-mcp stopped (${why})${tail ? `: ${tail}` : ''}`;
       failPending(new CbmError(lastError, 'cbm-exited'));
       if (!proc.stopping) {
-        const at = now();
-        crashes = crashes.filter(t => at - t < CRASH_WINDOW_MS).concat(at);
-        if (crashes.length >= CRASH_LIMIT) halted = true;
+        crashed();
         log.warn?.(`[cbm] ${lastError}`);
       }
       events.emit('change');
@@ -182,6 +198,9 @@ function createCbmClient({
       events.emit('change');
       return proc;
     } catch (err) {
+      // A session that never answers counts like one that stops: three in a minute and it waits for reset().
+      if (!proc.stopping && err.code !== 'cbm-exited') crashed();
+      lastError = err.message;
       stopProcess(proc);
       throw err;
     }
@@ -243,8 +262,10 @@ function createCbmClient({
    * running session stops and the next call starts the new one.
    */
   function refresh() {
-    const found = locate();
+    const found = find();
     if (child && (!found || found.path !== binary?.path || found.version !== binary?.version)) {
+      // The calls on the old session would only wait for their time-out.
+      failPending(new CbmError('codebase-memory-mcp changed; ask again', 'cbm-restarting'));
       stopProcess(child);
       serverInfo = null;
       events.emit('change');
@@ -257,6 +278,7 @@ function createCbmClient({
     halted = false;
     crashes = [];
     lastError = null;
+    located = null;
     refresh();
   }
 

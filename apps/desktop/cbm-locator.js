@@ -178,8 +178,9 @@ function checksumFor(text, asset) {
   return null;
 }
 
-async function fetchBuffer(url, fetchImpl) {
-  const res = await fetchImpl(url, { headers: { 'User-Agent': 'switchboard-e' } });
+async function fetchBuffer(url, fetchImpl, timeoutMs = 5 * 60 * 1000) {
+  // A stalled download fails, so the tab can offer it again.
+  const res = await fetchImpl(url, { headers: { 'User-Agent': 'switchboard-e' }, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -231,7 +232,7 @@ async function downloadCbm({
   const asset = assetFor(platform, arch);
   if (!asset) throw new Error(`codebase-memory-mcp has no build for ${platform}-${arch}`);
   onStep('download');
-  const sums = (await fetchBuffer(`${RELEASES}/v${version}/checksums.txt`, fetchImpl)).toString('utf8');
+  const sums = (await fetchBuffer(`${RELEASES}/v${version}/checksums.txt`, fetchImpl, 30_000)).toString('utf8');
   const want = checksumFor(sums, asset.name);
   if (!want) throw new Error(`codebase-memory-mcp ${version} lists no ${asset.name}`);
   const archive = await fetchBuffer(`${RELEASES}/v${version}/${asset.name}`, fetchImpl);

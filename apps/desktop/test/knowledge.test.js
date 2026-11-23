@@ -99,7 +99,7 @@ function setup({ handlers = {}, projects: list = { p1: ['/work/api', '/work/web'
 
 test('settings are normalized, and names cannot be set from outside', () => {
   const { db } = setup();
-  assert.deepEqual(knowledge.normalizeSettings(null), { enabled: false, mode: 'full', toolProfile: 'all', crossRepo: true, autoRefresh: true, names: {}, share: {}, savedQueries: [] });
+  assert.deepEqual(knowledge.normalizeSettings(null), { enabled: false, mode: 'full', toolProfile: 'all', crossRepo: true, autoRefresh: true, names: {}, indexed: {}, share: {}, savedQueries: [] });
   const r = knowledge.setSettings('p1', { enabled: true, mode: 'fast', toolProfile: 'scout', names: { '/work/api': 'evil' }, share: { '/work/api': true, '/elsewhere': true }, savedQueries: [{ name: 'calls', query: 'MATCH (n) RETURN n' }, { query: '' }] });
   assert.equal(r.settings.enabled, true);
   assert.equal(r.settings.mode, 'fast');
@@ -256,6 +256,8 @@ test('scheduleRefresh re-indexes only folders of projects with the graph on, onc
   knowledge.setSettings('p1', { enabled: true });
   assert.equal(knowledge.scheduleRefresh('/work/api'), false, 'not indexed yet');
   await knowledge.nameFor('p1', '/work/api');
+  assert.equal(knowledge.scheduleRefresh('/work/api'), false, 'a name alone is not a graph');
+  await knowledge.status('p1');
   assert.equal(knowledge.scheduleRefresh('/work/api'), true);
   assert.equal(knowledge.scheduleRefresh('/work/api'), true);
   const live = queue.filter(Boolean);
@@ -406,7 +408,8 @@ test('the git watcher is kept on for indexed folders of projects with the graph 
     client: fakeClient({ list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }, { name: 'web', root_path: '/work/web' }, { name: 'docs', root_path: '/work/docs' }] }) }),
     watchRepo: (dir) => { watched.push(dir); },
   });
-  for (const [id, folder] of [['p1', '/work/api'], ['p1', '/work/web'], ['p2', '/work/docs']]) await knowledge.nameFor(id, folder);
+  await knowledge.status('p1');
+  await knowledge.status('p2');
   assert.deepEqual(knowledge.watchEnabledFolders(), []);
   knowledge.setSettings('p1', { enabled: true });
   assert.deepEqual(watched.sort(), ['/work/api', '/work/web'], 'turning the graph on starts the watches');
@@ -428,7 +431,8 @@ test('the brief gets a Code graph section only with the graph on, naming each in
   knowledge.setSettings('p1', { enabled: true });
   assert.match(knowledge.briefSection('p1'), /no attached folder is indexed yet/);
   await knowledge.nameFor('p1', '/work/api');
-  await knowledge.nameFor('p1', '/work/web');
+  assert.match(knowledge.briefSection('p1'), /no attached folder is indexed yet/, 'a name alone is not a graph');
+  await knowledge.status('p1');
   const section = knowledge.briefSection('p1');
   assert.match(section, /^## Code graph \(codebase-memory-mcp\)/);
   assert.match(section, /\| `\/work\/api` \| `api` \|/);
@@ -473,6 +477,7 @@ test('sessions get CBM\'s MCP server only with the graph on and when the agent h
   assert.deepEqual(knowledge.sessionLaunch(null, 'claude'), {});
   registrations.claude = { command: '/opt/cbm/codebase-memory-mcp' };
   registrations.codex = true;
+  knowledge.restart(); // drops what was read of the agents' configs
   assert.deepEqual(knowledge.sessionLaunch('p1', 'claude'), {}, 'already in the agent\'s config');
   assert.deepEqual(knowledge.sessionLaunch('p1', 'codex'), {});
   assert.deepEqual(knowledge.agentsStatus(), { claude: 'global', codex: 'global' });
@@ -490,4 +495,105 @@ test('the agents\' installer runs as a dry run first, then for real', async () =
   await knowledge.installAgents({ dryRun: false });
   assert.deepEqual(ran, [['/opt/cbm/codebase-memory-mcp', 'install', '--dry-run', '-n'], ['/opt/cbm/codebase-memory-mcp', 'install', '-y']]);
   assert.ok(events.some(e => e.reason === 'agents'));
+});
+
+
+test('a deleted graph is not rebuilt by the next change, and leaves the brief', async () => {
+  const queue = [];
+  const timers = { setTimeout: (fn) => { queue.push(fn); return queue.length; }, clearTimeout: (id) => { queue[id - 1] = null; } };
+  let listed = [{ name: 'api', root_path: '/work/api' }];
+  setup({ timers, handlers: { list_projects: () => ({ projects: listed }), delete_project: () => { listed = []; return { status: 'deleted' }; } } });
+  knowledge.setSettings('p1', { enabled: true });
+  await knowledge.status('p1');
+  assert.match(knowledge.briefSection('p1'), /`api`/);
+  assert.equal(knowledge.scheduleRefresh('/work/api'), true);
+  await knowledge.deleteIndex('p1', '/work/api');
+  assert.equal(queue.filter(Boolean).length, 0, 'the refresh waiting is dropped');
+  assert.equal(knowledge.scheduleRefresh('/work/api'), false);
+  assert.doesNotMatch(knowledge.briefSection('p1'), /`api`/);
+  assert.equal(knowledge.settingsFor('p1').names['/work/api'], 'api', 'the name is kept for the next index');
+});
+
+test('a graph deleted outside the app is noticed by the status', async () => {
+  let listed = [{ name: 'api', root_path: '/work/api' }];
+  setup({ handlers: { list_projects: () => ({ projects: listed }) } });
+  await knowledge.status('p1');
+  assert.equal(knowledge.settingsFor('p1').indexed['/work/api'], true);
+  listed = [];
+  await knowledge.status('p1');
+  assert.equal(knowledge.settingsFor('p1').indexed['/work/api'], undefined);
+});
+
+test('a refresh links nothing again; an index does, once at a time', async () => {
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const { client } = setup({
+    handlers: {
+      list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }, { name: 'web', root_path: '/work/web' }] }),
+      index_repository: async (args) => {
+        if (args.mode === 'cross-repo-intelligence') { await gate; return {}; }
+        return args.status ? { state: 'succeeded' } : { state: 'queued' };
+      },
+    },
+  });
+  await knowledge.status('p1');
+  await knowledge.index('p1', '/work/api', { kind: 'refresh', wait: true });
+  assert.equal(client.calls.filter(c => c.args.mode === 'cross-repo-intelligence').length, 0);
+  const first = knowledge.linkCrossRepo('p1');
+  const second = knowledge.linkCrossRepo('p1');
+  assert.equal(first, second, 'the second joins the first');
+  release();
+  await first;
+  assert.equal(client.calls.filter(c => c.args.mode === 'cross-repo-intelligence').length, 2, 'one pass over the two folders');
+});
+
+test('a change while a folder is read is read again after; a job CBM lost is given up', async () => {
+  let release;
+  const gate = new Promise(r => { release = r; });
+  let answer = 'running';
+  const { client } = setup({
+    handlers: {
+      list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }] }),
+      index_repository: async (args) => {
+        if (!args.status) return { state: 'queued' };
+        await gate;
+        return answer === 'lost' ? { error: 'no such job' } : { state: answer };
+      },
+    },
+  });
+  knowledge.setSettings('p1', { enabled: true });
+  await knowledge.status('p1');
+  await knowledge.index('p1', '/work/api');
+  const again = await knowledge.index('p1', '/work/api', { kind: 'refresh' });
+  assert.equal(again.already, true);
+  answer = 'succeeded';
+  release();
+  await new Promise(r => setTimeout(r, 30));
+  const starts = client.calls.filter(c => c.tool === 'index_repository' && c.args.async);
+  assert.equal(starts.length, 2, 'the refresh asked for during the job ran after it');
+
+  answer = 'lost';
+  const st = await knowledge.index('p1', '/work/api', { wait: true });
+  assert.equal(st.ok, true);
+  const s2 = await knowledge.status('p1');
+  assert.equal(s2.folders[0].job.state, 'failed');
+  assert.match(s2.folders[0].job.error, /lost track/);
+});
+
+test('the graph is only read: write clauses and files out of the folder are refused', async () => {
+  const { client } = setup({ handlers: { list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }] }), query_graph: () => ({ columns: [], rows: [] }), get_file_outline: () => ({}), check_index_coverage: () => ({}) } });
+  await knowledge.status('p1');
+  for (const q of ['MATCH (n) DETACH DELETE n', 'CREATE (n:Function {name: "x"})', 'MATCH (n) SET n.name = 1', 'match (n) remove n.x', 'MERGE (a)-[:CALLS]->(b)', "CALL db.labels()", 'MATCH (n) /* x */ DELETE n']) {
+    await assert.rejects(knowledge.query('p1', '/work/api', 'query_graph', { query: q }), /Only reading queries/, q);
+  }
+  for (const q of ["MATCH (f:Function) WHERE f.name = 'deleteUser' RETURN f.name", 'MATCH (f) WHERE f.name CONTAINS "create" RETURN f.set, f.create LIMIT 5', 'MATCH (a)-[:CALLS]->(b) RETURN a.name, b.name // set later']) {
+    await knowledge.query('p1', '/work/api', 'query_graph', { query: q });
+  }
+  assert.equal(client.calls.filter(c => c.tool === 'query_graph').length, 3);
+  for (const bad of ['/etc/hosts', '../secrets.txt', 'src/../../x', 'C:\\x', '']) {
+    await assert.rejects(knowledge.query('p1', '/work/api', 'get_file_outline', { file_path: bad }), /a path in the folder/, bad);
+  }
+  await assert.rejects(knowledge.query('p1', '/work/api', 'check_index_coverage', { paths: ['src/a.js', '../b.js'] }), /a path in the folder/);
+  await knowledge.query('p1', '/work/api', 'get_file_outline', { file_path: 'src/app.js' });
+  await knowledge.query('p1', '/work/api', 'check_index_coverage', { paths: ['src/a.js', 'lib/b.ts'] });
 });

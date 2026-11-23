@@ -73,7 +73,8 @@ function Gate({ project, status, view, folder }: { project: Project; status: Kno
   }
   if (!folder) return <View style={kstyles.page}><KEmpty>No folders are attached to this project.</KEmpty></View>;
   if (view === 'settings') return <SettingsView project={project} status={status} />;
-  if (folder.job && jobActive(folder.job)) {
+  // Only a first index takes the page; a refresh of a graph there leaves the view as it is.
+  if (folder.job && jobActive(folder.job) && !folder.indexed) {
     return <View style={kstyles.page}><KLoading text={`${jobText(folder.job)} ${baseName(folder.path)}`} /><Text style={kstyles.help}>A large repository takes a minute or two the first time; afterwards only what changed is read again.</Text></View>;
   }
   if (!folder.indexed) return <IndexPrompt project={project} status={status} folder={folder} />;

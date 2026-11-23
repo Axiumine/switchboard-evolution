@@ -134,3 +134,20 @@ test('the Lens shows inside the app only from this computer, over http, in its o
   assert.equal(webPage.guardWebviewAttach({}, { partition: webPage.WEB_PARTITION, src: 'http://127.0.0.1:9749/' }), false, 'nor GitHub\'s session the Lens');
   assert.equal(webPage.lensPermission('geolocation'), false);
 });
+
+test('a redirect off the Lens or off https is stopped', () => {
+  const app = new EventEmitter();
+  const sessions = {};
+  const session = { fromPartition: (name) => (sessions[name] ||= { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) };
+  webPage.setupWebPages({ app, session, shell: { openExternal: () => Promise.resolve() }, clipboard: { writeText() {} }, Menu: { buildFromTemplate: () => ({ popup() {} }) }, log: { warn() {} } });
+  const lens = new EventEmitter();
+  lens.getType = () => 'webview';
+  lens.session = sessions[webPage.LENS_PARTITION];
+  lens.setWindowOpenHandler = () => {};
+  app.emit('web-contents-created', {}, lens);
+  let stopped = false;
+  lens.emit('will-redirect', { preventDefault: () => { stopped = true; } }, 'http://127.0.0.1:9749/api/x');
+  assert.equal(stopped, false);
+  lens.emit('will-redirect', { preventDefault: () => { stopped = true; } }, 'http://evil.example.com/');
+  assert.equal(stopped, true);
+});

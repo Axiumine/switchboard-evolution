@@ -193,7 +193,8 @@ test('after three crashes in a minute it waits for reset()', async () => {
 test('refresh() stops a session whose binary changed, and the next call runs the new one', async () => {
   let found = FOUND;
   const { spawnImpl, spawned } = fakeSpawn({ ...INIT, 'tools/call': () => ({ structuredContent: { ok: 1 } }) });
-  const client = createCbmClient({ locate: () => found, spawnImpl, log: quiet });
+  // No caching of the lookup here: the change is seen at the next refresh().
+  const client = createCbmClient({ locate: () => found, spawnImpl, log: quiet, locateTtlMs: 0 });
   await client.call('list_projects');
   client.refresh();
   assert.equal(spawned[0].child.killed, false, 'same binary: kept');
@@ -225,4 +226,44 @@ test('a server that exits while starting rejects the start', async () => {
   await new Promise(r => setTimeout(r, 5));
   spawned[0].child.die(3);
   await assert.rejects(call, (err) => err.code === 'cbm-exited' && /another build is active/.test(err.message));
+});
+
+test('calls waiting on a session whose binary changed fail at once', async () => {
+  let found = FOUND;
+  const { spawnImpl } = fakeSpawn({ ...INIT, 'tools/call': () => new Promise(() => {}) });
+  const client = createCbmClient({ locate: () => found, spawnImpl, log: quiet, locateTtlMs: 0 });
+  const waiting = client.call('search_graph', {}).catch(err => err);
+  await new Promise(r => setTimeout(r, 20));
+  found = { ...FOUND, version: '0.12.2' };
+  client.refresh();
+  const err = await waiting;
+  assert.equal(err.code, 'cbm-restarting');
+  client.stop();
+});
+
+test('the binary is looked up again only after a while, or on reset()', async () => {
+  let lookups = 0;
+  const { spawnImpl } = fakeSpawn({ ...INIT, 'tools/call': () => ({ structuredContent: {} }) });
+  let clock = 0;
+  const client = createCbmClient({ locate: () => { lookups += 1; return FOUND; }, spawnImpl, log: quiet, now: () => clock, locateTtlMs: 1000 });
+  client.refresh();
+  client.refresh();
+  assert.equal(lookups, 1);
+  clock += 1500;
+  client.refresh();
+  assert.equal(lookups, 2);
+  client.reset();
+  assert.equal(lookups, 3);
+  client.stop();
+});
+
+test('a session that never answers its start counts as a crash', async () => {
+  let clock = 0;
+  const { spawnImpl } = fakeSpawn({ initialize: () => new Promise(() => {}) });
+  const client = createCbmClient({ locate: () => FOUND, spawnImpl, log: quiet, startTimeoutMs: 10, now: () => clock });
+  for (let i = 0; i < 3; i++) {
+    await assert.rejects(client.call('list_projects'), (err) => err.code === 'cbm-timeout');
+    clock += 1000;
+  }
+  await assert.rejects(client.call('list_projects'), (err) => err.code === 'cbm-halted');
 });

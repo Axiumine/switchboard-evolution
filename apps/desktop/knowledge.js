@@ -38,6 +38,12 @@ const ADR_MODES = new Set(['outline', 'get', 'update', 'set_sections']);
 const PROMPTS = new Set(['explore_codebase', 'review_change_impact']);
 const LENS_WORKSPACES = new Set(['explore', 'galaxy', 'architecture', 'adr', 'coverage', 'system']);
 const JOB_DONE = new Set(['succeeded', 'failed', 'cancelled']);
+const JOB_STATES = new Set(['queued', 'running', 'cancelling', 'succeeded', 'failed', 'cancelled']);
+// A job longer than this, or this many answers without a state CBM knows, is given up.
+const JOB_MAX_MS = 2 * 60 * 60 * 1000;
+const POLL_UNKNOWN_MAX = 10;
+// How long the program found and the agents' configs are taken as read.
+const AGENTS_TTL_MS = 15_000;
 
 const ARGS_MAX_BYTES = 64 * 1024;
 // CBM trims answers to 3,200 tokens by default, a budget for a model's context.
@@ -74,8 +80,11 @@ const CONFIG_KEYS = {
 
 let db, log, projects, client, locator, emit, runConfig, fetchImpl, now, timers, watchRepo, syncBrief, cbmDir, runInstall;
 let keepAlive = null;
-const jobs = new Map(); // folderPath → { projectId, name, state, mode, startedAt, finishedAt, error, kind }
+const jobs = new Map(); // folderPath → { projectId, name, state, mode, startedAt, finishedAt, error, kind, again }
 const refreshTimers = new Map(); // folderPath → timeout
+const linking = new Map(); // projectId → the cross-repo link under way
+let naming = Promise.resolve(); // names are picked one at a time
+let agentsCache = null; // { at, value }
 let latestVersion = null;
 let latestAsked = false;
 let download = null; // { step, error } while a download runs or after it failed
@@ -98,6 +107,9 @@ function init(ctx) {
   jobs.clear();
   for (const t of refreshTimers.values()) timers.clearTimeout(t);
   refreshTimers.clear();
+  linking.clear();
+  naming = Promise.resolve();
+  agentsCache = null;
   latestVersion = null;
   latestAsked = false;
   download = null;
@@ -141,6 +153,9 @@ function normalizeSettings(raw) {
     crossRepo: s.crossRepo !== false,
     autoRefresh: s.autoRefresh !== false,
     names: cleanMap(s.names, cleanName),
+    // The folders CBM has a graph of: a name is kept after a delete (the next
+    // index reuses it), so a name alone does not say there is one.
+    indexed: cleanMap(s.indexed, (v) => (v === true ? true : null)),
     share: cleanMap(s.share, (v) => (v === true ? true : null)),
     savedQueries: cleanQueries(s.savedQueries),
   };
@@ -205,6 +220,7 @@ function setGlobalSettings(patch) {
     else throw new Error('The program path must be absolute');
   }
   db.setSetting(GLOBAL_KEY, next);
+  agentsCache = null;
   client.reset();
   emit('knowledge-changed', { projectId: null, reason: 'binary' });
   return { ok: true, settings: globalSettings() };
@@ -253,8 +269,14 @@ async function listProjects() {
   return out;
 }
 
-/** The CBM name of a folder, picked once (see the top of the file). */
-async function nameFor(projectId, folderPath, listed = null) {
+/** The CBM name of a folder, picked once (see the top of the file). One at a time, so two folders never take the same name. */
+function nameFor(projectId, folderPath, listed = null) {
+  const run = naming.then(() => pickName(projectId, folderPath, listed));
+  naming = run.catch(() => {});
+  return run;
+}
+
+async function pickName(projectId, folderPath, listed) {
   const settings = settingsFor(projectId);
   if (settings.names[folderPath]) return settings.names[folderPath];
   const { byFolder, taken } = assignedNames();
@@ -284,6 +306,16 @@ function knownName(projectId, folderPath) {
     throw err;
   }
   return name;
+}
+
+/** Record whether CBM has a graph of the folder, in every project that has it attached. */
+function markIndexed(folderPath, on) {
+  for (const id of projectsWithFolder(folderPath)) {
+    const s = settingsFor(id);
+    if (!!s.indexed[folderPath] === on) continue;
+    if (on) s.indexed[folderPath] = true; else delete s.indexed[folderPath];
+    saveSettings(id, s);
+  }
 }
 
 // --- Status ---
@@ -342,9 +374,14 @@ async function status(projectId) {
         const existing = folder.name
           ? listed.find(p => p.name === folder.name)
           : listed.find(p => samePath(p.root_path, folder.path));
-        if (!existing) continue;
+        if (!existing) {
+          // Deleted outside the app (CBM's own tools, a cleared cache).
+          if (settings.indexed[folder.path]) markIndexed(folder.path, false);
+          continue;
+        }
         if (!folder.name) folder.name = await nameFor(projectId, folder.path, listed);
         folder.indexed = true;
+        if (!settings.indexed[folder.path]) markIndexed(folder.path, true);
         try {
           folder.index = await client.call('index_status', { project: folder.name });
         } catch (err) {
@@ -360,13 +397,41 @@ async function status(projectId) {
 
 // --- Asking the graph ---
 
-function cleanArgs(args) {
+// Arguments that name a file of the folder: relative to it, never out of it.
+const PATH_ARGS = new Set(['file_path', 'path', 'paths']);
+// Cypher clauses that change a graph. CBM's query_graph is read-only; this keeps it so whatever its version.
+const CYPHER_WRITE = /(^|[^.\w$])(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|FOREACH|LOAD|CALL)\b/i;
+
+function checkRelPath(value) {
+  if (typeof value !== 'string' || !value || value.length > 1000 || value.includes('\0')) throw new Error('A file must be a path in the folder');
+  if (path.isAbsolute(value) || /^[A-Za-z]:/.test(value) || value.split(/[\\/]+/).includes('..')) throw new Error('A file must be a path in the folder');
+}
+
+/** The Cypher without its strings and comments, where a write clause would show. */
+function cypherCode(text) {
+  return String(text)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`]*`/g, "''");
+}
+
+function readOnlyCypher(text) {
+  return !CYPHER_WRITE.test(cypherCode(text));
+}
+
+function cleanArgs(args, tool = null) {
   if (args == null) return {};
   if (typeof args !== 'object' || Array.isArray(args)) throw new Error('Arguments must be an object');
   const out = {};
   for (const [key, value] of Object.entries(args)) {
     if (OWNED_ARGS.has(key)) continue;
+    if (PATH_ARGS.has(key) && value != null) {
+      if (Array.isArray(value)) value.forEach(checkRelPath); else checkRelPath(value);
+    }
     out[key] = value;
+  }
+  if (tool === 'query_graph' && out.query != null && !readOnlyCypher(out.query)) {
+    throw new Error('Only reading queries: the graph is changed by indexing, not from here');
   }
   if (Buffer.byteLength(JSON.stringify(out)) > ARGS_MAX_BYTES) throw new Error('The request is too large');
   return out;
@@ -377,7 +442,7 @@ async function query(projectId, folderPath, tool, args) {
   requireFolder(projectId, folderPath);
   if (!READ_TOOLS.has(tool)) throw new Error(`Unknown tool: ${String(tool).slice(0, 60)}`);
   const name = knownName(projectId, folderPath);
-  return client.call(tool, { max_output_tokens: OUTPUT_TOKENS, ...cleanArgs(args), project: name });
+  return client.call(tool, { max_output_tokens: OUTPUT_TOKENS, ...cleanArgs(args, tool), project: name });
 }
 
 /** compare_graphs between two folders of the project (a worktree and its main checkout, two branches). */
@@ -421,18 +486,34 @@ function announceJob(folderPath) {
 
 async function pollJob(folderPath, job, repoArgs) {
   let errors = 0;
+  let unknown = 0;
   while (!JOB_DONE.has(job.state)) {
     await new Promise(r => timers.setTimeout(r, POLL_MS));
     if (jobs.get(folderPath) !== job) return job;
+    if (now() - job.startedAt > JOB_MAX_MS) {
+      job.state = 'failed';
+      job.error = 'codebase-memory-mcp did not finish within two hours';
+      break;
+    }
     try {
       const s = await client.call('index_repository', { ...repoArgs, status: true });
       const state = s?.state || s?.status;
-      if (typeof state === 'string' && state !== job.state) {
+      errors = 0;
+      // An answer without a state CBM uses (a job the daemon lost on a restart) is not progress.
+      if (typeof state !== 'string' || !JOB_STATES.has(state)) {
+        unknown += 1;
+        if (unknown >= POLL_UNKNOWN_MAX) {
+          job.state = 'failed';
+          job.error = `codebase-memory-mcp lost track of the job${typeof state === 'string' ? ` (${state})` : ''}`;
+        }
+        continue;
+      }
+      unknown = 0;
+      if (state !== job.state) {
         job.state = state;
         if (s.error || s.message) job.error = JOB_DONE.has(state) && state !== 'succeeded' ? String(s.error || s.message) : null;
         announceJob(folderPath);
       }
-      errors = 0;
     } catch (err) {
       errors += 1;
       if (errors >= POLL_ERRORS_MAX) {
@@ -454,17 +535,24 @@ async function pollJob(folderPath, job, repoArgs) {
 async function index(projectId, folderPath, opts = {}) {
   requireFolder(projectId, folderPath);
   const running = jobs.get(folderPath);
-  if (running && !JOB_DONE.has(running.state)) return { ok: true, job: jobFor(folderPath), already: true };
+  if (running && !JOB_DONE.has(running.state)) {
+    // A change while the folder is read: read it again once this job ends.
+    if (opts.kind === 'refresh') running.again = true;
+    return { ok: true, job: jobFor(folderPath), already: true };
+  }
   const settings = settingsFor(projectId);
-  const name = await nameFor(projectId, folderPath);
   const mode = INDEX_MODES.has(opts.mode) ? opts.mode : settings.mode;
-  const repoArgs = { repo_path: folderPath, name };
-  const args = { ...repoArgs, mode, async: true };
-  if (settings.share[folderPath]) args.persistence = true;
-  const job = { projectId, name, state: 'queued', mode, kind: opts.kind === 'refresh' ? 'refresh' : 'index', startedAt: now(), finishedAt: null, error: null };
+  // In the map before anything is awaited, so a second call joins this one.
+  const job = { projectId, name: null, state: 'queued', mode, kind: opts.kind === 'refresh' ? 'refresh' : 'index', startedAt: now(), finishedAt: null, error: null, again: false };
   jobs.set(folderPath, job);
   announceJob(folderPath);
+  let repoArgs;
   try {
+    const name = await nameFor(projectId, folderPath);
+    job.name = name;
+    repoArgs = { repo_path: folderPath, name };
+    const args = { ...repoArgs, mode, async: true };
+    if (settings.share[folderPath]) args.persistence = true;
     const started = await client.call('index_repository', args);
     const state = started?.state || started?.status;
     if (typeof state === 'string') job.state = state;
@@ -478,12 +566,17 @@ async function index(projectId, folderPath, opts = {}) {
   announceJob(folderPath);
   const done = pollJob(folderPath, job, repoArgs).then(async (finished) => {
     if (finished.state === 'succeeded') {
+      const wasIndexed = !!settingsFor(projectId).indexed[folderPath];
+      markIndexed(folderPath, true);
       watchEnabledFolders();
-      for (const id of projectsWithFolder(folderPath)) briefChanged(id);
+      // The brief names the folder once its first graph is there.
+      if (!wasIndexed) for (const id of projectsWithFolder(folderPath)) briefChanged(id);
+      // Links between folders come with an index asked for, not with each refresh.
+      if (finished.kind === 'index' && settingsFor(projectId).crossRepo) {
+        await linkCrossRepo(projectId).catch((err) => log.warn?.('[knowledge] cross-repo link failed', err.message));
+      }
     }
-    if (finished.state === 'succeeded' && settingsFor(projectId).crossRepo) {
-      await linkCrossRepo(projectId).catch((err) => log.warn?.('[knowledge] cross-repo link failed', err.message));
-    }
+    if (finished.again) scheduleRefresh(folderPath);
     return finished;
   });
   if (opts.wait) await done;
@@ -508,10 +601,18 @@ async function indexAll(projectId, opts = {}) {
  * Link the project's indexed folders with each other (CROSS_* edges: one
  * calls the other's HTTP routes, queues, …). Needs two of them.
  */
-async function linkCrossRepo(projectId) {
+function linkCrossRepo(projectId) {
   requireProject(projectId);
+  // One link at a time per project: a second asks joins the first.
+  if (linking.has(projectId)) return linking.get(projectId);
+  const run = linkNow(projectId).finally(() => linking.delete(projectId));
+  linking.set(projectId, run);
+  return run;
+}
+
+async function linkNow(projectId) {
   const settings = settingsFor(projectId);
-  const folders = db.listProjectFolders(projectId).map(f => f.path).filter(p => settings.names[p]);
+  const folders = db.listProjectFolders(projectId).map(f => f.path).filter(p => settings.names[p] && settings.indexed[p]);
   if (folders.length < 2) return { ok: true, linked: 0 };
   const listed = new Set((await listProjects()).map(p => p.name));
   const indexed = folders.filter(p => listed.has(settings.names[p]));
@@ -534,7 +635,7 @@ async function linkCrossRepo(projectId) {
 function scheduleRefresh(folderPath) {
   const owner = projectsWithFolder(folderPath).find((id) => {
     const s = settingsFor(id);
-    return s.enabled && s.autoRefresh && s.names[folderPath];
+    return s.enabled && s.autoRefresh && s.names[folderPath] && s.indexed[folderPath];
   });
   if (!owner) return false;
   const pendingTimer = refreshTimers.get(folderPath);
@@ -552,7 +653,7 @@ function watchedFolders() {
   for (const project of db.listProjects()) {
     const s = settingsFor(project.id);
     if (!s.enabled || !s.autoRefresh) continue;
-    for (const f of db.listProjectFolders(project.id)) if (s.names[f.path]) out.add(f.path);
+    for (const f of db.listProjectFolders(project.id)) if (s.names[f.path] && s.indexed[f.path]) out.add(f.path);
   }
   return [...out];
 }
@@ -589,6 +690,10 @@ async function deleteIndex(projectId, folderPath) {
   const name = knownName(projectId, folderPath);
   const result = await client.call('delete_project', { project: name });
   jobs.delete(folderPath);
+  const pendingTimer = refreshTimers.get(folderPath);
+  if (pendingTimer) { timers.clearTimeout(pendingTimer); refreshTimers.delete(folderPath); }
+  // No graph any more: no refresh brings it back, and the brief stops naming it.
+  markIndexed(folderPath, false);
   for (const id of projectsWithFolder(folderPath)) { changed(id, folderPath, 'deleted'); briefChanged(id); }
   return { ok: true, result };
 }
@@ -794,7 +899,7 @@ function briefSection(projectId) {
   const s = settingsFor(projectId);
   if (!s.enabled) return '';
   const folders = db.listProjectFolders(projectId).map(f => f.path);
-  const named = folders.filter(p => s.names[p]);
+  const named = folders.filter(p => s.names[p] && s.indexed[p]);
   const lines = ['## Code graph (codebase-memory-mcp)'];
   if (!named.length) {
     lines.push('The code graph is on for this project, but no attached folder is indexed yet. Index them in Switchboard\'s Node Knowledge tab.');
@@ -839,12 +944,16 @@ function profileArgs(profile) {
 
 /** How each agent gets CBM: 'global' (its own config has it), 'session' (Switchboard adds it), or null (no CBM to run). */
 function agentsStatus() {
+  // ~/.claude.json can be large and is read again only every few seconds.
+  if (agentsCache && now() - agentsCache.at < AGENTS_TTL_MS) return agentsCache.value;
   const found = client.refresh();
   const usable = !!(found && found.ok);
-  return {
+  const value = {
     claude: locator.registeredServer() ? 'global' : usable ? 'session' : null,
     codex: locator.codexRegistered() ? 'global' : usable ? 'session' : null,
   };
+  agentsCache = { at: now(), value };
+  return value;
 }
 
 /**
@@ -860,8 +969,9 @@ function sessionLaunch(projectId, harnessId) {
   const found = client.refresh();
   if (!found || !found.ok) return {};
   const args = profileArgs(s.toolProfile);
+  const agents = agentsStatus();
   if (harnessId === 'claude') {
-    if (locator.registeredServer()) return {};
+    if (agents.claude === 'global') return {};
     const dir = typeof cbmDir === 'function' ? cbmDir() : cbmDir;
     if (!dir) return {};
     const file = path.join(dir, `mcp-${s.toolProfile || 'all'}.json`);
@@ -879,7 +989,7 @@ function sessionLaunch(projectId, harnessId) {
     return { mcpConfig: file };
   }
   if (harnessId === 'codex') {
-    if (locator.codexRegistered()) return {};
+    if (agents.codex === 'global') return {};
     return { mcpServers: [{ name: locator.SERVER_NAME, command: found.path, args }] };
   }
   return {};
@@ -902,6 +1012,7 @@ async function installAgents({ dryRun = true } = {}) {
   const found = requireBinary();
   const result = await runInstall(found.path, dryRun ? ['install', '--dry-run', '-n'] : ['install', '-y']);
   if (!dryRun) {
+    agentsCache = null;
     emit('knowledge-changed', { projectId: null, reason: 'agents' });
   }
   return { ok: result.ok, dryRun, output: String(result.output || '').slice(0, 200000), error: result.error || null };
@@ -920,6 +1031,7 @@ async function downloadBinary() {
       onStep: (step) => { download = { step, error: null, done: false }; emit('knowledge-changed', { projectId: null, reason: 'download' }); },
     });
     download = null;
+    agentsCache = null;
     client.reset();
     emit('knowledge-changed', { projectId: null, reason: 'binary' });
     return { ok: true, installed };
@@ -937,6 +1049,7 @@ function binary() {
 
 /** Try the session again (after repeated crashes, or a binary fixed by hand). */
 function restart() {
+  agentsCache = null;
   client.reset();
   emit('knowledge-changed', { projectId: null, reason: 'binary' });
   return { ok: true, client: client.status() };
@@ -948,6 +1061,7 @@ module.exports = {
   CONFIG_KEYS,
   LENS_WORKSPACES,
   normalizeSettings,
+  readOnlyCypher,
   getSettings,
   setSettings,
   settingsFor,
