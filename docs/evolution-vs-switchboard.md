@@ -83,8 +83,10 @@ What "an app of its own" means:
 - **Pull Requests**, through the GitHub CLI (`gh`): the one installed on the computer, or the one every build carries when there is none:
   - one tab per repository; every open pull request, drafts too, newest first
   - a filter for Open, Draft, Closed and Merged; closed and merged ones 10 at a time
-  - a row opens on its changed files and their diffs
-  - Merge (the repository's merge methods, the branch deleted on GitHub if you want), Convert to draft, Ready for review and Close, each asked first; the local checkout is never touched
+  - an open row shows the pull request as GitHub does, in four tabs: Conversation (the description and every comment and review, review threads, events, reactions, the reviewers, assignees and labels), Commits, Checks (with a finished job's log) and Files changed (with Viewed)
+  - the title edited in place; the description, comments and replies written, edited, hidden or deleted where GitHub allows; conversations resolved; reviews (Comment, Approve, Request changes); reviewers, assignees and labels changed; the branch updated with its base; failed jobs run again
+  - Merge (the repository's merge methods, the branch deleted on GitHub if you want), Convert to draft, Ready for review, Change base, Close and Reopen, each asked first; the local checkout is never touched
+  - the same on the phone, on a screen of its own
 
 ### 4. Files
 
