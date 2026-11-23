@@ -113,8 +113,13 @@ jobs:
           - name: Windows
             os: windows-2022
             args: --win --x64 --arm64
+          # node-pty has no prebuild for Linux: it is compiled on the runner
+          # and needs the glibc it was compiled against. ubuntu-latest is
+          # Ubuntu 26.04, whose glibc 2.42 makes a pty.node that fails to load
+          # on any older distribution; on 24.04 it needs glibc 2.34 (the
+          # "native modules" step below holds the Linux app to that).
           - name: Linux
-            os: ubuntu-latest
+            os: ubuntu-24.04
             args: --linux --x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -168,6 +173,31 @@ jobs:
             fi
             echo "$resources/bin/herdr-core"
           done
+
+      # A native module that needs a newer glibc than the distribution has
+      # does not load, and the app stops at launch (node-pty only reports
+      # that its prebuild is missing). The Linux app runs on glibc 2.34 and
+      # later (Ubuntu 22.04, Debian 12, Fedora 35); a module that needs more
+      # stops the build here instead.
+      - name: Linux native modules run on glibc 2.34
+        if: runner.os == 'Linux'
+        run: |
+          max=2.34
+          shopt -s globstar nullglob
+          mods=(dist/linux*-unpacked/resources/app.asar.unpacked/**/*.node)
+          [ ${#mods[@]} -gt 0 ] || { echo "::error::No native module found in the Linux app."; exit 1; }
+          status=0
+          for mod in "${mods[@]}"; do
+            # node-pty also carries its Mac and Windows prebuilds.
+            case "$(file -b "$mod")" in ELF*) ;; *) continue ;; esac
+            need=$(objdump -T "$mod" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -n 1 || true)
+            echo "$mod: glibc ${need:-any}"
+            if [ -n "$need" ] && [ "$(printf '%s\n%s\n' "$need" "$max" | sort -V | tail -n 1)" != "$max" ]; then
+              echo "::error::$mod needs glibc $need, newer than $max: it would not load on older distributions."
+              status=1
+            fi
+          done
+          exit $status
 
       # scripts/after-pack-gh.js puts the GitHub CLI in every app, or stops
       # the build: the Pull Requests view runs it when the computer has none.
