@@ -73,7 +73,7 @@ npx expo start
 npm run build:apk        # an Android APK built on your computer, signed with your own key
 ```
 
-The Mac and Linux builds carry herdr-core (`apps/desktop/scripts/after-pack-herdr.js`), which keeps sessions running when the app quits and lets a new version pick them up; a build that cannot fetch it stops rather than ship without it. A Mac build makes a dmg for Apple silicon (`-arm64`) and one for Intel (`-x64`): on an Apple silicon Mac install the arm64 one, as the Intel one runs under Rosetta, slower.
+The Mac and Linux builds carry herdr-core (`apps/desktop/scripts/after-pack-herdr.js`), which keeps sessions running when the app quits and lets a new version pick them up; a build that cannot fetch it stops rather than ship without it. Every build, Windows too, also carries the GitHub CLI (`apps/desktop/scripts/after-pack-gh.js`) for the Git tab's Pull Requests view: a `gh` installed on the computer comes first, and the one in the app is used when there is none. A Mac build makes a dmg for Apple silicon (`-arm64`) and one for Intel (`-x64`): on an Apple silicon Mac install the arm64 one, as the Intel one runs under Rosetta, slower.
 
 Turn on **Mobile app access** in the desktop app, choose **Add a device** and scan the QR code with the phone app to pair.
 

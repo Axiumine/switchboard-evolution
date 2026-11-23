@@ -284,6 +284,36 @@ test('without gh on the computer nothing is started', async () => {
   assert.equal(result.code, 'gh-missing');
 });
 
+test('the gh installed on the computer comes first, then the one in the app', () => {
+  const RES = '/Applications/Demo.app/Contents/Resources';
+  const files = new Set(['/opt/homebrew/bin/gh', `${RES}/bin/gh`, '/tmp/my-gh', 'C:\\App\\resources\\bin\\gh.exe']);
+  const exists = (p) => files.has(p);
+  const installed = (name) => (name === 'gh' ? '/opt/homebrew/bin/gh' : null);
+  const none = () => null;
+  assert.deepEqual(pr.locateGh({ override: undefined, finder: installed, resourcesPath: RES, exists, platform: 'darwin' }),
+    { path: '/opt/homebrew/bin/gh', source: 'installed' });
+  assert.deepEqual(pr.locateGh({ override: undefined, finder: none, resourcesPath: RES, exists, platform: 'darwin' }),
+    { path: `${RES}/bin/gh`, source: 'bundled' });
+  assert.deepEqual(pr.locateGh({ override: '/tmp/my-gh', finder: installed, resourcesPath: RES, exists, platform: 'darwin' }),
+    { path: '/tmp/my-gh', source: 'override' });
+  // An override that is not there is passed over.
+  assert.equal(pr.locateGh({ override: '/tmp/gone', finder: none, resourcesPath: '/elsewhere', exists, platform: 'darwin' }), null);
+  // Electron run from node_modules has no gh in its resources.
+  assert.equal(pr.locateGh({ override: undefined, finder: none, resourcesPath: undefined, exists, platform: 'darwin' }), null);
+  // Windows looks for gh.exe.
+  const asked = [];
+  pr.locateGh({ override: undefined, finder: (name) => { asked.push(name); return null; }, resourcesPath: 'C:\\App\\resources', exists: () => false, platform: 'win32' });
+  assert.deepEqual(asked, ['gh.exe']);
+});
+
+test('signed out with the gh in the app, the sign-in command names it in full', async () => {
+  const gh = { path: '/Applications/Demo App.app/Contents/Resources/bin/gh', source: 'bundled' };
+  setup({ answer: () => ({ code: 4, stdout: '', stderr: 'To get started with GitHub CLI, please run:  gh auth login\n', gh }) });
+  const result = await pr.listOpen(DIR);
+  assert.equal(result.code, 'gh-auth');
+  assert.equal(result.error, 'Sign in to GitHub: in a terminal, run "/Applications/Demo App.app/Contents/Resources/bin/gh" auth login, then try again.');
+});
+
 test('gh runs without prompts, colours or update notices, with Homebrew in PATH', () => {
   const env = pr.ghEnv({ PATH: '/usr/bin:/bin', ELECTRON_RUN_AS_NODE: '1', HOME: '/home/dev' });
   assert.equal(env.GH_PROMPT_DISABLED, '1');

@@ -78,7 +78,7 @@ What "an app of its own" means:
   - a guided New worktree (new, existing or remote branch, folder, local files to copy, a command after creating)
   - Lock, Move, Repair, Prune, "Remove merged…"
   - new sessions started right in a worktree
-- **Pull Requests**, through the GitHub CLI (`gh`) on the computer:
+- **Pull Requests**, through the GitHub CLI (`gh`): the one installed on the computer, or the one every build carries when there is none:
   - one tab per repository; every open pull request, drafts too, newest first
   - a filter for Open, Draft, Closed and Merged; closed and merged ones 10 at a time
   - a row opens on its changed files and their diffs

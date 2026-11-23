@@ -7,7 +7,8 @@ name: Release
 # - macOS: a dmg and a zip for Apple silicon and for Intel, signed ad hoc
 #   (no Apple Developer ID), as a build made on a Mac with npm run build:mac.
 #   Every Mac and Linux app carries herdr-core (scripts/after-pack-herdr.js),
-#   which keeps sessions running when the app quits.
+#   which keeps sessions running when the app quits, and every app, Windows
+#   too, the GitHub CLI (scripts/after-pack-gh.js) for the Pull Requests view.
 # - Windows: an installer for x64 and for arm64, unsigned.
 # - Linux: an AppImage, a deb and a pacman package, x64.
 # - Android: an APK made as scripts/build-apk.sh makes it on a Mac (expo
@@ -166,6 +167,23 @@ jobs:
               exit 1
             fi
             echo "$resources/bin/herdr-core"
+          done
+
+      # scripts/after-pack-gh.js puts the GitHub CLI in every app, or stops
+      # the build: the Pull Requests view runs it when the computer has none.
+      - name: gh is in the app
+        run: |
+          shopt -s nullglob
+          apps=(dist/mac*/*.app/Contents/Resources dist/linux*-unpacked/resources dist/win*-unpacked/resources)
+          [ ${#apps[@]} -gt 0 ] || { echo "::error::No packed app found in dist."; exit 1; }
+          for resources in "${apps[@]}"; do
+            gh="$resources/bin/gh"
+            case "$resources" in dist/win*) gh="$gh.exe" ;; esac
+            if [ ! -f "$gh" ] || [ ! -f "$resources/bin/gh.LICENSE" ]; then
+              echo "::error::$gh or its licence is missing."
+              exit 1
+            fi
+            echo "$gh"
           done
 
       - uses: actions/upload-artifact@v7

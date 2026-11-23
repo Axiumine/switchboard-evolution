@@ -2,7 +2,9 @@
 //
 // The app keeps no GitHub credentials: `gh` already holds the user's login
 // (github.com and Enterprise hosts alike), so every read and every action is a
-// `gh` command:
+// `gh` command. A gh installed on the computer comes first; without one the
+// view runs the gh the app carries (resources/bin, scripts/after-pack-gh.js),
+// which reads the same login (~/.config/gh and the system keychain):
 //
 //   - the list: `gh api graphql`, with the query and its variables as JSON on
 //     stdin. GraphQL gives real cursors (`gh pr list` has no offset), so the
@@ -25,7 +27,9 @@
 // init(ctx), so tests can hand it a fake `runGh` and a fake `git`.
 
 const cp = require('child_process');
+const fs = require('fs');
 const os = require('os');
+const path = require('path');
 const { findBinary, pathWithHomebrew } = require('./find-binary');
 const { buildPtyEnv } = require('./pty-env');
 
@@ -82,20 +86,38 @@ function ghEnv(source = process.env) {
   };
 }
 
+/**
+ * The gh the view runs, as { path, source }: SWITCHBOARD_GH when it names one,
+ * then a gh installed on the computer (PATH, then Homebrew's folders), then
+ * the one in the app (resources/bin). Null when there is none.
+ */
+function locateGh({ override = process.env.SWITCHBOARD_GH, finder = find, resourcesPath = process.resourcesPath, exists = fs.existsSync, platform = process.platform } = {}) {
+  const exe = platform === 'win32' ? 'gh.exe' : 'gh';
+  if (override && exists(override)) return { path: override, source: 'override' };
+  const installed = finder(exe);
+  if (installed) return { path: installed, source: 'installed' };
+  const bundled = resourcesPath ? path.join(resourcesPath, 'bin', exe) : null;
+  if (bundled && exists(bundled)) return { path: bundled, source: 'bundled' };
+  return null;
+}
+
 function missingError() {
   const err = new Error(GH_MISSING);
   err.code = 'gh-missing';
   return err;
 }
 
-/** Run gh with `args`, `input` on stdin; resolves to { stdout, stderr, code } whatever the exit code. */
+/**
+ * Run gh with `args`, `input` on stdin; resolves to { stdout, stderr, code, gh }
+ * whatever the exit code, `gh` being which one ran (locateGh).
+ */
 function defaultRunGh(args, { input = null, timeoutMs = READ_TIMEOUT_MS } = {}) {
-  const bin = find('gh');
-  if (!bin) return Promise.reject(missingError());
+  const gh = locateGh();
+  if (!gh) return Promise.reject(missingError());
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = cp.spawn(bin, args, { cwd: os.tmpdir(), env: ghEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
+      child = cp.spawn(gh.path, args, { cwd: os.tmpdir(), env: ghEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       reject(err.code === 'ENOENT' ? missingError() : err);
       return;
@@ -119,7 +141,7 @@ function defaultRunGh(args, { input = null, timeoutMs = READ_TIMEOUT_MS } = {}) 
     child.on('close', (code) => {
       clearTimeout(timer);
       if (failure) { reject(failure); return; }
-      resolve({ stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(errOut).toString('utf8'), code });
+      resolve({ stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(errOut).toString('utf8'), code, gh });
     });
     child.stdin.on('error', () => {});
     child.stdin.end(input == null ? '' : input);
@@ -146,7 +168,11 @@ function ghFailure(result, target) {
   const text = cleanGhText(`${result.stderr || ''}\n${result.code ? '' : result.stdout || ''}`);
   if (result.code === 4 || /gh auth login|not logged in|authentication required|HTTP 401|Bad credentials/i.test(text)) {
     const host = target && target.host && target.host !== 'github.com' ? ` --hostname ${target.host}` : '';
-    return { error: `Sign in to GitHub with "gh auth login${host}" in a terminal, then try again.`, code: 'gh-auth' };
+    // The gh in the app is not on PATH: the command names it in full.
+    const error = result.gh && result.gh.source === 'bundled'
+      ? `Sign in to GitHub: in a terminal, run "${result.gh.path}" auth login${host}, then try again.`
+      : `Sign in to GitHub with "gh auth login${host}" in a terminal, then try again.`;
+    return { error, code: 'gh-auth' };
   }
   // --match-head-commit: the branch moved on since the list was read.
   if (/Head branch was modified/i.test(text)) {
@@ -497,6 +523,6 @@ module.exports = {
   init,
   listOpen, listPage, files, runAction,
   // exported for tests
-  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghFailure, ghEnv,
+  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghFailure, ghEnv, locateGh,
   normalizePullRequest, repositoryInfo, LIST_QUERY, MERGE_METHODS, ACTIONS,
 };

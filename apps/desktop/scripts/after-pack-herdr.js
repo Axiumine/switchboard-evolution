@@ -1,10 +1,10 @@
-// after-pack-herdr.js — electron-builder's afterPack hook (package.json
-// build.afterPack): puts herdr-core in the app, as resources/bin/herdr-core,
-// where hc-engine.js finds it. Sessions run in herdr-core so they keep
-// running when the app quits; an app without it runs them inside itself, and
-// a new version installed over one with it does not find the sessions it
-// left running. So every build carries it: npm run build:*, the Release
-// workflow and switchboard-e alike.
+// after-pack-herdr.js — puts herdr-core in the app, as resources/bin/herdr-core,
+// where hc-engine.js finds it (run by scripts/after-pack.js, electron-builder's
+// afterPack hook). Sessions run in herdr-core so they keep running when the
+// app quits; an app without it runs them inside itself, and a new version
+// installed over one with it does not find the sessions it left running. So
+// every build carries it: npm run build:*, the Release workflow and
+// switchboard-e alike.
 //
 // The pinned version comes from releases.herdr.dev, checked against the
 // SHA-256 in its manifest, and is kept in a cache so builds do not download it

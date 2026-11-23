@@ -93,7 +93,7 @@
       "node_modules/node-pty/**"
     ],
     "publish": null,
-    "afterPack": "scripts/after-pack-herdr.js",
+    "afterPack": "scripts/after-pack.js",
     "mac": {
       "target": [
         {
