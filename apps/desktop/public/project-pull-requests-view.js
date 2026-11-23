@@ -80,6 +80,10 @@ function prRepoData(remote = null) {
     files: new Map(),     // `${number}@${headOid}` → { loading } | { files, truncated } | { error }
     openFiles: new Map(), // the same key → Set of file paths whose diff is shown; none at first
     closedFolders: new Map(), // the same key → Set of tree folders closed
+    detail: new Map(),    // number → what an open pull request's tabs hold (pull-request-detail-view.js)
+    drafts: new Map(),    // editor key → its text, kept while it is open
+    titleEdit: null,      // { number, busy, error } while a title is edited in place
+    listPending: false,   // a repaint waiting for the focus to leave a field
   };
 }
 
@@ -210,13 +214,20 @@ function prMergeBlock(pr, repo) {
   return null;
 }
 
-/** The row's "…" menu: Convert to draft or Ready for review, then Close. Closed and merged ones have none. */
+/**
+ * The row's "…" menu: Convert to draft or Ready for review, Change base, then
+ * Close; a closed one has Reopen; a merged one has none.
+ */
 function prRowMenuItems(pr, repo, actions = {}) {
-  if (pr.state !== 'OPEN') return [];
   const disabled = !prCanEdit(pr, repo);
+  if (pr.state === 'CLOSED') {
+    return [{ label: 'Reopen pull request…', icon: PR_ICONS.open(13), disabled: disabled && !pr.viewerCanReopen, onClick: () => actions.reopen?.() }];
+  }
+  if (pr.state !== 'OPEN') return [];
   const items = [];
   if (pr.isDraft) items.push({ label: 'Ready for review…', icon: PR_ICONS.open(13), disabled, onClick: () => actions.ready?.() });
   else items.push({ label: 'Convert to draft…', icon: PR_ICONS.draft(13), disabled, onClick: () => actions.draft?.() });
+  items.push({ label: 'Change base…', icon: PICONS.branch(13), disabled, onClick: () => actions.base?.() });
   items.push({ sep: true });
   items.push({ label: 'Close pull request…', icon: PR_ICONS.closed(13), danger: true, disabled, onClick: () => actions.close?.() });
   return items;
@@ -312,22 +323,35 @@ function prWebTitle(pr) {
   return `#${pr.number} ${pr.title || ''}`.trim();
 }
 
-function prRowHtml(pr, { expanded = false, repo = null, now = new Date() } = {}) {
+/**
+ * The title being edited in place: the field, and the pencil turned into Save.
+ * Enter saves, Escape puts the title back.
+ */
+function prTitleEditHtml(pr, edit) {
+  const off = edit.busy ? ' disabled' : '';
+  return `<span class="pr-title-edit"><input type="text" class="pr-title-input" value="${prAttr(edit.text)}" maxlength="256" spellcheck="true" aria-label="Title of #${pr.number}" title="Enter saves, Esc cancels"${off}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-title-save" data-act="title-save"${off}>${edit.busy ? '<span class="gg-dialog-spinner" aria-hidden="true"></span>' : PICONS.check(12)}<span>Save</span></button>${edit.error ? `<span class="pr-title-error" role="alert">${escapeHtml(edit.error)}</span>` : ''}</span>`;
+}
+
+function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleEdit = null } = {}) {
   const status = prStatus(pr);
   const block = prMergeBlock(pr, repo);
   const branches = `${pr.head} → ${pr.base}`;
   const link = prLinkToolsHtml(pr);
+  const more = prRowMenuItems(pr, repo).length
+    ? `
+          <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="more" title="More actions" aria-label="More actions for #${pr.number}">${PICONS.dots(13)}</button>` : '';
   // A disabled button shows no tooltip of its own: the reason sits on its wrapper.
   const actions = link + (pr.state === 'OPEN' ? `
-          <span class="pr-merge-wrap"${block ? ` title="${prAttr(block)}"` : ''}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-merge-btn" data-act="merge"${block ? ' disabled' : ''}>${PR_ICONS.merged(12)}<span>Merge</span></button></span>
-          <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="more" title="More actions" aria-label="More actions for #${pr.number}">${PICONS.dots(13)}</button>` : '');
+          <span class="pr-merge-wrap"${block ? ` title="${prAttr(block)}"` : ''}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-merge-btn" data-act="merge"${block ? ' disabled' : ''}>${PR_ICONS.merged(12)}<span>Merge</span></button></span>` : '') + more;
+  const pencil = pr.viewerCanUpdate ? `<button type="button" class="pr-title-pencil" data-act="title-edit" title="Edit title" aria-label="Edit the title of #${pr.number}">${PICONS.pencil(12)}</button>` : '';
+  const title = titleEdit ? prTitleEditHtml(pr, titleEdit) : `<span class="pr-title">${escapeHtml(pr.title)}</span>${pencil}`;
   return `
     <div class="pr-item${expanded ? ' open' : ''}" data-pr="${pr.number}">
       <div class="pr-row" data-act="toggle" role="button" tabindex="0" aria-expanded="${expanded}">
         <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
         <span class="pr-state pr-state--${status}" title="${PR_STATE_LABELS[status]}">${PR_ICONS[status](15)}</span>
         <div class="pr-main">
-          <div class="pr-line"><span class="pr-title">${escapeHtml(pr.title)}</span>${prBadgesHtml(pr)}</div>
+          <div class="pr-line">${title}${prBadgesHtml(pr)}</div>
           <div class="pr-meta"><span class="pr-number">#${pr.number}</span><span>${escapeHtml(prWhenText(pr, now))} by ${escapeHtml(pr.author)}</span><span class="pr-branches mono" title="${prAttr(branches)}">${escapeHtml(branches)}</span><span class="pr-stats mono"><span class="pr-add">+${pr.additions || 0}</span> <span class="pr-del">−${pr.deletions || 0}</span></span><span>${prPlural(pr.changedFiles || 0, 'file')}</span></div>
         </div>
         <div class="pr-actions">${actions}</div>
@@ -354,6 +378,13 @@ function prFooterHtml(data, filter) {
     </div>`;
 }
 
+/** The title edit of this row, if it is the one being edited: its text is the draft. */
+function prTitleEditOf(data, pr) {
+  const edit = data.titleEdit;
+  if (!edit || edit.number !== pr.number) return null;
+  return { text: data.drafts?.get(`title:${pr.number}`) ?? pr.title, busy: !!edit.busy, error: edit.error || '' };
+}
+
 /** The list for one repository's data and the filter: rows, an empty line, the pages' footer. */
 function prListHtml(data, filter, now = new Date()) {
   const items = prMergeLists(data.open?.items, data.page.items, filter);
@@ -361,7 +392,7 @@ function prListHtml(data, filter, now = new Date()) {
   const truncated = data.open?.truncated ? '<div class="pr-footer">Only the newest 1000 open pull requests are listed.</div>' : '';
   const waitingForPage = prPageStates(filter).length && !data.page.loaded;
   const rows = items.length
-    ? `<div class="pr-rows">${items.map(pr => prRowHtml(pr, { expanded: data.expanded.has(pr.number), repo, now })).join('')}</div>`
+    ? `<div class="pr-rows">${items.map(pr => prRowHtml(pr, { expanded: data.expanded.has(pr.number), repo, now, titleEdit: prTitleEditOf(data, pr) })).join('')}</div>`
     : (waitingForPage ? '' : `<div class="git-empty-state"><div class="git-empty-title">${escapeHtml(prEmptyText(filter))}</div></div>`);
   return `${rows}${truncated}${prFooterHtml(data, filter)}`;
 }
@@ -402,7 +433,7 @@ function prFilesToolsHtml(view) {
  * An open pull request's changed files, as a tree or a list. Every diff starts
  * closed: a file opens its own, Expand all opens them all.
  */
-function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = new Set() } = {}) {
+function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = new Set(), viewed = null } = {}) {
   if (!entry || entry.loading) return '<div class="pr-files-empty"><span class="git-loading-dot"></span>Reading the changed files…</div>';
   if (entry.error) {
     return `<div class="pr-files-empty is-error"><span>${escapeHtml(entry.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="files-retry">Retry</button></div>`;
@@ -432,22 +463,28 @@ function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = n
     // In the tree the folders say where a file is; the list says it after the name.
     const where = tree ? '' : escapeHtml(dir);
     const from = file.oldPath ? ` <span class="pr-file-from">from ${escapeHtml(file.oldPath)}</span>` : '';
-    return `
-      <button type="button" class="pr-file${tree ? ' tree' : ''}${isOpen ? ' open' : ''}" data-file="${file.index}" aria-expanded="${isOpen}" style="--depth:${row.depth}" title="${prAttr(title)}">
+    // A pull request's files (not a commit's) can be marked as viewed, as on GitHub.
+    const seen = viewed ? viewed[file.path] : null;
+    const box = viewed ? `<label class="pr-viewed${seen === 'DISMISSED' ? ' is-dismissed' : ''}" title="${seen === 'DISMISSED' ? 'Changed since you viewed it' : 'Mark as viewed'}"><input type="checkbox" data-viewed="${file.index}"${seen === 'VIEWED' ? ' checked' : ''}><span>Viewed</span></label>` : '';
+    const button = `
+      <button type="button" class="pr-file${tree ? ' tree' : ''}${isOpen ? ' open' : ''}${seen === 'VIEWED' ? ' is-viewed' : ''}" data-file="${file.index}" aria-expanded="${isOpen}" style="--depth:${row.depth}" title="${prAttr(title)}">
         <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
         <span class="git-file-code ${prAttr(file.status)}">${PR_STATUS_LETTERS[file.status] || 'M'}</span>
         ${icon}
         <span class="pr-file-name mono">${escapeHtml(name)}</span>
         <span class="pr-file-dir">${where}${from}</span>
         <span class="pr-stats mono"><span class="pr-add">+${file.insertions || 0}</span> <span class="pr-del">−${file.deletions || 0}</span></span>
-      </button>
+      </button>`;
+    return `${box ? `<div class="pr-file-line">${button}${box}</div>` : button}
       <div class="pr-file-diff" data-diff="${file.index}"${isOpen ? '' : ' hidden'}>${isOpen ? prPatchHtml(file) : ''}</div>`;
   }).join('');
+  const viewedCount = viewed ? files.filter(f => viewed[f.path] === 'VIEWED').length : 0;
   return `
     <div class="pr-files-head">
       <span>${prPlural(files.length, 'file')} changed</span>
       <span class="pr-stats mono"><span class="pr-add">+${insertions}</span> <span class="pr-del">−${deletions}</span></span>
       ${entry.truncated ? '<span class="pr-files-note">GitHub lists the first 3000 files.</span>' : ''}
+      ${viewed ? `<span class="pr-viewed-count">${viewedCount} of ${files.length} viewed</span>` : ''}
       ${prFilesToolsHtml(view)}
     </div>
     <div class="pr-files${tree ? ' is-tree' : ''}">${rows}</div>`;
@@ -476,6 +513,11 @@ const PR_ACTION_COPY = {
     title: 'Ready for review',
     primary: 'Mark as ready',
     text: 'Reviewers are asked to review it, and it can be merged when the repository\'s rules allow it.',
+  },
+  reopen: {
+    title: 'Reopen pull request',
+    primary: 'Reopen pull request',
+    text: 'It is open again, with its branch, its commits and its conversation as they were.',
   },
   close: {
     title: 'Close pull request',
@@ -616,6 +658,8 @@ function prPaint(project, state, body) {
   prWireRepoPicker(project, state, body);
   prPaintList(project, state, body);
   prBindNotice(project, state, body);
+  // A repaint held back while a field had the focus runs once it leaves (after the click that moved it).
+  body.onfocusout = () => setTimeout(() => { if (typeof prFlushPending === 'function') prFlushPending(project, state); }, 200);
   body.querySelector('#pr-refresh').onclick = () => prRefresh(project, state, repo.path, { notice: true });
   body.querySelector('#pr-filter').onclick = (e) => prOpenFilterMenu(project, state, body, e.currentTarget);
   prWireRemote(project, state, body, repo.path);
@@ -682,6 +726,9 @@ function prPaintList(project, state, body) {
   const repo = prSelectedRepo(state);
   if (!list || !repo) return;
   const data = prRepoState(project.id, state, repo.path);
+  // Never under the fingers: while a field in the list has the focus, the repaint waits.
+  if (typeof prTypingIn === 'function' && prTypingIn(list)) { data.listPending = true; return; }
+  data.listPending = false;
   // Painting again keeps the place: the view scrolls, not the list.
   const scroller = body;
   const scrollTop = scroller.scrollTop;
@@ -730,7 +777,7 @@ function prWireItem(project, state, repoPath, item, pr) {
   const row = item.querySelector('.pr-row');
   const toggle = () => prToggle(project, state, repoPath, item, pr);
   row.onclick = (e) => {
-    if (e.target.closest('[data-act="merge"], [data-act="more"], .pr-link-tools, .pr-merge-wrap')) return;
+    if (e.target.closest('[data-act="merge"], [data-act="more"], .pr-link-tools, .pr-merge-wrap, .pr-title-edit, [data-act="title-edit"]')) return;
     toggle();
   };
   row.onkeydown = (e) => {
@@ -739,6 +786,7 @@ function prWireItem(project, state, repoPath, item, pr) {
     toggle();
   };
   prWireLinkTools(item, pr);
+  prWireTitle(project, state, repoPath, item, pr);
   const merge = item.querySelector('[data-act="merge"]');
   if (merge) merge.onclick = (e) => { e.stopPropagation(); prMergeDialog(project, state, repoPath, pr); };
   const more = item.querySelector('[data-act="more"]');
@@ -749,6 +797,8 @@ function prWireItem(project, state, repoPath, item, pr) {
         draft: () => prConfirmDialog(project, state, repoPath, pr, 'draft'),
         ready: () => prConfirmDialog(project, state, repoPath, pr, 'ready'),
         close: () => prConfirmDialog(project, state, repoPath, pr, 'close'),
+        reopen: () => prConfirmDialog(project, state, repoPath, pr, 'reopen'),
+        base: () => prChangeBaseDialog(project, state, repoPath, pr),
       }), { anchor: e.currentTarget });
     };
   }
@@ -767,26 +817,46 @@ function prToggle(project, state, repoPath, item, pr) {
   prPaintDetail(project, state, repoPath, item, pr);
 }
 
+/** What is under an open row: the four tabs (pull-request-detail-view.js), or the files alone without it. */
 function prPaintDetail(project, state, repoPath, item, pr) {
+  if (typeof prdPaint === 'function') { prdPaint(project, state, repoPath, item, pr); return; }
+  prPaintFiles(project, state, repoPath, item, pr, item.querySelector('.pr-detail'));
+}
+
+/** The Files changed tab: the pull request's files, read once per head commit, with their Viewed boxes. */
+function prPaintFiles(project, state, repoPath, item, pr, slot) {
   const data = prRepoState(project.id, state, repoPath);
   const key = prFilesKey(pr);
   const entry = data.files.get(key);
-  const detail = item.querySelector('.pr-detail');
   if (!entry) {
     prLoadFiles(project, state, repoPath, pr);
-    detail.innerHTML = prFilesHtml({ loading: true });
+    slot.innerHTML = prFilesHtml({ loading: true });
     return;
   }
   if (!data.openFiles.has(key)) data.openFiles.set(key, new Set());
   if (!data.closedFolders.has(key)) data.closedFolders.set(key, new Set());
   const openPaths = data.openFiles.get(key);
-  const closedFolders = data.closedFolders.get(key);
-  const repaint = () => prPaintDetail(project, state, repoPath, item, pr);
-  detail.innerHTML = prFilesHtml(entry, { open: openPaths, view: prFileView(), closedFolders });
-  detail.querySelector('[data-act="files-retry"]')?.addEventListener('click', () => {
-    data.files.delete(key);
-    repaint();
+  const d = typeof prdState === 'function' ? prdState(data, pr) : null;
+  const viewed = d && pr.id && d.viewed && !d.viewed.error && d.viewed.map ? d.viewed.map : null;
+  prWireFiles(slot, entry, {
+    openPaths,
+    closedFolders: data.closedFolders.get(key),
+    viewed,
+    repaint: () => prPaintDetail(project, state, repoPath, item, pr),
+    retry: () => { data.files.delete(key); prPaintDetail(project, state, repoPath, item, pr); },
+    onView: () => prRepaint(project, state, repoPath),
+    onViewed: viewed ? (file, on) => prdToggleViewed(prdContext(project, state, repoPath, item, pr), file, on, openPaths) : null,
   });
+}
+
+/**
+ * Files as prFilesHtml draws them, brought to life: a file opens its diff, a
+ * folder closes, Expand all and Collapse all, Tree and List (`onView`), and
+ * the Viewed boxes (`onViewed`). Used by Files changed and by each commit.
+ */
+function prWireFiles(slot, entry, { openPaths, closedFolders, viewed = null, repaint, retry, onView, onViewed = null }) {
+  slot.innerHTML = prFilesHtml(entry, { open: openPaths, view: prFileView(), closedFolders, viewed });
+  slot.querySelector('[data-act="files-retry"]')?.addEventListener('click', () => retry?.());
   const files = entry.files || [];
   const setOpen = (button, open) => {
     const file = files[Number(button.dataset.file)];
@@ -794,42 +864,139 @@ function prPaintDetail(project, state, repoPath, item, pr) {
     if (open) openPaths.add(file.path); else openPaths.delete(file.path);
     button.classList.toggle('open', open);
     button.setAttribute('aria-expanded', String(open));
-    const slot = detail.querySelector(`[data-diff="${button.dataset.file}"]`);
-    if (!slot) return;
-    slot.hidden = !open;
-    if (open && !slot.innerHTML) slot.innerHTML = prPatchHtml(file);
+    const diff = slot.querySelector(`[data-diff="${button.dataset.file}"]`);
+    if (!diff) return;
+    diff.hidden = !open;
+    if (open && !diff.innerHTML) diff.innerHTML = prPatchHtml(file);
   };
-  detail.querySelectorAll('.pr-file').forEach((button) => {
+  slot.querySelectorAll('.pr-file').forEach((button) => {
     button.onclick = () => setOpen(button, button.getAttribute('aria-expanded') !== 'true');
   });
-  detail.querySelectorAll('.pr-folder').forEach((button) => {
+  slot.querySelectorAll('.pr-folder').forEach((button) => {
     button.onclick = () => {
       const folder = button.dataset.folder;
       if (closedFolders.has(folder)) closedFolders.delete(folder); else closedFolders.add(folder);
-      repaint();
+      repaint?.();
+    };
+  });
+  slot.querySelectorAll('[data-viewed]').forEach((box) => {
+    box.onchange = () => {
+      const file = files[Number(box.dataset.viewed)];
+      if (file) onViewed?.(file, box.checked);
     };
   });
   // Expand all opens every folder and every diff; Collapse all closes the
   // diffs and leaves the folders as they are, so the files stay in sight.
-  const expandAll = detail.querySelector('[data-act="files-expand-all"]');
+  const expandAll = slot.querySelector('[data-act="files-expand-all"]');
   if (expandAll) expandAll.onclick = () => {
     closedFolders.clear();
     for (const file of files) openPaths.add(file.path);
-    repaint();
+    repaint?.();
   };
-  const collapseAll = detail.querySelector('[data-act="files-collapse-all"]');
+  const collapseAll = slot.querySelector('[data-act="files-collapse-all"]');
   if (collapseAll) collapseAll.onclick = () => {
     openPaths.clear();
-    repaint();
+    repaint?.();
   };
-  detail.querySelectorAll('[data-act="files-view"]').forEach((button) => {
+  slot.querySelectorAll('[data-act="files-view"]').forEach((button) => {
     button.onclick = () => {
       if (button.dataset.view === prFileView()) return;
       setPrFileView(button.dataset.view);
       // One choice for every pull request: the other open ones change too.
-      prRepaint(project, state, repoPath);
+      onView?.();
     };
   });
+}
+
+// --- The title, edited in place ---
+
+/** Paint one row again where it is (after its title changed, or started or stopped being edited). */
+function prRepaintItem(project, state, repoPath, number) {
+  const body = prActiveBody(project);
+  if (!body || state.selectedRepo !== repoPath) return null;
+  const data = prRepoState(project.id, state, repoPath);
+  const item = body.querySelector(`.pr-item[data-pr="${number}"]`);
+  const pr = typeof prFindPr === 'function' ? prFindPr(data, number) : null;
+  if (!item || !pr) return null;
+  const holder = document.createElement('div');
+  holder.innerHTML = prRowHtml(pr, { expanded: data.expanded.has(number), repo: data.open?.repo || null, titleEdit: prTitleEditOf(data, pr) }).trim();
+  const fresh = holder.firstElementChild;
+  item.replaceWith(fresh);
+  prWireItem(project, state, repoPath, fresh, pr);
+  return fresh;
+}
+
+function prFocusTitle(item) {
+  const input = item?.querySelector('.pr-title-input');
+  if (!input || input.disabled) return;
+  input.focus();
+  input.select();
+}
+
+function prWireTitle(project, state, repoPath, item, pr) {
+  const data = prRepoState(project.id, state, repoPath);
+  const key = `title:${pr.number}`;
+  const pencil = item.querySelector('[data-act="title-edit"]');
+  if (pencil) {
+    pencil.onclick = (e) => {
+      e.stopPropagation();
+      data.titleEdit = { number: pr.number, busy: false, error: '' };
+      data.drafts.set(key, pr.title);
+      prFocusTitle(prRepaintItem(project, state, repoPath, pr.number));
+    };
+  }
+  const input = item.querySelector('.pr-title-input');
+  if (!input) return;
+  const save = item.querySelector('[data-act="title-save"]');
+  const cancel = () => {
+    data.titleEdit = null;
+    data.drafts.delete(key);
+    prRepaintItem(project, state, repoPath, pr.number);
+  };
+  input.onclick = (e) => e.stopPropagation();
+  input.oninput = () => data.drafts.set(key, input.value);
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); prSaveTitle(project, state, repoPath, pr); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+  };
+  // The button keeps the field's focus, so the row is not painted again under the click.
+  if (save) {
+    save.onmousedown = (e) => e.preventDefault();
+    save.onclick = (e) => { e.stopPropagation(); prSaveTitle(project, state, repoPath, pr); };
+  }
+}
+
+/** Save the title being edited: refused when empty, nothing when unchanged; GitHub's refusal stays beside the field. */
+async function prSaveTitle(project, state, repoPath, pr) {
+  const data = prRepoState(project.id, state, repoPath);
+  const key = `title:${pr.number}`;
+  if (!data.titleEdit || data.titleEdit.number !== pr.number || data.titleEdit.busy) return;
+  const text = String(data.drafts.get(key) ?? pr.title).trim();
+  const fail = (error) => {
+    data.titleEdit = { number: pr.number, busy: false, error };
+    prFocusTitle(prRepaintItem(project, state, repoPath, pr.number));
+  };
+  if (!text) { fail('A title cannot be empty.'); return; }
+  if (text === pr.title) {
+    data.titleEdit = null;
+    data.drafts.delete(key);
+    prRepaintItem(project, state, repoPath, pr.number);
+    return;
+  }
+  if (!pr.id) { fail('Refresh the list, then try again.'); return; }
+  data.titleEdit = { number: pr.number, busy: true, error: '' };
+  prRepaintItem(project, state, repoPath, pr.number);
+  const result = await prApi('editPullRequest', project.id, repoPath, prRemoteOpts(data, { kind: 'title', pullRequestId: pr.id, title: text }));
+  if (state.repos.get(repoPath) !== data) return;
+  if (!result?.ok) { fail(result?.error || 'GitHub did not take the title.'); return; }
+  for (const item of [...(data.open?.items || []), ...(data.page?.items || [])]) if (item.number === pr.number) item.title = text;
+  pr.title = text;
+  const conversation = data.detail?.get(pr.number)?.conversation;
+  if (conversation?.pr) conversation.pr.title = text;
+  data.titleEdit = null;
+  data.drafts.delete(key);
+  prRepaintItem(project, state, repoPath, pr.number);
+  prLoad(project, state, repoPath, { quiet: true });
 }
 
 /** The repaint of one open row's files, if it is still on screen and open. */
@@ -1018,7 +1185,13 @@ async function prLoadFiles(project, state, repoPath, pr) {
 }
 
 async function prRefresh(project, state, repoPath, { notice = false } = {}) {
-  if (notice) prSetNotice(project, state, { kind: 'busy', text: 'Reading pull requests…' });
+  if (notice) {
+    prSetNotice(project, state, { kind: 'busy', text: 'Reading pull requests…' });
+    // What the open pull requests' tabs read is read again when they are painted.
+    for (const d of prRepoState(project.id, state, repoPath).detail.values()) {
+      for (const what of ['conversation', 'commits', 'checks', 'viewed']) if (d[what]) d[what].loadedAt = 0;
+    }
+  }
   const ok = await prLoad(project, state, repoPath, { quiet: true });
   if (notice && state.notice?.kind === 'busy') {
     const data = prRepoState(project.id, state, repoPath);
@@ -1171,6 +1344,7 @@ if (typeof module !== 'undefined' && module.exports) {
     PR_FILTERS, PR_DEFAULT_FILTER, PR_PAGE_SIZE,
     prStatus, prVisible, prPageStates, prMergeLists, prFilterLabel, prIsDefaultFilter, prToggleFilter, prEmptyText,
     prCanEdit, prMergeBlock, prRowMenuItems, prWebUrl, prLinkToolsHtml, prWebTitle, prFileRows, prFileView, prFilesToolsHtml, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
+    prTitleEditHtml, prTitleEditOf,
     prPatchHtml, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,
   };
 }

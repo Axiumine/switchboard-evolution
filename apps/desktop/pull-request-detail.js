@@ -94,6 +94,7 @@ fragment Head on PullRequest {
   author { login avatarUrl }
   viewerCanUpdate viewerCanReact viewerCanClose viewerCanReopen viewerCanUpdateBranch viewerCanLabel viewerCanAssign viewerDidAuthor
   mergeStateStatus mergeable reviewDecision headRefName headRefOid baseRefName isCrossRepository
+  totalCommentsCount allCommits: commits { totalCount }
   ${REACTIONS}
   reviewRequests(first: 50) { nodes { requestedReviewer { ${REVIEWER} } } }
   latestReviews(first: 50) { nodes { state submittedAt author { login avatarUrl } } }
@@ -374,8 +375,10 @@ function pullRequestHead(node) {
       label: !!node.viewerCanLabel,
       assign: !!node.viewerCanAssign,
     },
-    mergeStateStatus: node.mergeStateStatus || 'UNKNOWN',
+    mergeStateStatus: node.mergeStateStatus || 'UNKNOWN', // BEHIND | BLOCKED | CLEAN | DIRTY | DRAFT | HAS_HOOKS | UNSTABLE | UNKNOWN
     mergeable: node.mergeable || 'UNKNOWN',
+    comments: node.totalCommentsCount || 0,
+    commitCount: (node.allCommits && node.allCommits.totalCount) || 0,
     reviewDecision: node.reviewDecision || null,
     head: node.headRefName || '',
     headOid: node.headRefOid || '',
@@ -689,12 +692,11 @@ async function branches(dir, { remote = null, query = null } = {}) {
   if (failure) return failure;
   const repository = data.repository;
   const refs = repository.refs || {};
-  return {
-    ok: true,
-    defaultBranch: (repository.defaultBranchRef && repository.defaultBranchRef.name) || null,
-    branches: (refs.nodes || []).filter(Boolean).map(r => r.name).filter(Boolean),
-    totalCount: refs.totalCount || 0,
-  };
+  const defaultBranch = (repository.defaultBranchRef && repository.defaultBranchRef.name) || null;
+  const names = (refs.nodes || []).filter(Boolean).map(r => r.name).filter(Boolean);
+  // The default branch is offered even when it is not among the first 100 by name.
+  if (defaultBranch && !names.includes(defaultBranch) && (!query || defaultBranch.toLowerCase().includes(String(query).toLowerCase()))) names.unshift(defaultBranch);
+  return { ok: true, defaultBranch, branches: names, totalCount: refs.totalCount || 0 };
 }
 
 /** What the sidebar can add: the repository's labels, or the people who may be assigned or asked to review. */

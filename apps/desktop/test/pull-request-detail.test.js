@@ -45,7 +45,7 @@ const HEAD_NODE = {
   authorAssociation: 'OWNER', author: { login: 'dev-one', avatarUrl: null },
   viewerCanUpdate: true, viewerCanReact: true, viewerCanClose: true, viewerCanReopen: false, viewerCanUpdateBranch: true,
   viewerCanLabel: true, viewerCanAssign: false, viewerDidAuthor: true,
-  mergeStateStatus: 'BEHIND', mergeable: 'MERGEABLE', reviewDecision: 'REVIEW_REQUIRED',
+  mergeStateStatus: 'BEHIND', mergeable: 'MERGEABLE', reviewDecision: 'REVIEW_REQUIRED', totalCommentsCount: 5, allCommits: { totalCount: 2 },
   headRefName: 'feature', headRefOid: SHA, baseRefName: 'main', isCrossRepository: false,
   reactionGroups,
   reviewRequests: { nodes: [
@@ -112,6 +112,7 @@ test('the conversation comes in one GraphQL read: the pull request, a page of it
   assert.equal(result.pr.bodyHtml, '<p>The <strong>why</strong></p>');
   assert.equal(result.pr.editedAt, '2026-01-01T09:30:00Z');
   assert.equal(result.pr.mergeStateStatus, 'BEHIND');
+  assert.deepEqual([result.pr.comments, result.pr.commitCount], [5, 2]);
   assert.equal(result.pr.checks, 'PENDING');
   assert.equal(result.pr.pendingReviewId, 'PRR_pending');
   assert.deepEqual(result.pr.reactions, [{ content: 'THUMBS_UP', count: 2, mine: true }]);
@@ -307,6 +308,11 @@ test('branches for Change base come by name, with the default one', async () => 
   assert.match(calls[0].input.query, /refPrefix: "refs\/heads\/"/);
   assert.deepEqual(result, { ok: true, defaultBranch: 'main', branches: ['develop', 'main', 'release'], totalCount: 3 });
   assert.equal((await detail.branches(DIR, { query: 'x'.repeat(201) })).code, 'bad-request');
+  // Not among the first 100 by name: the default branch comes all the same, when it matches.
+  setup(() => json({ repository: { defaultBranchRef: { name: 'trunk' }, refs: { totalCount: 300, nodes: [{ name: 'aaa' }] } } }));
+  assert.deepEqual((await detail.branches(DIR, {})).branches, ['trunk', 'aaa']);
+  assert.deepEqual((await detail.branches(DIR, { query: 'TR' })).branches, ['trunk', 'aaa']);
+  assert.deepEqual((await detail.branches(DIR, { query: 'aa' })).branches, ['aaa']);
 });
 
 test('the sidebar is offered the repository\'s labels and the people who may be assigned', async () => {
