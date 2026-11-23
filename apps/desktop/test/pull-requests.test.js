@@ -213,13 +213,14 @@ test('each action is one fixed gh command, always with -R', () => {
   assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'draft' }).args, ['pr', 'ready', '7', '-R', 'acme/widgets', '--undo']);
   assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'ready' }).args, ['pr', 'ready', '7', '-R', 'acme/widgets']);
   assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'close' }).args, ['pr', 'close', '7', '-R', 'acme/widgets']);
+  assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'reopen' }).args, ['pr', 'reopen', '7', '-R', 'acme/widgets']);
   assert.deepEqual(pr.actionArgs({ ...target, host: 'github.example.com' }, { number: 7, action: 'close' }).args,
     ['pr', 'close', '7', '-R', 'github.example.com/acme/widgets']);
 });
 
 test('anything else is refused before gh runs', async () => {
   const target = { host: 'github.com', owner: 'acme', repo: 'widgets' };
-  assert.match(pr.actionArgs(target, { number: 7, action: 'reopen' }).error, /Unknown pull request action/);
+  assert.match(pr.actionArgs(target, { number: 7, action: 'lock' }).error, /Unknown pull request action/);
   assert.match(pr.actionArgs(target, { number: 7, action: 'merge', method: '--admin' }).error, /Unknown merge method/);
   assert.match(pr.actionArgs(target, { number: 7, action: 'merge', method: 'merge', headOid: 'main' }).error, /commit hash/);
   assert.match(pr.actionArgs(target, { number: '7 --admin', action: 'close' }).error, /number/);
@@ -241,7 +242,8 @@ test('an action says what it did, and one runs at a time per repository', async 
   assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'close' }), { ok: true, message: 'Closed pull request #8.' });
   assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'draft' }), { ok: true, message: 'Pull request #8 is a draft now.' });
   assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'ready' }), { ok: true, message: 'Pull request #8 is ready for review.' });
-  assert.equal(calls.length, 4);
+  assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'reopen' }), { ok: true, message: 'Reopened pull request #8.' });
+  assert.equal(calls.length, 5);
 });
 
 test('a merge queue or auto-merge is reported in gh\'s own words', async () => {

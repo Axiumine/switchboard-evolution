@@ -51,7 +51,7 @@ test('wrong parameters are refused before the handler runs', async () => {
     ['get-pull-requests-page', ['p1', REPO, { states: ['CLOSED'], first: 500 }]],
     ['get-pull-request-files', ['p1', REPO, { number: '7' }]],
     ['get-pull-request-files', ['p1', REPO, { number: 0 }]],
-    ['run-pull-request-action', act({ action: 'reopen' })],
+    ['run-pull-request-action', act({ action: 'lock' })],
     ['run-pull-request-action', act({ method: 'octopus' })],
     ['run-pull-request-action', act({ headOid: 'main' })],
     ['run-pull-request-action', act({ deleteBranch: 'yes' })],

@@ -753,6 +753,8 @@ ipcMain.handle('get-pull-request-viewed', guarded((id, folderPath, opts) => proj
 ipcMain.handle('get-pull-request-branches', guarded((id, folderPath, opts) => projects.projectPullRequestBranches(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('get-pull-request-candidates', guarded((id, folderPath, opts) => projects.projectPullRequestCandidates(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('render-pull-request-markdown', guarded((id, folderPath, opts) => projects.renderProjectPullRequestMarkdown(id, String(folderPath || ''), opts || {})));
+// Every other change to a pull request (pull-request-edits.js).
+ipcMain.handle('edit-pull-request', guarded((id, folderPath, params) => projects.editProjectPullRequest(id, String(folderPath || ''), params || {})));
 // The .env files a folder has, and the ones the dialog ticks by default,
 // so a new worktree can be offered its repository's local environment.
 ipcMain.handle('list-env-files', guarded((folderPath) => ({

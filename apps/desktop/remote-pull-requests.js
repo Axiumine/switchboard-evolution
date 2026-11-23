@@ -44,7 +44,7 @@ const FILES_OPTS = fields({ remote: optional(isRemote), number: isNumber }, ['nu
 const ACTION_PARAMS = fields({
   remote: optional(isRemote),
   number: isNumber,
-  action: oneOf('merge', 'draft', 'ready', 'close'),
+  action: oneOf('merge', 'draft', 'ready', 'close', 'reopen'),
   method: optional(oneOf('merge', 'squash', 'rebase')),
   deleteBranch: optional(isBool),
   headOid: optional(isHash),

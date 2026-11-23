@@ -12,7 +12,8 @@
 //     all read, 100 per request;
 //   - a pull request's files, each with its own patch: the REST endpoint
 //     `pulls/{n}/files`, one JSON object per line through `--jq`;
-//   - the actions: `gh pr merge | ready [--undo] | close`.
+//   - the actions: `gh pr merge | ready [--undo] | close | reopen`; every other
+//     change (title, comments, reviews…) is in pull-request-edits.js.
 //
 // Every command names the repository with `-R` (or `--hostname` and the
 // owner/name in the query) and runs outside the repository's folder, so `gh`
@@ -43,7 +44,7 @@ const MAX_PAGE_SIZE = 100;
 const MAX_PATCH_BYTES = 4 * 1024 * 1024; // all the patches of one pull request together
 const MAX_FILES = 3000; // what GitHub itself lists at most
 const MERGE_METHODS = ['merge', 'squash', 'rebase'];
-const ACTIONS = ['merge', 'draft', 'ready', 'close'];
+const ACTIONS = ['merge', 'draft', 'ready', 'close', 'reopen'];
 const PAGE_STATES = ['CLOSED', 'MERGED'];
 const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
 
@@ -505,6 +506,7 @@ function actionArgs(target, { number, action, method, deleteBranch, headOid } = 
   if (action === 'draft') return { args: ['pr', 'ready', String(n), ...repo, '--undo'] };
   if (action === 'ready') return { args: ['pr', 'ready', String(n), ...repo] };
   if (action === 'close') return { args: ['pr', 'close', String(n), ...repo] };
+  if (action === 'reopen') return { args: ['pr', 'reopen', String(n), ...repo] };
   if (!MERGE_METHODS.includes(method)) return { error: `Unknown merge method: ${method}` };
   if (headOid != null && !/^[0-9a-f]{40}$/.test(String(headOid))) return { error: 'Not a commit hash' };
   const args = ['pr', 'merge', String(n), ...repo, `--${method}`];
@@ -520,10 +522,11 @@ function doneMessage(action, n, ghText) {
   if (action === 'merge') return `Merged pull request #${n}.`;
   if (action === 'draft') return `Pull request #${n} is a draft now.`;
   if (action === 'ready') return `Pull request #${n} is ready for review.`;
+  if (action === 'reopen') return `Reopened pull request #${n}.`;
   return `Closed pull request #${n}.`;
 }
 
-/** Merge, convert to draft, mark ready for review or close one pull request. */
+/** Merge, convert to draft, mark ready for review, close or reopen one pull request. */
 async function runAction(dir, params = {}) {
   const { target, failure } = await targetFor(dir, params.remote || null);
   if (failure) return failure;
