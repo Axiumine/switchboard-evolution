@@ -43,6 +43,10 @@ async function knRenderGlobalSettings(el) {
       ? `${escapeHtml(found.version)}, ${escapeHtml(sourceText)}${found.ok ? '' : ` · <span class="kn-error-text">too old: ${escapeHtml(bin.minimum)} or later</span>`}${bin.updateAvailable ? ` · ${escapeHtml(bin.latest)} is out` : ''}<br><span class="kn-mono">${escapeHtml(found.path)}</span>`
       : `Not found. The Node Knowledge tab can download ${escapeHtml(bin.pinned || '')} into <span class="kn-mono">${escapeHtml(bin.installDir || '')}</span>.`,
     `<button class="settings-check-updates-btn" data-kn-act="pick">Choose…</button>${found?.source === 'settings' ? '<button class="settings-check-updates-btn" data-kn-act="default">Use the default</button>' : ''}${!found && bin.canDownload ? '<button class="settings-check-updates-btn" data-kn-act="download">Download</button>' : ''}`);
+  if (found?.ok) {
+    html += knSettingsField('Your agents', 'codebase-memory-mcp\'s installer registers it with every coding agent on this computer (Claude Code, Codex and many more), with its skill, hooks and graph agents. You see what it would change before it runs.',
+      '<button class="settings-check-updates-btn" data-kn-act="agents">Set up…</button>');
+  }
   let values = null;
   let keys = {};
   if (found?.ok) {
@@ -74,6 +78,7 @@ async function knRenderGlobalSettings(el) {
     });
   });
   const on = (act, fn) => el.querySelectorAll(`[data-kn-act="${act}"]`).forEach(b => b.addEventListener('click', fn));
+  on('agents', () => { if (typeof knInstallAgents === 'function') knInstallAgents(() => say('codebase-memory-mcp is set up for your agents. Restart them to load it.')); });
   on('pick', async () => { const r = await window.api.knowledgePickBinary(); if (!r?.canceled) knRenderGlobalSettings(el); });
   on('default', async () => { await window.api.setKnowledgeGlobal({ binaryPath: '' }); knRenderGlobalSettings(el); });
   on('download', async (e) => {

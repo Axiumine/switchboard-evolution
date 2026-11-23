@@ -72,7 +72,7 @@ const CONFIG_KEYS = {
   ui_port: 'port',
 };
 
-let db, log, projects, client, locator, emit, runConfig, fetchImpl, now, timers, watchRepo;
+let db, log, projects, client, locator, emit, runConfig, fetchImpl, now, timers, watchRepo, syncBrief, cbmDir, runInstall;
 let keepAlive = null;
 const jobs = new Map(); // folderPath → { projectId, name, state, mode, startedAt, finishedAt, error, kind }
 const refreshTimers = new Map(); // folderPath → timeout
@@ -92,6 +92,9 @@ function init(ctx) {
   now = ctx.now || (() => Date.now());
   timers = ctx.timers || { setTimeout, clearTimeout };
   watchRepo = ctx.watchRepo || null;
+  syncBrief = ctx.syncBrief || (async () => {});
+  cbmDir = ctx.cbmDir || null;
+  runInstall = ctx.runInstall || defaultRunInstall;
   jobs.clear();
   for (const t of refreshTimers.values()) timers.clearTimeout(t);
   refreshTimers.clear();
@@ -182,6 +185,7 @@ function setSettings(projectId, patch) {
   saveSettings(projectId, next);
   const settings = settingsFor(projectId);
   watchEnabledFolders();
+  if (current.enabled !== settings.enabled || current.crossRepo !== settings.crossRepo) briefChanged(projectId);
   emit('knowledge-changed', { projectId, reason: 'settings' });
   return { ok: true, settings };
 }
@@ -351,7 +355,7 @@ async function status(projectId) {
       error = err.message;
     }
   }
-  return { ok: true, binary, client: client.status(), settings, folders, error };
+  return { ok: true, binary, client: client.status(), agents: binary.found && binary.found.ok ? agentsStatus() : null, settings, folders, error };
 }
 
 // --- Asking the graph ---
@@ -473,7 +477,10 @@ async function index(projectId, folderPath, opts = {}) {
   }
   announceJob(folderPath);
   const done = pollJob(folderPath, job, repoArgs).then(async (finished) => {
-    if (finished.state === 'succeeded') watchEnabledFolders();
+    if (finished.state === 'succeeded') {
+      watchEnabledFolders();
+      for (const id of projectsWithFolder(folderPath)) briefChanged(id);
+    }
     if (finished.state === 'succeeded' && settingsFor(projectId).crossRepo) {
       await linkCrossRepo(projectId).catch((err) => log.warn?.('[knowledge] cross-repo link failed', err.message));
     }
@@ -582,7 +589,7 @@ async function deleteIndex(projectId, folderPath) {
   const name = knownName(projectId, folderPath);
   const result = await client.call('delete_project', { project: name });
   jobs.delete(folderPath);
-  for (const id of projectsWithFolder(folderPath)) changed(id, folderPath, 'deleted');
+  for (const id of projectsWithFolder(folderPath)) { changed(id, folderPath, 'deleted'); briefChanged(id); }
   return { ok: true, result };
 }
 
@@ -776,6 +783,130 @@ async function lens(projectId, folderPath, workspace) {
   return { ok: true, enabled, reachable, port, base, url, project: name, workspace: ws };
 }
 
+// --- The project's agents: the brief and the MCP server of their sessions ---
+
+/**
+ * The "Code graph" section of the project's managed block (CLAUDE.md,
+ * AGENTS.md), for projects with the graph on: the CBM name of each indexed
+ * folder and how to use the tools. projects.js asks for it at every sync.
+ */
+function briefSection(projectId) {
+  const s = settingsFor(projectId);
+  if (!s.enabled) return '';
+  const folders = db.listProjectFolders(projectId).map(f => f.path);
+  const named = folders.filter(p => s.names[p]);
+  const lines = ['## Code graph (codebase-memory-mcp)'];
+  if (!named.length) {
+    lines.push('The code graph is on for this project, but no attached folder is indexed yet. Index them in Switchboard\'s Node Knowledge tab.');
+    return lines.join('\n') + '\n';
+  }
+  lines.push('The attached folders are indexed by codebase-memory-mcp (CBM), and Switchboard keeps the indexes fresh. Pass these names as `project` to every CBM tool:');
+  lines.push('', '| Folder | CBM project |', '|---|---|', ...named.map(p => `| \`${p}\` | \`${s.names[p]}\` |`), '');
+  lines.push('Graph first: `search_graph` to find a symbol, `trace_path` for who calls what, `get_code_snippet` to read it, `query_graph` (read-only Cypher) for questions over many hops, `get_architecture` for the layout, and `detect_changes` before a commit to see what a change reaches. Use `search_code` or grep for literal text and for the files `check_index_coverage` flags. Each folder\'s architecture decisions are in `manage_adr`.');
+  if (named.length > 1 && s.crossRepo) {
+    lines.push('', 'The folders are linked with each other: `query_graph(project, "MATCH (a)-[r:CROSS_HTTP_CALLS]->(b) RETURN a.name, a.file_path, b.name, properties(r)")` finds the calls one makes into another.');
+  }
+  return lines.join('\n') + '\n';
+}
+
+// The block the cbm-setup kit writes under the managed block; the section
+// above takes its place, so it goes when the graph is on.
+const KIT_BLOCK = /\n*<!-- cbm:start -->[\s\S]*?<!-- cbm:end -->[ \t]*\n?/;
+
+function removeKitBlock(root) {
+  for (const file of ['CLAUDE.md', 'AGENTS.md']) {
+    const target = path.join(root, file);
+    let text;
+    try { text = fs.readFileSync(target, 'utf8'); } catch { continue; }
+    if (!KIT_BLOCK.test(text)) continue;
+    const next = text.replace(KIT_BLOCK, '\n').replace(/\n{3,}$/, '\n');
+    if (next !== text) fs.writeFileSync(target, next, 'utf8');
+  }
+}
+
+function briefChanged(projectId) {
+  const project = db.getProject(projectId);
+  if (!project) return;
+  if (settingsFor(projectId).enabled && project.root) {
+    try { removeKitBlock(project.root); } catch (err) { log.warn?.('[knowledge] could not tidy the brief', err.message); }
+  }
+  Promise.resolve(syncBrief(projectId)).catch((err) => log.warn?.('[knowledge] brief sync failed', err.message));
+}
+
+function profileArgs(profile) {
+  return profile === 'analysis' || profile === 'scout' ? [`--tool-profile=${profile}`] : [];
+}
+
+/** How each agent gets CBM: 'global' (its own config has it), 'session' (Switchboard adds it), or null (no CBM to run). */
+function agentsStatus() {
+  const found = client.refresh();
+  const usable = !!(found && found.ok);
+  return {
+    claude: locator.registeredServer() ? 'global' : usable ? 'session' : null,
+    codex: locator.codexRegistered() ? 'global' : usable ? 'session' : null,
+  };
+}
+
+/**
+ * What a session of the project needs for CBM's MCP server, for the harness
+ * that starts it: nothing when the graph is off or the agent already has the
+ * server in its own config; else { mcpConfig } (Claude: a JSON file for
+ * --mcp-config) or { mcpServers } (Codex: -c overrides).
+ */
+function sessionLaunch(projectId, harnessId) {
+  if (!projectId) return {};
+  const s = settingsFor(projectId);
+  if (!s.enabled) return {};
+  const found = client.refresh();
+  if (!found || !found.ok) return {};
+  const args = profileArgs(s.toolProfile);
+  if (harnessId === 'claude') {
+    if (locator.registeredServer()) return {};
+    const dir = typeof cbmDir === 'function' ? cbmDir() : cbmDir;
+    if (!dir) return {};
+    const file = path.join(dir, `mcp-${s.toolProfile || 'all'}.json`);
+    const config = { mcpServers: { [locator.SERVER_NAME]: { type: 'stdio', command: found.path, args } } };
+    const text = JSON.stringify(config, null, 2) + '\n';
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      let current = null;
+      try { current = fs.readFileSync(file, 'utf8'); } catch {}
+      if (current !== text) fs.writeFileSync(file, text, { mode: 0o600 });
+    } catch (err) {
+      log.warn?.('[knowledge] could not write the MCP config', err.message);
+      return {};
+    }
+    return { mcpConfig: file };
+  }
+  if (harnessId === 'codex') {
+    if (locator.codexRegistered()) return {};
+    return { mcpServers: [{ name: locator.SERVER_NAME, command: found.path, args }] };
+  }
+  return {};
+}
+
+function defaultRunInstall(bin, args) {
+  return new Promise((resolve) => {
+    execFile(bin, args, { encoding: 'utf8', timeout: 5 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, output: `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim(), error: err ? err.message.split('\n')[0] : null });
+    });
+  });
+}
+
+/**
+ * CBM's own installer for the coding agents (MCP registration, skill, hooks,
+ * graph agents in every client it finds): `install --dry-run` first lists what
+ * it would change; then `install -y` does it.
+ */
+async function installAgents({ dryRun = true } = {}) {
+  const found = requireBinary();
+  const result = await runInstall(found.path, dryRun ? ['install', '--dry-run', '-n'] : ['install', '-y']);
+  if (!dryRun) {
+    emit('knowledge-changed', { projectId: null, reason: 'agents' });
+  }
+  return { ok: result.ok, dryRun, output: String(result.output || '').slice(0, 200000), error: result.error || null };
+}
+
 // --- The binary ---
 
 /** Download and install the pinned CBM (see cbm-locator.js). */
@@ -846,5 +977,9 @@ module.exports = {
   lens,
   downloadBinary,
   binary,
+  briefSection,
+  sessionLaunch,
+  agentsStatus,
+  installAgents,
   restart,
 };

@@ -188,6 +188,7 @@ contextBridge.exposeInMainWorld('api', {
   knowledgeDownloadBinary: () => ipcRenderer.invoke('knowledge-download-binary'),
   knowledgeRestart: () => ipcRenderer.invoke('knowledge-restart'),
   getKnowledgeBinary: () => ipcRenderer.invoke('get-knowledge-binary'),
+  knowledgeInstallAgents: (opts) => ipcRenderer.invoke('knowledge-install-agents', opts),
   onKnowledgeChanged: (callback) => {
     const handler = (_event, payload) => callback(payload || {});
     ipcRenderer.on('knowledge-changed', handler);

@@ -429,6 +429,9 @@ function buildLaunchArgs({ sessionId, isNew, options }) {
   // Otherwise project attachments can consume a schedule's entire prompt
   // as one more --add-dir value, leaving an empty interactive session.
   if (options?.allowedTools) args.push('--allowedTools', String(options.allowedTools));
+  // An MCP server for this session only (the project's code graph, when the
+  // agent has none of its own: knowledge.js sessionLaunch).
+  if (options?.mcpConfig) args.push('--mcp-config', String(options.mcpConfig));
   if (options?.addDirs) {
     const dirs = String(options.addDirs).split(',').map(d => d.trim()).filter(Boolean);
     for (const dir of dirs) args.push('--add-dir', dir);

@@ -818,7 +818,14 @@ const cbmClient = createCbmClient({
   log,
   clientInfo: { name: 'switchboard-evolution', version: app.getVersion() },
 });
-knowledge.init({ db: dbModule, log, projects, client: cbmClient, emit, watchRepo: (dir) => gitGraphService.ensureRepoWatch(dir) });
+knowledge.init({
+  db: dbModule, log, projects, client: cbmClient, emit,
+  watchRepo: (dir) => gitGraphService.ensureRepoWatch(dir),
+  syncBrief: (id) => projects.syncProjectBrief(id),
+  cbmDir: () => path.join(app.getPath('userData'), 'cbm'),
+});
+// Projects with the code graph on get a "Code graph" section in their managed block.
+projects.addBriefSection((id) => knowledge.briefSection(id));
 addSink((channel, args) => {
   if (channel === 'git-graph-repo-changed' && typeof args[0] === 'string') knowledge.scheduleRefresh(args[0]);
 });
@@ -868,6 +875,7 @@ ipcMain.handle('knowledge-lens', knowledgeGuarded((id, folder, workspace) => kno
 ipcMain.handle('knowledge-download-binary', knowledgeGuarded(() => knowledge.downloadBinary()));
 ipcMain.handle('knowledge-restart', knowledgeGuarded(() => knowledge.restart()));
 ipcMain.handle('get-knowledge-binary', knowledgeGuarded(() => knowledge.binary()));
+ipcMain.handle('knowledge-install-agents', knowledgeGuarded((opts) => knowledge.installAgents({ dryRun: knObject(opts).dryRun !== false })));
 
 // --- IPC: get-projects ---
 ipcMain.handle('open-external', (_event, url) => {
@@ -3103,6 +3111,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     } else {
       // Argv is built by the harness and quoted here, so a value can never be
       // spliced into the command line as shell syntax.
+      // A project with the code graph on: its sessions get CBM's MCP server
+      // when the agent has none of its own (knowledge.js sessionLaunch).
+      try {
+        const graph = knowledge.sessionLaunch(sessionOptions?.projectId || getMeta(sessionId)?.projectId || null, harness.id);
+        if (graph.mcpConfig || graph.mcpServers) sessionOptions = { ...(sessionOptions || {}), ...graph };
+      } catch (err) {
+        log.warn('[knowledge] session launch', err.message);
+      }
       const cliArgs = harness.buildLaunchArgs({
         sessionId: launchId, isNew: startFresh, options: sessionOptions,
       });

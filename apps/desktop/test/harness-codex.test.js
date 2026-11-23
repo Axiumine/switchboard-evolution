@@ -696,3 +696,17 @@ test('initialPrompt is the last positional argument for a fresh session only', (
   const forked = H.buildLaunchArgs({ sessionId: 'new', isNew: true, options: { forkFrom: 'src', initialPrompt: 'x' } });
   assert.ok(!forked.includes('x'), 'a fork carries its parent prompt');
 });
+
+test('MCP servers for one session become -c overrides with TOML values, and odd names are left out', () => {
+  const codexHarness = require('../harnesses/codex');
+  const args = codexHarness.buildLaunchArgs({ sessionId: 'x', isNew: true, options: { mcpServers: [
+    { name: 'codebase-memory-mcp', command: '/opt/cbm/codebase-memory-mcp', args: ['--tool-profile=scout'] },
+    { name: 'bad name]', command: '/x' },
+    { name: 'empty', command: '' },
+  ] } });
+  const overrides = args.filter((a, i) => args[i - 1] === '-c' && a.startsWith('mcp_servers.'));
+  assert.deepEqual(overrides, [
+    'mcp_servers.codebase-memory-mcp.command="/opt/cbm/codebase-memory-mcp"',
+    'mcp_servers.codebase-memory-mcp.args=["--tool-profile=scout"]',
+  ]);
+});

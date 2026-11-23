@@ -62,7 +62,11 @@ function fakeClient(handlers = {}) {
   };
 }
 
+const registrations = { claude: null, codex: false };
 const fakeLocator = {
+  SERVER_NAME: 'codebase-memory-mcp',
+  registeredServer: () => registrations.claude,
+  codexRegistered: () => registrations.codex,
   MIN_VERSION: [0, 12, 1],
   CBM_VERSION: '0.12.1',
   RELEASE_PAGE: 'https://example.invalid/releases',
@@ -414,4 +418,76 @@ test('the git watcher is kept on for indexed folders of projects with the graph 
 
 test('projects.js gives knowledge.js the folder check it relies on', () => {
   assert.equal(typeof require('../projects').requireAttachedFolder, 'function');
+});
+
+
+test('the brief gets a Code graph section only with the graph on, naming each indexed folder', async () => {
+  const synced = [];
+  setup({ handlers: { list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }, { name: 'web', root_path: '/work/web' }] }) } });
+  assert.equal(knowledge.briefSection('p1'), '');
+  knowledge.setSettings('p1', { enabled: true });
+  assert.match(knowledge.briefSection('p1'), /no attached folder is indexed yet/);
+  await knowledge.nameFor('p1', '/work/api');
+  await knowledge.nameFor('p1', '/work/web');
+  const section = knowledge.briefSection('p1');
+  assert.match(section, /^## Code graph \(codebase-memory-mcp\)/);
+  assert.match(section, /\| `\/work\/api` \| `api` \|/);
+  assert.match(section, /CROSS_HTTP_CALLS/, 'two folders linked');
+  knowledge.setSettings('p1', { crossRepo: false });
+  assert.doesNotMatch(knowledge.briefSection('p1'), /CROSS_HTTP_CALLS/);
+  assert.ok(synced);
+});
+
+test('turning the graph on syncs the brief and drops the block the cbm-setup kit wrote', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kn-brief-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const managed = '<!-- switchboard:managed -->\n# Shop\n<!-- /switchboard:managed -->\n';
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), `${managed}\n<!-- cbm:start -->\n## Code graph (codebase-memory-mcp)\nold\n<!-- cbm:end -->\n\nMy own notes.\n`);
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), `${managed}\nNothing else.\n`);
+  const db = fakeDb();
+  db.addProject('p1', ['/work/api']);
+  db.rows.projects[0].root = root;
+  const synced = [];
+  knowledge.init({ db, log: quiet, projects: fakeProjects(db), client: fakeClient({}), locator: fakeLocator, emit() {}, syncBrief: async (id) => { synced.push(id); } });
+  knowledge.setSettings('p1', { mode: 'fast' });
+  assert.deepEqual(synced, [], 'nothing that changes the brief');
+  knowledge.setSettings('p1', { enabled: true });
+  assert.deepEqual(synced, ['p1']);
+  assert.equal(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), `${managed}\nMy own notes.\n`);
+  assert.equal(fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), `${managed}\nNothing else.\n`);
+});
+
+test('sessions get CBM\'s MCP server only with the graph on and when the agent has none of its own', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kn-mcp-'));
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); registrations.claude = null; registrations.codex = false; });
+  const db = fakeDb();
+  db.addProject('p1', ['/work/api']);
+  knowledge.init({ db, log: quiet, projects: fakeProjects(db), client: fakeClient({}), locator: fakeLocator, emit() {}, cbmDir: () => dir });
+  assert.deepEqual(knowledge.sessionLaunch('p1', 'claude'), {}, 'graph off');
+  knowledge.setSettings('p1', { enabled: true, toolProfile: 'scout' });
+  const claude = knowledge.sessionLaunch('p1', 'claude');
+  assert.equal(claude.mcpConfig, path.join(dir, 'mcp-scout.json'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(claude.mcpConfig, 'utf8')), { mcpServers: { 'codebase-memory-mcp': { type: 'stdio', command: '/opt/cbm/codebase-memory-mcp', args: ['--tool-profile=scout'] } } });
+  assert.deepEqual(knowledge.sessionLaunch('p1', 'codex'), { mcpServers: [{ name: 'codebase-memory-mcp', command: '/opt/cbm/codebase-memory-mcp', args: ['--tool-profile=scout'] }] });
+  assert.deepEqual(knowledge.sessionLaunch('p1', 'opencode'), {});
+  assert.deepEqual(knowledge.sessionLaunch(null, 'claude'), {});
+  registrations.claude = { command: '/opt/cbm/codebase-memory-mcp' };
+  registrations.codex = true;
+  assert.deepEqual(knowledge.sessionLaunch('p1', 'claude'), {}, 'already in the agent\'s config');
+  assert.deepEqual(knowledge.sessionLaunch('p1', 'codex'), {});
+  assert.deepEqual(knowledge.agentsStatus(), { claude: 'global', codex: 'global' });
+});
+
+test('the agents\' installer runs as a dry run first, then for real', async () => {
+  const ran = [];
+  const db = fakeDb();
+  db.addProject('p1', []);
+  const events = [];
+  knowledge.init({ db, log: quiet, projects: fakeProjects(db), client: fakeClient({}), locator: fakeLocator, emit: (c, p) => events.push(p), runInstall: async (bin, args) => { ran.push([bin, ...args]); return { ok: true, output: 'would write ~/.claude.json' }; } });
+  const preview = await knowledge.installAgents();
+  assert.equal(preview.dryRun, true);
+  assert.equal(preview.output, 'would write ~/.claude.json');
+  await knowledge.installAgents({ dryRun: false });
+  assert.deepEqual(ran, [['/opt/cbm/codebase-memory-mcp', 'install', '--dry-run', '-n'], ['/opt/cbm/codebase-memory-mcp', 'install', '-y']]);
+  assert.ok(events.some(e => e.reason === 'agents'));
 });

@@ -98,6 +98,20 @@ function registeredServer({ configPath = claudeConfigPath(), readFile = fs.readF
   }
 }
 
+/** Codex's user config: $CODEX_HOME/config.toml, or ~/.codex/config.toml. */
+function codexConfigPath({ env = process.env, home = os.homedir() } = {}) {
+  return path.join(env.CODEX_HOME || path.join(home, '.codex'), 'config.toml');
+}
+
+/** Whether Codex has a codebase-memory-mcp server in its config ([mcp_servers.<name>] with CBM's command). */
+function codexRegistered({ configPath = codexConfigPath(), readFile = fs.readFileSync } = {}) {
+  let text;
+  try { text = readFile(configPath, 'utf8'); } catch { return false; }
+  if (new RegExp(`^\\s*\\[mcp_servers\\.(?:"${SERVER_NAME}"|${SERVER_NAME})\\]`, 'm').test(text)) return true;
+  // Another server name whose command is CBM's binary.
+  return /^\s*\[mcp_servers\.[^\]]+\][^[]*?^\s*command\s*=\s*"[^"]*codebase-memory-mcp(?:\.exe)?"/m.test(text);
+}
+
 /**
  * The CBM to run, as { path, version, source, ok }: `ok` is false when the one
  * found is older than MIN_VERSION (the tab asks to update it). In order:
@@ -266,6 +280,8 @@ module.exports = {
   readVersion,
   claudeConfigPath,
   registeredServer,
+  codexConfigPath,
+  codexRegistered,
   locateCbm,
   assetFor,
   checksumFor,

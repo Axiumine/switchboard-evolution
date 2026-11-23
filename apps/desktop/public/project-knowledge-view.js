@@ -452,7 +452,10 @@ function renderKnowledgeOverview(project, view, folder, body) {
     <div class="kn-section-title">${folders.length > 1 ? 'Folders' : 'Folder'}</div>
     <div class="kn-folder-grid">${folders.map(f => knFolderCardHtml(project, s, f)).join('')}</div>
     <div class="kn-section-title"><span>Architecture of ${escapeHtml(pathBasename(folder))}</span>
-      <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="cycles"${data.cyclesLoading ? ' disabled' : ''}>${data.cyclesLoading ? 'Looking…' : 'Find call cycles'}</button>
+      <span class="kn-title-actions">
+        ${typeof knAskAgentButtonHtml === 'function' ? knAskAgentButtonHtml('explore') : ''}
+        <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="cycles"${data.cyclesLoading ? ' disabled' : ''}>${data.cyclesLoading ? 'Looking…' : 'Find call cycles'}</button>
+      </span>
     </div>
     ${cyclesHtml}
     <div class="kn-arch-grid">${archHtml}</div>
@@ -473,6 +476,7 @@ function renderKnowledgeOverview(project, view, folder, body) {
     if (view.isConnected) renderKnowledgeOverview(project, view, folder, body);
   };
   view.querySelectorAll('[data-kn-qn]').forEach(btn => { btn.onclick = () => knShowSymbol(project, folder, btn.dataset.knQn); });
+  if (typeof knWireAskAgent === 'function') knWireAskAgent(project, view, folder, {});
   if (data.arch) {
     for (const sec of data.arch.sections) {
       const card = view.querySelector(`[data-kn-section="${sec.id}"]`);
@@ -529,7 +533,7 @@ function renderKnowledgeSettings(project, view, body) {
     <div class="ws-sec"><span>Code graph</span><span class="ws-saved" id="kn-set-saved">${PICONS.check(11)}<span>Saved</span></span></div>
     <div class="ws-card">
       <div class="ws-row">
-        <div class="ws-row-k"><b>Use the code graph</b><span>Keep this project's graphs fresh as its repositories change.</span></div>
+        <div class="ws-row-k"><b>Use the code graph</b><span>Keep this project's graphs fresh as its repositories change, tell its agents about them (a Code graph section in CLAUDE.md and AGENTS.md), and give its Claude and Codex sessions the graph's tools.</span></div>
         <div class="ws-row-v">${knSwitchHtml('kn-set-enabled', settings.enabled)}</div>
       </div>
       <div class="ws-row">
@@ -543,6 +547,22 @@ function renderKnowledgeSettings(project, view, body) {
       <div class="ws-row">
         <div class="ws-row-k"><b>Link the repositories</b><span>Find the calls one folder makes into another (HTTP, gRPC, queues) after each index.</span></div>
         <div class="ws-row-v">${knSwitchHtml('kn-set-cross', settings.crossRepo)}<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="link"${folders.length < 2 ? ' disabled title="Needs two indexed folders"' : ''}>${PICONS.link(11)}<span>Link now</span></button></div>
+      </div>
+    </div>
+
+    <div class="ws-sec">Agents</div>
+    <div class="ws-card">
+      ${['claude', 'codex'].map(id => {
+        const how = status.agents?.[id];
+        const name = id === 'claude' ? 'Claude Code' : 'Codex';
+        const text = how === 'global' ? `${name} has codebase-memory-mcp in its own config: every session sees the graph.`
+          : how === 'session' ? `${name} has no codebase-memory-mcp of its own: ${settings.enabled ? 'Switchboard gives this project\'s sessions the server on their command line.' : 'with the code graph on, Switchboard gives this project\'s sessions the server.'}`
+          : 'Needs codebase-memory-mcp.';
+        return `<div class="ws-row"><div class="ws-row-k"><b>${name}</b><span>${text}</span></div><div class="ws-row-v"><span class="kn-label${how === 'global' ? '' : ' kn-label--muted'}">${how === 'global' ? 'Its own' : how === 'session' ? 'Per session' : '—'}</span></div></div>`;
+      }).join('')}
+      <div class="ws-row">
+        <div class="ws-row-k"><b>Tools in the sessions</b><span>When Switchboard adds the server: all of CBM's tools, only those that read and analyse, or the few that search and trace.</span></div>
+        <div class="ws-row-v"><select class="ws-select" id="kn-set-profile">${KnowledgeModel.TOOL_PROFILES.map(p => `<option value="${p.id}"${p.id === settings.toolProfile ? ' selected' : ''}>${escapeHtml(p.label)}</option>`).join('')}</select></div>
       </div>
     </div>
 
@@ -575,6 +595,7 @@ function renderKnowledgeSettings(project, view, body) {
   q('#kn-set-refresh').onchange = (e) => save({ autoRefresh: e.target.checked });
   q('#kn-set-cross').onchange = (e) => save({ crossRepo: e.target.checked });
   q('#kn-set-mode').onchange = (e) => save({ mode: e.target.value }).then(() => knRedraw(project));
+  q('#kn-set-profile').onchange = (e) => save({ toolProfile: e.target.value });
   const on = (act, fn) => view.querySelectorAll(`[data-kn-act="${act}"]`).forEach(el => { el.onclick = fn; });
   on('link', async (e) => {
     const btn = e.currentTarget;

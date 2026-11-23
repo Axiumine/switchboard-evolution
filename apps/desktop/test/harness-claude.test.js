@@ -363,3 +363,12 @@ test('the session title is read from the terminal title, after the status mark',
   assert.equal(claude.titleFromTerminal('claude'), null);
   assert.equal(claude.titleFromTerminal(''), null);
 });
+
+test('a session MCP config goes before the session selector, so it never takes the prompt', () => {
+  const args = claude.buildLaunchArgs({ sessionId: 'abc', isNew: true, options: { mcpConfig: '/data/cbm/mcp-all.json', initialPrompt: 'hello' } });
+  const at = args.indexOf('--mcp-config');
+  assert.equal(args[at + 1], '/data/cbm/mcp-all.json');
+  assert.ok(at < args.indexOf('--session-id'));
+  assert.equal(args.at(-1), 'hello');
+  assert.equal(claude.buildLaunchArgs({ sessionId: 'abc', isNew: true, options: {} }).includes('--mcp-config'), false);
+});

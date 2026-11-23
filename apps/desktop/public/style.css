@@ -9530,3 +9530,5 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .kn-settings-note { margin: 4px 0 8px; }
 .kn-settings-saved { min-height: 16px; margin-top: 4px; }
 .kn-config-input { width: 96px; }
+.kn-title-actions { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
+.kn-install-preview { max-height: 46vh; font-size: 11px; padding: 10px 12px; white-space: pre-wrap; }
