@@ -180,6 +180,7 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 - [ ] Author avatars load through an SSRF-safe cache (Gravatar and host-specific providers), a self-hosted GitLab host needs a native confirmation naming the host, and the cache can be cleared (master?) — `git-graph-avatars.js`, `main.js` (`get-git-graph-avatar-url`, `confirm-git-graph-avatars-gitlab-host`, `clear-git-graph-avatar-cache`)
 - [ ] The graph updates when a repository changes on disk or a phone ran an action (events `git-graph-repo-changed`, `git-graph-action-progress`) (master) — `preload.js` (`onGitGraphRepoChanged`, `onGitGraphActionProgress`), `broadcast.js`
 - [ ] "Show in the Git Graph" links from the Files Timeline and the Worktrees tab select a commit or a repository in History (master) — `project-files-view.js` (`showCommitInGitGraph`), `project-worktrees-view.js`
+- [ ] Every CodeMirror diff (History's files, Changes, comparisons, the file panel) shows added lines green and removed ones red, the words that changed a stronger tint of the same colour, never @codemirror/merge's coloured underlines (master) — `style.css` (`.cm-changedText`, `.cm-deletedChunk`)
 
 ## 10. Project page: Git tab, Worktrees (master)
 

@@ -4617,21 +4617,25 @@ body { display: flex; flex-direction: column; }
   font-size: 12.5px;
 }
 
-/* Diff line backgrounds */
-#file-panel-body .cm-merge-a .cm-changedLine,
-#file-panel-body .cm-deletedChunk {
+/* Every CodeMirror diff (the file panel, History, Changes, a comparison):
+   added lines green and removed ones red, and the words that changed in them
+   a stronger tint of the same colour. Never @codemirror/merge's own coloured
+   underlines (green, red or salmon) nor its brownish removed chunks. */
+.cm-merge-a .cm-changedLine,
+.cm-deletedChunk {
   background-color: rgba(248, 81, 73, 0.12) !important;
 }
-#file-panel-body .cm-merge-b .cm-changedLine {
+.cm-merge-b .cm-changedLine,
+.cm-inlineChangedLine {
   background-color: rgba(63, 185, 80, 0.12) !important;
 }
-/* Inner word-level change highlighting (replace underlines with backgrounds) */
-#file-panel-body .cm-merge-a .cm-changedText,
-#file-panel-body .cm-deletedChunk .cm-deletedText {
-  background: rgba(248, 81, 73, 0.35) !important;
-}
-#file-panel-body .cm-merge-b .cm-changedText {
+.cm-merge-b .cm-changedText {
   background: rgba(63, 185, 80, 0.35) !important;
+}
+.cm-merge-a .cm-changedText,
+.cm-deletedChunk .cm-deletedText,
+.cm-merge-b .cm-deletedText {
+  background: rgba(248, 81, 73, 0.35) !important;
 }
 
 #file-panel-actions {
