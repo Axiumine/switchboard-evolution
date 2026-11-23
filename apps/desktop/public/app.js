@@ -699,11 +699,23 @@ const taskManagerTab = document.getElementById('task-manager-tab');
 taskManagerTab.innerHTML = ICONS.memory(18);
 taskManagerTab.addEventListener('click', () => openProcessViewer());
 
+// A page coming on screen takes the strip's underline ('selected'), as a
+// clicked tab does; another tab of the strip clicked, or the page gone, gives
+// it back (the tab switching below).
 function lightWhileShown(tab, page, isOwn = () => true) {
   if (!tab || !page) return;
-  const update = () => tab.classList.toggle('open', page.style.display !== 'none' && isOwn());
+  const update = () => {
+    const shown = page.style.display !== 'none' && isOwn();
+    if (shown && !tab.classList.contains('open')) tab.classList.add('selected');
+    if (!shown) tab.classList.remove('selected');
+    tab.classList.toggle('open', shown);
+  };
   new MutationObserver(update).observe(page, { attributes: true, attributeFilter: ['style', 'data-scope'] });
   update();
+}
+// Clicked again while already on screen, after another tab took the underline.
+for (const tab of [taskManagerTab, globalSettingsBtn]) {
+  tab.addEventListener('click', () => { if (tab.classList.contains('open')) tab.classList.add('selected'); });
 }
 lightWhileShown(taskManagerTab, processViewer);
 // The same page holds a project's settings, which are not this tab's.
@@ -1330,11 +1342,55 @@ window.addEventListener('resize', () => {
 });
 
 // --- Tab switching ---
+// Sessions and Projects share the main area: the grid, the active terminal,
+// or the placeholder.
+function restoreTerminalArea() {
+  hideAllViewers();
+  if (gridViewActive) {
+    // Grid is still set up — just re-show it and refit
+    placeholder.style.display = 'none';
+    terminalHeader.style.display = 'none';
+    gridViewer.style.display = 'block';
+    for (const entry of openSessions.values()) {
+      if (!entry.closed) fitAndScroll(entry);
+    }
+  } else if (activeSessionId && openSessions.has(activeSessionId)) {
+    showSession(activeSessionId);
+  } else {
+    placeholder.style.display = '';
+  }
+}
+
+function showStatsPage() {
+  placeholder.style.display = 'none';
+  terminalArea.style.display = 'none';
+  planViewer.style.display = 'none';
+  memoryViewer.style.display = 'none';
+  settingsViewer.style.display = 'none';
+  processViewer.style.display = 'none';
+  statsViewer.style.display = 'flex';
+  loadStats();
+}
+
 document.querySelectorAll('.sidebar-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     const tabName = tab.dataset.tab;
     // The Task Manager and Global settings share the tab styling but open a page instead.
-    if (!tabName || tabName === activeTab) return;
+    if (!tabName) return;
+    // Any other tab of the strip takes the underline back from their page.
+    const pageHadUnderline = !!document.querySelector('#sidebar-tabs .sidebar-tab.open.selected');
+    document.querySelectorAll('#sidebar-tabs .sidebar-tab.selected').forEach(t => t.classList.remove('selected'));
+    if (tabName === activeTab) {
+      // Already the sidebar's tab: its own page comes back over the Task Manager
+      // or Global settings. Plans and Files leave the main area as it is, as
+      // when they are picked from another tab.
+      if (pageHadUnderline) {
+        if (tabName === 'sessions') restoreTerminalArea();
+        else if (tabName === 'projects') showProjectHome();
+        else if (tabName === 'stats') showStatsPage();
+      }
+      return;
+    }
     // Leaving the Projects tab takes its page and Session tab with it.
     if (activeTab === 'projects' && typeof leaveProjectViews === 'function') leaveProjectViews();
     activeTab = tabName;
@@ -1362,25 +1418,6 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     searchBar.classList.remove('with-group');
     // So does the donation box at its foot (donate-box.js).
     if (donateBar) donateBar.hidden = tabName !== 'projects';
-
-    // Sessions and Projects share the main area: the grid, the active
-    // terminal, or the placeholder.
-    function restoreTerminalArea() {
-      hideAllViewers();
-      if (gridViewActive) {
-        // Grid is still set up — just re-show it and refit
-        placeholder.style.display = 'none';
-        terminalHeader.style.display = 'none';
-        gridViewer.style.display = 'block';
-        for (const entry of openSessions.values()) {
-          if (!entry.closed) fitAndScroll(entry);
-        }
-      } else if (activeSessionId && openSessions.has(activeSessionId)) {
-        showSession(activeSessionId);
-      } else {
-        placeholder.style.display = '';
-      }
-    }
 
     if (tabName === 'sessions') {
       sessionFilters.style.display = '';
@@ -1413,14 +1450,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     } else if (tabName === 'stats') {
       statsContent.style.display = '';
       // Immediately show stats viewer in main area
-      placeholder.style.display = 'none';
-      terminalArea.style.display = 'none';
-      planViewer.style.display = 'none';
-      memoryViewer.style.display = 'none';
-      settingsViewer.style.display = 'none';
-      processViewer.style.display = 'none';
-      statsViewer.style.display = 'flex';
-      loadStats();
+      showStatsPage();
     } else if (tabName === 'memory') {
       // The Files tab (files-view.js): agent files, opened and pinned files.
       searchBar.style.display = '';

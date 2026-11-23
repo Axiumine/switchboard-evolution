@@ -259,9 +259,16 @@ body { display: flex; flex-direction: column; }
   border-bottom-color: var(--accent);
 }
 
-/* The Task Manager or Global settings page is on screen: lit, without the
-   underline, which belongs to the tab whose list the sidebar shows. */
+/* The Task Manager or Global settings page is on screen: lit. Opened, it takes
+   the underline like any tab clicked; another tab clicked takes it back, and
+   the page, still on screen, stays lit (app.js lightWhileShown). */
 .sidebar-tab.open { color: color-mix(in srgb, var(--accent) 70%, white); }
+.sidebar-tab.open.selected { color: #b0b0c4; border-bottom-color: var(--accent); }
+#sidebar-tabs:has(.sidebar-tab.open.selected) .sidebar-tab.active {
+  color: #7a7a90;
+  border-bottom-color: transparent;
+}
+#sidebar-tabs:has(.sidebar-tab.open.selected) .sidebar-tab.active:hover { color: #8888a0; }
 
 /* A tab's tooltip (sidebar-tips.js): its name, and for the Task Manager and
    Stats the button that opens them in a window of their own. */
@@ -8274,9 +8281,11 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .tcard-archived.open { color: #9090a8; }
 .tcard-archived-list { border-top: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; }
 
-/* A floating archive button on every session row, shown on hover. */
+/* A floating archive button on every session row, shown on hover, and the
+   fork button just right of it when the session can be forked. */
 .pane-session { position: relative; }
-.pane-row-archive {
+.pane-row-archive,
+.pane-row-fork {
   position: absolute;
   top: 5px;
   right: 6px;
@@ -8294,9 +8303,12 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
   padding: 0;
   transition: opacity 0.12s, color 0.12s;
 }
-.pane-session:hover .pane-row-archive { opacity: 1; }
-.pane-row-archive:hover { color: #d0d0e8; background: #23232f; }
+.pane-session:hover .pane-row-archive,
+.pane-session:hover .pane-row-fork { opacity: 1; }
+.pane-row-archive:hover,
+.pane-row-fork:hover { color: #d0d0e8; background: #23232f; }
 .pane-session:hover .pane-title { padding-right: 30px; }
+.pane-session.has-fork:hover .pane-title { padding-right: 54px; }
 .tcard .tcard-session .pane-row-archive { right: 10px; top: 7px; }
 
 /* The star at the right of every session row, as on the Sessions tab: dim
@@ -8330,6 +8342,11 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .pane-session .pane-row-archive { right: 28px; }
 .tcard .tcard-session .pane-pin { right: 8px; top: 7px; }
 .tcard .tcard-session .pane-row-archive { right: 32px; }
+/* Fork takes archive's place beside the star; archive moves one step left. */
+.pane-session .pane-row-fork { right: 28px; }
+.pane-session.has-fork .pane-row-archive { right: 52px; }
+.tcard .tcard-session .pane-row-fork { right: 32px; top: 7px; }
+.tcard .tcard-session.has-fork .pane-row-archive { right: 56px; }
 
 /* The star on the title's line, beside the archive button, and under both
    the memory a live session uses (app.js paintSessionMemory). */

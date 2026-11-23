@@ -1106,12 +1106,13 @@ test('a click in the first column ticks the row without opening it; elsewhere it
   assert.equal(view.gitGraphInSelectCell(null), false);
 });
 
-test('the toolbar has a "•••" for the selection before the search, and Compare once two are ticked', () => {
+test('the toolbar ends with a "•••" for the selection, and Compare once two are ticked', () => {
   const state = view.gitGraphState('proj-cmp-toolbar');
   state.rows = [{ hash: 'c' }, { hash: 'b' }, { hash: 'a' }];
   state.checkedHashes = new Set();
   let html = view.gitGraphControlBarHtml({ id: 'proj-cmp-toolbar' }, state);
-  assert.ok(html.indexOf('gg-select-menu-btn') < html.indexOf('gg-find-btn'));
+  const buttons = (markup) => [...markup.matchAll(/<button[^>]*\bid="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(buttons(html).at(-1), 'gg-select-menu-btn', 'the last button of the toolbar');
   assert.doesNotMatch(html, /gg-select-all-btn|gg-select-none-btn/);
   assert.doesNotMatch(html, /gg-selected-count/, 'no count while the selection is off');
   assert.doesNotMatch(html, /gg-compare-btn/);
@@ -1120,6 +1121,8 @@ test('the toolbar has a "•••" for the selection before the search, and Com
   html = view.gitGraphControlBarHtml({ id: 'proj-cmp-toolbar' }, state);
   assert.match(html, /Compare 2/, 'a ticked commit no longer loaded does not count');
   assert.match(html, /2 selected/);
+  assert.equal(buttons(html).at(-1), 'gg-select-menu-btn');
+  assert.ok(html.indexOf('gg-terminal-btn') < html.indexOf('gg-selected-count'), 'the count goes with the "•••"');
 });
 
 test('the selection is off by default; its menu turns it on, then selects, inverts and cancels', () => {

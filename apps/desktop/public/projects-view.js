@@ -640,6 +640,18 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
     btn.onclick = (e) => { e.stopPropagation(); if (dismissible) dismissSession(id); else toggleArchiveSession(session); };
     row.appendChild(btn);
   }
+  // Fork, just right of archive, as on the Sessions tab.
+  if (!dismissible && session.type !== 'terminal' && cliCanFork(session.runtime)) {
+    const fork = document.createElement('button');
+    fork.type = 'button';
+    fork.className = 'pane-row-fork';
+    fork.title = 'Fork session';
+    fork.setAttribute('aria-label', fork.title);
+    fork.innerHTML = PICONS.fork(12);
+    fork.onclick = (e) => { e.stopPropagation(); if (hoverPreview) hideSessionHoverPreview(id); forkSessionInPlace(session); };
+    row.appendChild(fork);
+    row.classList.add('has-fork');
+  }
   // The star, at the right of the title's line, as on the Sessions tab.
   const pin = document.createElement('button');
   pin.type = 'button';
@@ -3530,21 +3542,26 @@ function sessionMoveItems(session) {
   return moveItems;
 }
 
+/**
+ * Fork a session. The fork runs in the source's folder and is filed where the
+ * source is, so the project's lists show it straight away.
+ */
+function forkSessionInPlace(session) {
+  const info = projectForSession(session);
+  const target = info
+    ? { ...launchTargetFor(info.project, (info.project.tracks || []).find(t => t.id === session.trackId) || null), projectPath: session.projectPath }
+    : { projectPath: session.projectPath };
+  forkSession(session, target);
+}
+
 function sessionMenuItems(session) {
   const moveItems = sessionMoveItems(session);
   const running = isSessionRunning(session.sessionId);
   const unread = typeof responseReadySessions !== 'undefined' && responseReadySessions.has(session.sessionId);
-  const folder = { projectPath: session.projectPath };
-  // A fork runs in the source's folder and is filed where the source is, so
-  // the project's lists show it straight away.
-  const info = projectForSession(session);
-  const forkTarget = info
-    ? { ...launchTargetFor(info.project, (info.project.tracks || []).find(t => t.id === session.trackId) || null), projectPath: session.projectPath }
-    : folder;
   const sessionActions = [
     running ? { label: 'Stop', icon: '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>', onClick: () => confirmAndStopSession(session.sessionId) } : null,
     session.type !== 'terminal' && !running ? { label: 'Resume with config…', icon: ICONS.launchConfig(14), onClick: () => showResumeSessionDialog(session) } : null,
-    session.type !== 'terminal' && cliCanFork(session.runtime) ? { label: 'Fork', icon: PICONS.fork(14), onClick: () => forkSession(session, forkTarget) } : null,
+    session.type !== 'terminal' && cliCanFork(session.runtime) ? { label: 'Fork', icon: PICONS.fork(14), onClick: () => forkSessionInPlace(session) } : null,
     session.type !== 'terminal' ? { label: unread ? 'Mark as read' : 'Mark as unread', icon: unread ? ICONS.markRead(14) : ICONS.markUnread(14), onClick: () => { if (unread) clearUnread(session.sessionId); else markUnread(session.sessionId); refreshSidebar(); } } : null,
     session.type !== 'terminal' ? { label: 'View messages', icon: PICONS.messages(14), onClick: () => showJsonlViewer(session) } : null,
   ].filter(Boolean);

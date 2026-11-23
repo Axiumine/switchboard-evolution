@@ -792,13 +792,13 @@ function gitGraphControlBarHtml(project, state) {
       </div>
       <div class="gg-toolbar-right">
         <span class="gg-compare-slot" id="gg-compare-slot">${gitGraphCompareSlotHtml(state)}</span>
-        ${state.selecting ? `<span class="gg-selected-count" id="gg-selected-count">${gitGraphCheckedCount(state)} selected</span>` : ''}
-        <button type="button" class="gg-icon-btn" id="gg-select-menu-btn" title="Selection: tick commits to compare them" aria-label="Selection">${gitGraphIcon('more', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-find-btn" title="Find (Ctrl/Cmd+F)">${gitGraphIcon('search', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-settings-btn" title="Repository Settings">${gitGraphIcon('gear', 14)}</button>
         ${state.remotes.length ? `<button type="button" class="gg-icon-btn" id="gg-fetch-btn" title="Fetch from Remote(s)">${gitGraphIcon('fetch', 14)}</button>` : ''}
         <button type="button" class="gg-icon-btn ${state.loading ? 'gg-spin' : ''}" id="gg-refresh-btn" title="Refresh">${gitGraphIcon('refresh', 14)}</button>
         <button type="button" class="gg-icon-btn" id="gg-terminal-btn" title="Open a Terminal for this Repository">${gitGraphIcon('terminal', 14)}</button>
+        ${state.selecting ? `<span class="gg-selected-count" id="gg-selected-count">${gitGraphCheckedCount(state)} selected</span>` : ''}
+        <button type="button" class="gg-icon-btn" id="gg-select-menu-btn" title="Selection: tick commits to compare them" aria-label="Selection">${gitGraphIcon('more', 14)}</button>
       </div>
     </div>
     <div class="gg-branches-menu" id="gg-branches-menu" style="display:none"></div>`;
