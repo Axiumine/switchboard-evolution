@@ -409,3 +409,7 @@ test('the git watcher is kept on for indexed folders of projects with the graph 
   assert.deepEqual(knowledge.watchedFolders(), []);
   knowledge.stopWatching();
 });
+
+test('projects.js gives knowledge.js the folder check it relies on', () => {
+  assert.equal(typeof require('../projects').requireAttachedFolder, 'function');
+});

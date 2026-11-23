@@ -9335,3 +9335,86 @@ body.file-window #file-window {
 body.file-window .viewer-panel-editor,
 body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .viewer-toolbar-controls .tool-window-btn { margin-left: 2px; }
+
+/* ---- Node Knowledge tab (project-knowledge-view.js) ---- */
+.kn-body .mono, .kn-table td, .kn-mono { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; }
+.kn-subnav { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.kn-nav { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.kn-nav::-webkit-scrollbar { display: none; }
+.kn-nav .git-workspace-nav-btn { white-space: nowrap; }
+.kn-subnav-side { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kn-folder-select { max-width: 260px; }
+.kn-folder-one { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #b0b0c4; }
+.kn-subnav-meta { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #7a7a90; white-space: nowrap; }
+.kn-busy {
+  display: inline-block; flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid rgba(160,166,255,0.25); border-top-color: #a6abff;
+  animation: stats-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .kn-busy { animation-duration: 3s; } }
+.kn-page { padding: 20px 28px 28px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.kn-loading { font-size: 12px; color: #7a7a90; padding: 6px 0; }
+.kn-notice {
+  max-width: 720px; padding: 18px 20px; border-radius: 10px;
+  background: #18181f; border: 1px solid rgba(255,255,255,0.06);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.kn-notice-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #d8d8ec; }
+.kn-notice-text { font-size: 12.5px; line-height: 1.55; color: #a8a8bc; }
+.kn-notice-text.muted { color: #6f6f86; font-size: 12px; }
+.kn-notice-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.kn-notice-step { font-size: 12px; color: #a6abff; }
+.kn-notice-error, .kn-error-text { color: #df7180; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kn-section-title {
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #7a7a90;
+}
+.kn-folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.kn-folder-card { cursor: pointer; transition: border-color 0.15s; }
+.kn-folder-card:hover { border-color: rgba(255,255,255,0.12); }
+.kn-folder-card--current { border-color: rgba(120,130,255,0.4); }
+.kn-folder-card .ws-card-h { min-width: 0; }
+.kn-folder-card .ws-card-h svg { flex: 0 0 auto; }
+.kn-folder-card .ws-card-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-folder-card .ws-card-meta { flex: 0 1 auto; min-width: 0; }
+.kn-folder-card .ws-ghost { flex: 0 0 auto; }
+.kn-folder-line { display: flex; align-items: center; gap: 6px; }
+.kn-spacer { flex: 1; }
+.kn-arch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; align-items: start; }
+.kn-arch-card { min-width: 0; }
+.kn-arch-card--wide { grid-column: 1 / -1; }
+.kn-table-wrap { overflow-x: auto; padding: 0 14px 6px; }
+.kn-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.kn-table th {
+  text-align: left; font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: #6f6f86; padding: 4px 8px 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); white-space: nowrap;
+}
+.kn-table td {
+  color: #c0c0d4; padding: 4px 8px 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kn-row-link { cursor: pointer; }
+.kn-row-link:hover td { color: #e0e0f4; background: rgba(255,255,255,0.025); }
+.kn-bars { display: flex; flex-direction: column; gap: 5px; padding: 2px 14px 8px; }
+.kn-bar-row { display: grid; grid-template-columns: 110px 1fr 56px; align-items: center; gap: 8px; font-size: 11.5px; }
+.kn-bar-label { color: #c0c0d4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.kn-bar-fill { display: block; height: 100%; background: #8088ff; border-radius: 3px; }
+.kn-bar-value { text-align: right; color: #7a7a90; font-variant-numeric: tabular-nums; }
+.kn-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 14px 8px; }
+.kn-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 10px;
+  background: rgba(255,255,255,0.045); font-size: 11px; color: #a8a8bc;
+}
+.kn-chip b { font-weight: 600; color: #d0d0e8; font-variant-numeric: tabular-nums; }
+.kn-chips--edges .kn-chip { background: rgba(120,130,255,0.08); }
+.kn-cycles { display: flex; flex-direction: column; gap: 4px; padding: 2px 14px 8px; max-height: 280px; overflow-y: auto; }
+.kn-cycle { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 11.5px; }
+.kn-sym-link {
+  border: 0; background: none; padding: 0; font: inherit; color: #a6abff; cursor: pointer;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px;
+}
+.kn-sym-link:hover { text-decoration: underline; }
+.kn-arrow { color: #5e5e74; }
+.kn-settings { max-width: 860px; }
+.kn-dialog-text { margin: 0; font-size: 12.5px; line-height: 1.55; color: #b0b0c4; }

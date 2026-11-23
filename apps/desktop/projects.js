@@ -2102,7 +2102,7 @@ async function editProjectPullRequest(projectId, folderPath, params) {
 module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief,
-  createProject, updateProject, deleteProject, attachFolder, detachFolder,
+  createProject, updateProject, deleteProject, attachFolder, detachFolder, requireAttachedFolder,
   folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths, readProjectGitEditFile, saveProjectGitEditFile,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
   projectGitGraphFileAtRevision, projectGitGraphFileDiffBetween,

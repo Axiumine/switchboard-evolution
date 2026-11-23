@@ -190,7 +190,7 @@ function saveProjectsUi() {
   if (projectsUi.otherOpen) sessionStorage.setItem('projects.otherOpen', '1'); else sessionStorage.removeItem('projects.otherOpen');
 }
 
-const PROJECT_WORKSPACE_TABS = new Set(['overview', 'session', 'plan', 'todos', 'files', 'git', 'settings']);
+const PROJECT_WORKSPACE_TABS = new Set(['overview', 'session', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings']);
 // The two tabs drawn from the project's plan data (get-project-plan): the phases and the todos.
 const PLAN_TABS = new Set(['plan', 'todos']);
 
@@ -1780,6 +1780,7 @@ function renderOverview() {
         ${tabWithWindow('todos', `<button type="button" class="ws-tab ${tabName === 'todos' ? 'active' : ''}" data-tab="todos" title="The todos from todos.md, with the sessions that worked on them">Todos <span class="ws-tab-meta" id="ws-tab-todos-meta"></span></button>`)}
         ${tabWithWindow('files', `<button type="button" class="ws-tab ${tabName === 'files' ? 'active' : ''}" data-tab="files" title="The project folder: brief, plan, todos and anything else the project keeps">Files</button>`)}
         ${tabWithWindow('git', `<button type="button" class="ws-tab ${tabName === 'git' ? 'active' : ''}" data-tab="git" title="Working changes, the commit graph with its actions (branch, merge, rebase, stash and more) and the worktrees">Git</button>`)}
+        ${tabWithWindow('knowledge', `<button type="button" class="ws-tab ${tabName === 'knowledge' ? 'active' : ''}" data-tab="knowledge" title="The attached folders as code graphs (codebase-memory-mcp): architecture, search, call traces, the impact of a change, Cypher queries and more">Node Knowledge</button>`)}
         ${tabWithWindow('settings', `<button type="button" class="ws-tab ${tabName === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>`)}
       </div>
     </div>`;
@@ -1796,6 +1797,7 @@ function renderOverview() {
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.compare) renderGitCompareWindow(project, body);
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.file) renderGitFileWindow(project, body);
   else if (tabName === 'git') renderProjectGitWorkspace(project, body);
+  else if (tabName === 'knowledge') renderKnowledgeTab(project, body);
   else renderOverviewBody(project, body);
 
   if (PROJECT_WINDOW) {
@@ -1823,8 +1825,8 @@ function renderOverview() {
 
 // --- A tab of the project in a window of its own (project-window.js) ---
 // Every tab but Session, whose terminal stays in the main window.
-const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', todos: 'Todos', files: 'Files', git: 'Git', settings: 'Settings' };
-const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'todos', 'files', 'git', 'settings'];
+const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', todos: 'Todos', files: 'Files', git: 'Git', knowledge: 'Node Knowledge', settings: 'Settings' };
+const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings'];
 
 /**
  * A tab chosen in a tab's window: the window moves to it (main.js keeps it
