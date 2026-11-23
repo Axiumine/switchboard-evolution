@@ -13,6 +13,7 @@ Modules both apps use, written once here:
 - `git-change-actions.js`: discarding changes and adding to `.gitignore` from the Git tab's Changes, with the dialog texts.
 - `star-tints.js`: the color of each pinned session's star.
 - `donate.js`: the amounts of the donation box and the PayPal page each one opens.
+- `knowledge-model.js`: the Node Knowledge tab's view of codebase-memory-mcp's answers (tables, symbols, the trace tree and its layout, impact, architecture, comparison).
 
 Each one runs as a classic browser script, a CommonJS module and an ES import, so for now the apps keep a copy:
 the desktop in `public/` (and `remote-protocol.js` at its root), the mobile app in `src/shared/vendor/` with the

@@ -11,7 +11,7 @@ const { createCbmClient, toolResult, CbmError } = require('../cbm-client');
 
 const quiet = { warn() {}, info() {}, error() {} };
 
-/** A fake server: `handlers[method](params, ctx)` gives the result, or throws to answer an error. */
+/** A fake server: `handlers[method](params, ctx)` gives the result, or throws to answer an error; other methods get Method not found. */
 function fakeSpawn(handlers = {}) {
   const spawned = [];
   const spawnImpl = (bin, args, opts) => {
@@ -33,7 +33,10 @@ function fakeSpawn(handlers = {}) {
       child.received.push(msg);
       if (msg.id == null || !msg.method) return;
       const handler = handlers[msg.method];
-      if (!handler) return; // never answers: a timeout
+      if (!handler) {
+        child.say({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'Method not found' } });
+        return;
+      }
       try {
         const result = await handler(msg.params, { child, bin, args, opts });
         child.say({ jsonrpc: '2.0', id: msg.id, result });
@@ -48,6 +51,15 @@ function fakeSpawn(handlers = {}) {
 }
 
 const INIT = { initialize: () => ({ protocolVersion: '2025-06-18', serverInfo: { name: 'codebase-memory-mcp', version: '0.12.1' }, capabilities: { tools: {} } }) };
+const TOOLS = {
+  'tools/list': () => ({
+    tools: [
+      { name: 'list_projects', inputSchema: { properties: { format: {}, detail: {}, limit: {}, offset: {} } } },
+      { name: 'index_status', inputSchema: { properties: { project: {}, format: {} } } },
+      { name: 'compare_graphs', inputSchema: { properties: { base_project: {}, target_project: {}, limit: {} }, additionalProperties: false } },
+    ],
+  }),
+};
 const FOUND = { path: '/opt/cbm/codebase-memory-mcp', version: '0.12.1', ok: true, source: 'installed' };
 
 test('toolResult prefers structuredContent, then JSON text, then the plain text', () => {
@@ -60,6 +72,7 @@ test('toolResult prefers structuredContent, then JSON text, then the plain text'
 test('the session starts on the first call, initializes once, and asks every tool for JSON', async () => {
   const { spawnImpl, spawned } = fakeSpawn({
     ...INIT,
+    ...TOOLS,
     'tools/call': (params) => ({ content: [{ type: 'text', text: JSON.stringify({ got: params }) }], structuredContent: { got: params } }),
   });
   const client = createCbmClient({ locate: () => FOUND, spawnImpl, env: () => ({ HOME: '/home/u' }), cwd: '/tmp/x', log: quiet });
@@ -74,8 +87,17 @@ test('the session starts on the first call, initializes once, and asks every too
   assert.equal(spawned[0].opts.cwd, '/tmp/x');
   assert.deepEqual(spawned[0].opts.env, { HOME: '/home/u' });
   const methods = spawned[0].child.received.map(m => m.method);
-  assert.deepEqual(methods, ['initialize', 'notifications/initialized', 'tools/call', 'tools/call']);
+  assert.deepEqual(methods, ['initialize', 'notifications/initialized', 'tools/list', 'tools/call', 'tools/call']);
   assert.deepEqual(client.status(), { running: true, binary: { path: FOUND.path, version: '0.12.1', source: 'installed' }, server: { name: 'codebase-memory-mcp', version: '0.12.1' }, error: null, halted: false });
+  client.stop();
+});
+
+test('a call keeps only the arguments its tool declares, and asks for JSON only where the tool has a format', async () => {
+  const { spawnImpl } = fakeSpawn({ ...INIT, ...TOOLS, 'tools/call': (p) => ({ structuredContent: { args: p.arguments } }) });
+  const client = createCbmClient({ locate: () => FOUND, spawnImpl, log: quiet });
+  assert.deepEqual((await client.call('compare_graphs', { base_project: 'a', target_project: 'b', format: 'tree', extra: 1 })).args, { base_project: 'a', target_project: 'b' });
+  assert.deepEqual((await client.call('index_status', { project: 'p', verbose: undefined, junk: true })).args, { project: 'p', format: 'json' });
+  assert.deepEqual((await client.call('not_listed', { a: 1 })).args, { a: 1, format: 'json' }, 'a tool the list does not name gets its arguments as given');
   client.stop();
 });
 
@@ -112,7 +134,7 @@ test('tool errors and RPC errors reject with CBM\'s words', async () => {
 });
 
 test('a call the server never answers times out', async () => {
-  const { spawnImpl } = fakeSpawn({ ...INIT });
+  const { spawnImpl } = fakeSpawn({ ...INIT, 'tools/call': () => new Promise(() => {}) });
   const client = createCbmClient({ locate: () => FOUND, spawnImpl, log: quiet, callTimeoutMs: 50 });
   await assert.rejects(client.call('search_graph', {}), (err) => err.code === 'cbm-timeout');
   client.stop();
@@ -195,7 +217,7 @@ test('prompts come back as their text', async () => {
 });
 
 test('a server that exits while starting rejects the start', async () => {
-  const { spawnImpl, spawned } = fakeSpawn({});
+  const { spawnImpl, spawned } = fakeSpawn({ initialize: () => new Promise(() => {}) });
   const client = createCbmClient({ locate: () => FOUND, spawnImpl, log: quiet, startTimeoutMs: 1000 });
   const call = client.call('list_projects');
   await new Promise(r => setTimeout(r, 10));

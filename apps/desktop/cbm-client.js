@@ -7,9 +7,11 @@
 // quits; when it dies, the next call starts it again, unless it keeps dying,
 // and then it waits for reset().
 //
-// Every tool is asked for `format: "json"`: the answer's structuredContent, or
-// its text parsed as JSON. A tool that reports an error (isError) rejects with
-// a CbmError of code 'cbm-tool-error' and CBM's own words.
+// The tools' input schemas are read once per session (tools/list): a call
+// keeps only the arguments its tool declares (some refuse any other), and asks
+// for `format: "json"` where the tool has it. The answer is its
+// structuredContent, or its text parsed as JSON. A tool that reports an error
+// (isError) rejects with a CbmError of code 'cbm-tool-error' and CBM's words.
 
 const { spawn } = require('child_process');
 const readline = require('readline');
@@ -69,6 +71,7 @@ function createCbmClient({
   let lastError = null;
   let crashes = [];
   let halted = false;
+  let schemas = new Map(); // tool → Set of argument names, from tools/list
   const pending = new Map();
 
   function failPending(err) {
@@ -163,8 +166,18 @@ function createCbmClient({
         rawRequest(proc, 'initialize', { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo }, startTimeoutMs),
         exited.then(() => { throw new CbmError(lastError || 'codebase-memory-mcp stopped while starting', 'cbm-exited'); }),
       ]);
-      serverInfo = init?.serverInfo || null;
       send(proc, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+      schemas = new Map();
+      try {
+        const listed = await rawRequest(proc, 'tools/list', {}, startTimeoutMs);
+        for (const tool of Array.isArray(listed?.tools) ? listed.tools : []) {
+          const props = tool?.inputSchema?.properties;
+          if (tool?.name && props && typeof props === 'object') schemas.set(tool.name, new Set(Object.keys(props)));
+        }
+      } catch (err) {
+        log.warn?.('[cbm] tools/list failed; arguments are sent as given', err.message);
+      }
+      serverInfo = init?.serverInfo || null;
       lastError = null;
       events.emit('change');
       return proc;
@@ -198,9 +211,23 @@ function createCbmClient({
     return rawRequest(proc, method, params, timeoutMs);
   }
 
+  /** The arguments a tool takes, with format: 'json' where it has one. */
+  function argumentsFor(tool, args) {
+    const known = schemas.get(tool);
+    const out = {};
+    for (const [key, value] of Object.entries(args || {})) {
+      if (value === undefined || key === 'format') continue;
+      if (known && !known.has(key)) continue;
+      out[key] = value;
+    }
+    if (!known || known.has('format')) out.format = 'json';
+    return out;
+  }
+
   /** Call a tool; resolves to its JSON answer. */
   async function call(tool, args = {}, opts = {}) {
-    const result = await request('tools/call', { name: tool, arguments: { ...args, format: 'json' } }, opts);
+    await ensure();
+    const result = await request('tools/call', { name: tool, arguments: argumentsFor(tool, args) }, opts);
     return toolResult(result);
   }
 
