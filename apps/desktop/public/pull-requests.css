@@ -466,10 +466,18 @@
 .pr-md img, .pr-md video { max-width: 100%; height: auto; border-radius: 4px; }
 .pr-md table { border-collapse: collapse; display: block; overflow: auto; }
 .pr-md th, .pr-md td { padding: 4px 8px; border: 1px solid rgba(255,255,255,0.08); }
-.pr-md ul.contains-task-list { padding-left: 18px; }
+/* style.css takes every padding away: a list gets back the room its markers
+   hang in (else they sit on the box's border) and a nested list its indent,
+   as on GitHub. A task list's boxes hang there too, its text in line with a
+   list's. */
+.pr-md ul, .pr-md ol { padding-left: 2em; }
+.pr-md li > ul, .pr-md li > ol { margin-bottom: 0; }
+.pr-md dt { font-weight: 600; font-style: italic; }
+.pr-md dd { padding-left: 16px; margin-bottom: 8px; }
+.pr-md summary { cursor: pointer; }
 .pr-md .task-list-item { list-style: none; }
 .pr-md .task-list-item input,
-.pr-md input[type="checkbox"] { all: revert; width: auto; height: auto; margin: 0 6px 0 -16px; vertical-align: middle; accent-color: color-mix(in srgb, var(--accent) 74%, rgb(168 168 168)); }
+.pr-md input[type="checkbox"] { all: revert; width: auto; height: auto; margin: 0 0.2em 0.25em -1.4em; vertical-align: middle; accent-color: color-mix(in srgb, var(--accent) 74%, rgb(168 168 168)); }
 .pr-md hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); }
 .pr-md-plain { white-space: pre-wrap; margin: 0; }
 
