@@ -1,8 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
-import { memo, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from 'react-native';
 import { create } from 'zustand';
 
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
@@ -697,18 +697,22 @@ function CheckRow({ pullRef, check, logOpen, onLog, onRerun }: {
 
 function JobLog({ pullRef, jobId }: { pullRef: PullRef; jobId: number }) {
   const log = useJobLog(pullRef, jobId);
+  // The log scrolls in its own box, from its end, where a failure says why.
+  const box = useRef<ScrollViewInstance>(null);
   const shown = useMemo(() => (log.data?.ok ? logLines(log.data.text || '') : null), [log.data]);
   if (log.isLoading) return <View style={styles.logNote}><ActivityIndicator size="small" color={colors.accent} /><Text style={styles.emptyText}>Reading the log…</Text></View>;
   if (!log.data?.ok || !shown) return <Text style={[styles.logNote, { color: colors.danger }]}>{log.data?.error || 'The log could not be read.'}</Text>;
   return (
     <View>
       {shown.cut || log.data.truncated ? <Text style={styles.logNoteText}>Only the end of the log is shown.</Text> : null}
-      <ScrollView horizontal style={styles.log} contentContainerStyle={styles.logContent}>
-        <View>
-          {shown.lines.map((line, i) => (
-            <Text key={i} style={[styles.logLine, line.tone === 'group' && { color: colors.accent, fontWeight: '700' }, line.tone === 'error' && { color: colors.danger }, line.tone === 'warning' && { color: colors.attention }]}>{line.text || ' '}</Text>
-          ))}
-        </View>
+      <ScrollView ref={box} nestedScrollEnabled style={styles.log} onContentSizeChange={() => box.current?.scrollToEnd({ animated: false })}>
+        <ScrollView horizontal nestedScrollEnabled contentContainerStyle={styles.logContent}>
+          <View>
+            {shown.lines.map((line, i) => (
+              <Text key={i} style={[styles.logLine, line.tone === 'group' && { color: colors.accent, fontWeight: '700' }, line.tone === 'error' && { color: colors.danger }, line.tone === 'warning' && { color: colors.attention }]}>{line.text || ' '}</Text>
+            ))}
+          </View>
+        </ScrollView>
       </ScrollView>
     </View>
   );
@@ -739,9 +743,9 @@ const styles = StyleSheet.create({
   notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, padding: spacing.sm, paddingLeft: spacing.md, borderRadius: 8, backgroundColor: colors.surface, borderLeftWidth: 3 },
   noticeText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
   tabs: { flexDirection: 'row', gap: 2, paddingHorizontal: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  tab: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: spacing.md, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tab: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 42, paddingHorizontal: 9, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabOn: { borderBottomColor: colors.accent },
-  tabText: { color: colors.textDim, fontSize: 14 },
+  tabText: { color: colors.textDim, fontSize: 13.5 },
   tabTextOn: { color: colors.text, fontWeight: '700' },
   tabCount: { color: colors.textDim, fontSize: 11.5, backgroundColor: colors.raised, borderRadius: 9, paddingHorizontal: 6, overflow: 'hidden' },
   conversation: { padding: spacing.lg, gap: spacing.md },

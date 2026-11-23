@@ -82,7 +82,7 @@ export default function SidebarScreen() {
           {option.sub ? <Text style={styles.sub} numberOfLines={1}>{option.sub}</Text> : null}
         </Pressable>
       ))}
-      {candidates.data?.ok && !options.length ? <Text style={formStyles.empty}>Nothing found.</Text> : null}
+      {candidates.data?.ok && !options.length ? <Text style={formStyles.empty}>{side === 'reviewers' && !search ? 'No one else to ask: GitHub takes no review from the pull request\'s author.' : 'Nothing found.'}</Text> : null}
       <ErrorText>{error}</ErrorText>
       <PrimaryButton label="Save" busyLabel="Saving…" busy={busy} disabled={!online || !head} onPress={save} />
     </ScrollView>

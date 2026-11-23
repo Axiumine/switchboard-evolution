@@ -1143,7 +1143,7 @@ function prdOpenSidePicker(ctx, side, button) {
       const key = keyOf(item);
       const label = side === 'labels' ? prdLabelHtml(item) : `${prdAvatarHtml(item.login, item.avatar, 16)}<span>${escapeHtml(item.login)}</span>${item.name ? `<span class="pr-muted">${escapeHtml(item.name)}</span>` : ''}`;
       return `<label class="pr-filter-option"><input type="checkbox" data-key="${prAttr(key)}"${chosen.has(key) ? ' checked' : ''}>${label}</label>`;
-    }).join('') : '<div class="pr-muted">Nothing found.</div>';
+    }).join('') : `<div class="pr-muted">${side === 'reviewers' && !search.value.trim() ? 'No one else to ask: GitHub takes no review from the pull request\'s author.' : 'Nothing found.'}</div>`;
     options.querySelectorAll('input[data-key]').forEach((input) => {
       input.onchange = () => { if (input.checked) chosen.add(input.dataset.key); else chosen.delete(input.dataset.key); };
     });
