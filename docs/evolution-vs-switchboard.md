@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.12.0 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.14.0 (November 2026).
 
 ## At a glance
 
@@ -34,13 +34,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 22 Nov | Switchboard Evolution 1.10.0 | The sidebar's Agent Files tab becomes Files: drop any file on the sidebar to open it there or in a window of its own, and pin files at the top. |
 | 23 Nov | Switchboard Evolution 1.11.0 | A Pull Requests view in the Git tab, on the desktop and the phone: every open pull request with its files and diffs, merge, draft, ready and close. The app carries the GitHub CLI for a computer without one. |
 | 23 Nov | Switchboard Evolution 1.12.0 | A pull request's files as a tree, every diff closed. Before Merge, four icons copy its address and open its page on GitHub inside the app, in a panel or a window of its own, or in the browser, on the desktop and the phone. |
+| 23 Nov | Switchboard Evolution 1.14.0 | The Node Knowledge tab: the project's repositories as code graphs with codebase-memory-mcp (architecture, search, call traces, the impact of a change, Cypher queries, decision records, coverage, the 3D Lens), and the graph's tools in the project's agent sessions. An open pull request shown as GitHub does: Conversation, Commits, Checks and Files changed, and changed from there, on the desktop and the phone. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.12.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.14.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
