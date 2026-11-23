@@ -19,16 +19,7 @@ const RESTART_DELAYS_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000];
 // One label, as Cloudflare's free certificate covers *.domain but not deeper.
 const NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const DOMAIN_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
-const HOMEBREW_BINS = ['/opt/homebrew/bin', '/usr/local/bin'];
-
-/** Where a program is: PATH first, then Homebrew's folders (an app opened from the Finder has a short PATH). */
-function findBinary(name, { pathEnv = process.env.PATH || '', exists = fs.existsSync } = {}) {
-  for (const dir of [...pathEnv.split(path.delimiter).filter(Boolean), ...HOMEBREW_BINS]) {
-    const candidate = path.join(dir, name);
-    if (exists(candidate)) return candidate;
-  }
-  return null;
-}
+const { findBinary } = require('./find-binary');
 
 /**
  * One agent process, kept running while wanted. `command()` gives what to run

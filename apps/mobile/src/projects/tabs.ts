@@ -53,13 +53,17 @@ export function swipeTab(
   return tabs[index + (dx < 0 ? 1 : -1)]?.key ?? null;
 }
 
-/** The Git tab's views, as on the desktop: Changes | History | Worktrees. */
-export type GitView = 'changes' | 'history' | 'worktrees';
+/**
+ * The Git tab's views, as on the desktop: Changes | History | Worktrees | Pull
+ * Requests. Pull Requests is "PRs" here, so the four fit across a phone.
+ */
+export type GitView = 'changes' | 'history' | 'worktrees' | 'pulls';
 
-export const GIT_VIEWS: readonly { key: GitView; label: string }[] = [
+export const GIT_VIEWS: readonly { key: GitView; label: string; a11y?: string }[] = [
   { key: 'changes', label: 'Changes' },
   { key: 'history', label: 'History' },
   { key: 'worktrees', label: 'Worktrees' },
+  { key: 'pulls', label: 'PRs', a11y: 'Pull Requests' },
 ];
 
 /** Tabs that became views of the Git tab, for links made before. */

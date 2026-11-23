@@ -10,10 +10,12 @@ import type { GitView, ProjectTab, ScrollKey, SessionView } from './tabs';
  */
 export type ProjectUi = {
   tab: ProjectTab;
-  /** The Git tab's view: Changes, History or Worktrees. */
+  /** The Git tab's view: Changes, History, Worktrees or Pull Requests. */
   gitView?: GitView;
-  /** The repository (folder path) Changes and History show; the two views share it, as on the desktop. */
+  /** The repository (folder path) Changes, History and Pull Requests show; they share it, as on the desktop. */
   gitRepo?: string;
+  /** Pull Requests: the GitHub remote chosen per repository (folder path), when there are several. */
+  pullRemotes?: Record<string, string>;
   /** The session the Session tab shows; it outlives a switch to another tab, as on the desktop. */
   session?: string | null;
   /** Whether the Session tab opened on the chat or the terminal. */

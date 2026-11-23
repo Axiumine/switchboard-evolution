@@ -139,6 +139,11 @@ contextBridge.exposeInMainWorld('api', {
   onGitGraphActionProgress: (callback) => {
     ipcRenderer.on('git-graph-action-progress', (_event, payload) => callback(payload));
   },
+  // Pull Requests tab (pull-requests.js)
+  getPullRequests: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-requests', id, folderPath, opts),
+  getPullRequestsPage: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-requests-page', id, folderPath, opts),
+  getPullRequestFiles: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-files', id, folderPath, opts),
+  runPullRequestAction: (id, folderPath, params) => ipcRenderer.invoke('run-pull-request-action', id, folderPath, params),
   listEnvFiles: (folderPath) => ipcRenderer.invoke('list-env-files', folderPath),
   saveProjectBrief: (id, content) => ipcRenderer.invoke('save-project-brief', id, content),
   createProjectFile: (id, name, content) => ipcRenderer.invoke('create-project-file', id, name, content),

@@ -15,10 +15,12 @@ import { useProjectUi } from '@/projects/ui-store';
 import { colors, spacing } from '@/theme';
 import { RepoChips } from '../RepoChips';
 import { SectionLink } from '../Section';
+import { PullRequestsTab } from './PullRequestsTab';
 import { WorktreesTab } from './WorktreesTab';
 
 /**
- * The Git tab, as on the desktop: Changes | History | Worktrees. Each view is
+ * The Git tab, as on the desktop: Changes | History | Worktrees | Pull
+ * Requests (PRs). Each view is
  * built when first shown and kept, so its scroll and sheets survive switching;
  * the project remembers which one was open.
  */
@@ -31,13 +33,14 @@ export function GitTab({ project, active = true }: { project: Project; active?: 
     changes: <ChangesView project={project} active={active && view === 'changes'} />,
     history: <HistoryView project={project} />,
     worktrees: <WorktreesTab project={project} active={active && view === 'worktrees'} />,
+    pulls: <PullRequestsTab project={project} active={active && view === 'pulls'} />,
   };
 
   return (
     <View style={styles.screen}>
       <View style={styles.switchBar}>
         <View style={styles.switch} accessibilityRole="tablist" accessibilityLabel="Git view">
-          {GIT_VIEWS.map(({ key, label }) => {
+          {GIT_VIEWS.map(({ key, label, a11y }) => {
             const on = key === view;
             return (
               <Pressable
@@ -46,8 +49,9 @@ export function GitTab({ project, active = true }: { project: Project; active?: 
                 style={[styles.option, on && styles.optionOn]}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: on }}
+                accessibilityLabel={a11y ?? label}
               >
-                <Text style={[styles.optionText, on && styles.optionTextOn]}>{label}</Text>
+                <Text style={[styles.optionText, on && styles.optionTextOn]} numberOfLines={1}>{label}</Text>
               </Pressable>
             );
           })}

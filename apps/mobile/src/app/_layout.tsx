@@ -71,6 +71,7 @@ export default function RootLayout() {
             <Stack.Screen name="worktrees/settings" options={{ title: 'Worktree settings' }} />
             <Stack.Screen name="worktrees/folder" options={{ title: 'Worktree folder' }} />
             <Stack.Screen name="worktrees/changes" options={{ title: 'Uncommitted and unpushed' }} />
+            <Stack.Screen name="pulls/merge" options={{ title: 'Merge pull request' }} />
           </Stack>
           <SidebarDivider />
         </WithDownloadBar>

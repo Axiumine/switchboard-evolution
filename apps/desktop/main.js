@@ -414,6 +414,8 @@ const gitGraphAvatars = require('./git-graph-avatars');
 require('./remote-git-graph');
 // What of the Worktrees tab a paired phone may use.
 require('./remote-worktrees');
+// What of the Pull Requests tab a paired phone may use.
+require('./remote-pull-requests');
 // What of the Task Manager a paired phone may use.
 const { isOwner: isProcessOwner } = require('./remote-process-usage');
 // Mirrors db.js's own DATA_DIR resolution (SWITCHBOARD_DATA_DIR override,
@@ -426,6 +428,7 @@ gitGraphAvatars.init({
   log,
 });
 gitGraphService.init({ db: dbModule, log, send: emit });
+require('./pull-requests').init({ log });
 
 // An upgrade can change the working rules in the brief. Bring every project's
 // managed blocks up to date once at startup; unchanged files are not written.
@@ -732,6 +735,11 @@ ipcMain.handle('save-git-graph-archive', guarded(async (id, folderPath, opts = {
     ref: opts.ref, refType: opts.refType, remote: opts.remote, format, absPath: result.filePath,
   });
 }));
+// --- IPC: Pull Requests tab (pull-requests.js, through the GitHub CLI) ---
+ipcMain.handle('get-pull-requests', guarded((id, folderPath, opts) => projects.projectPullRequests(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-requests-page', guarded((id, folderPath, opts) => projects.projectPullRequestsPage(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-files', guarded((id, folderPath, opts) => projects.projectPullRequestFiles(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('run-pull-request-action', guarded((id, folderPath, params) => projects.runProjectPullRequestAction(id, String(folderPath || ''), params || {})));
 // The .env files a folder has, and the ones the dialog ticks by default,
 // so a new worktree can be offered its repository's local environment.
 ipcMain.handle('list-env-files', guarded((folderPath) => ({

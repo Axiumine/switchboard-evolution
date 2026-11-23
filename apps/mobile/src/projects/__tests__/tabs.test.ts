@@ -28,6 +28,7 @@ describe('parseGitView', () => {
   it('reads a view, or the old tab it replaces', () => {
     expect(parseGitView('worktrees')).toBe('worktrees');
     expect(parseGitView('history')).toBe('history');
+    expect(parseGitView('pulls')).toBe('pulls');
     expect(parseGitView('gitgraph')).toBe('history');
     expect(parseGitView('git')).toBeNull();
     expect(parseGitView(undefined)).toBeNull();
@@ -39,8 +40,9 @@ describe('PROJECT_TABS', () => {
     expect(PROJECT_TABS.map((t) => t.label)).toEqual(['Overview', 'Session', 'Plan', 'Todos', 'Files', 'Git', 'Settings']);
   });
 
-  it('puts Changes, History and Worktrees under Git', () => {
-    expect(GIT_VIEWS.map((v) => v.label)).toEqual(['Changes', 'History', 'Worktrees']);
+  it('puts Changes, History, Worktrees and Pull Requests under Git', () => {
+    expect(GIT_VIEWS.map((v) => v.label)).toEqual(['Changes', 'History', 'Worktrees', 'PRs']);
+    expect(GIT_VIEWS.map((v) => v.a11y ?? v.label)).toEqual(['Changes', 'History', 'Worktrees', 'Pull Requests']);
   });
 });
 

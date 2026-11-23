@@ -141,7 +141,7 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 
 ## 8. Project page: Git tab, Changes
 
-- [ ] The Git tab has a switch Changes | History | Worktrees (master adds Worktrees) and fills the whole width — `project-git-view.js` (`GIT_WORKSPACE_VIEWS`, `renderProjectGitWorkspace`)
+- [ ] The Git tab has a switch Changes | History | Worktrees | Pull Requests (master adds Worktrees and Pull Requests) and fills the whole width; Changes, History and Pull Requests share the chosen repository — `project-git-view.js` (`GIT_WORKSPACE_VIEWS`, `renderProjectGitWorkspace`, `setProjectGitView`)
 - [ ] With several attached repositories a picker chooses one; a folder that is not a repository says so — `project-git-view.js` (`.git-repo-picker`, `paintGitRepository`)
 - [ ] Changes shows the branch (or detached head), clean or "n changed files", ahead/behind, insertions and deletions, warnings, and the latest commit — `project-git-view.js` (`gitOverviewHtml`)
 - [ ] The changed-file list can be a flat list or a tree (choice remembered); clicking a file shows its unified diff, with "Read only" labelling the tab — `project-git-view.js` (`gitViewToggleHtml`, `paintGitDiff`, `getProjectGitDiff`)
@@ -191,6 +191,16 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 - [ ] "Remove merged…" lists worktrees whose branch is merged into a base, ticks which to remove and optionally deletes their branches (master) — `project-worktrees-view.js` (`wtMergedDialog`), `main.js` (`worktree-merged`)
 - [ ] "Prune…" previews stale records, optionally detaches stale ones, then prunes; "Repair all" and "Repair a moved folder…" reconnect worktrees (master) — `project-worktrees-view.js` (`wtPruneDialog`, `wtRepair`, `wtRepairMoved`), `main.js` (`worktree-prune-preview`, `worktree-prune`)
 - [ ] Worktree settings: folder template with `$BASE_PATH`, `$BASE_ROOT`, `$BASE_NAME`, `$REF_NAME`, `$INDEX`, `$PROJECT_ROOT`; copy patterns and ignores; command after creating; command before removing; what to open after creating (master) — `project-worktrees-view.js` (`wtSettingsDialog`), `main.js` (`get-worktree-settings`, `set-worktree-settings`)
+
+## 10b. Project page: Git tab, Pull Requests (master)
+
+- [ ] The Pull Requests view has one tab per repository, as History, and reads the pull requests of its GitHub remote through the GitHub CLI (`gh`) on the computer; with more than one GitHub remote a Remote combo chooses which, remembered per repository — `project-pull-requests-view.js` (`renderProjectPullRequestsTab`, `prRemoteSelectHtml`), `pull-requests.js` (`resolveRepo`), `main.js` (`get-pull-requests`)
+- [ ] Every open pull request is listed, drafts too, newest first (by opening date), however many there are; each row shows its state, title, number, author, when, head → base, +/− and files, and badges for Draft, Conflicts, the review and the checks (master) — `project-pull-requests-view.js` (`prRowHtml`, `prBadgesHtml`, `prMergeLists`)
+- [ ] A filter combo with Open, Draft, Closed and Merged (Open and Draft at first, at least one stays on, not saved); Closed and Merged join the list 10 at a time with "Load 10 more" and "N of M shown" (master) — `project-pull-requests-view.js` (`prOpenFilterMenu`, `prLoadPage`, `prFooterHtml`), `main.js` (`get-pull-requests-page`)
+- [ ] A row opens on its changed files, each with its diff; the first ones open as far as about 1500 lines, the rest one click away, with Open all and Close all; binary and too large diffs say so (master) — `project-pull-requests-view.js` (`prPaintDetail`, `prFilesHtml`, `prFileBudget`), `main.js` (`get-pull-request-files`)
+- [ ] Merge sits on an open row (off, with the reason, for a draft, conflicts, or an account that cannot write); its dialog offers the repository's merge methods and "Delete the branch after merging" (on GitHub only, never for a fork) and refuses when new commits arrived (master) — `project-pull-requests-view.js` (`prMergeBlock`, `prMergeDialog`), `pull-requests.js` (`actionArgs`), `main.js` (`run-pull-request-action`)
+- [ ] The row's ⋯ has Convert to draft… or Ready for review…, and Close pull request…; each asks first, with the focus on Cancel, and shows gh's error in the dialog when GitHub refuses (master) — `project-pull-requests-view.js` (`prRowMenuItems`, `prConfirmDialog`)
+- [ ] Without gh, signed out of GitHub, or without a GitHub remote the view says what to do, with Try again; the list is read again when shown after a minute, when the window comes back and after each action (master) — `project-pull-requests-view.js` (`prErrorHtml`, `prEnsureLoaded`)
 
 ## 11. Project page: Settings tab
 
@@ -383,7 +393,7 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 
 ## Renderer to main: ipcMain handlers in `apps/desktop/main.js`
 
-There are **169** handlers: 163 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `main` has 98 of them; **71 are master only** (4 came with 1.6.6: staging, search and replace). A handler marked (master) is one of those. All of them are registered through `ipc-registry.js`, which lets the remote-access server call the same function with a null event. Events from main to the renderer are listed after the table.
+There are **173** handlers: 167 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `main` has 98 of them; **75 are master only** (4 came with 1.6.6: staging, search and replace). A handler marked (master) is one of those. All of them are registered through `ipc-registry.js`, which lets the remote-access server call the same function with a null event. Events from main to the renderer are listed after the table.
 
 | Area | Count | Channels |
 |---|---|---|
@@ -394,6 +404,7 @@ There are **169** handlers: 163 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `m
 | Git Changes | 6 (2 master) | `get-project-git-status`, `get-project-git-info`, `get-project-git-diff`, `get-folder-git-status`; (master) `stage-project-git-files`, `stage-project-git-lines` |
 | Git History (graph) | 20 (15 master) | `get-project-git-graph`, `get-git-graph-commit-detail`, `get-git-graph-compare-detail`, `get-git-graph-file-at-revision`, `get-git-graph-file-diff-between` (upstream); (master) `get-git-graph-repo-config`, `set-git-graph-repo-config`, `trust-git-graph-repo-config`, `confirm-git-graph-avatars-gitlab-host`, `export-git-graph-repo-config`, `get-git-graph-user-details`, `get-git-graph-global-preferences`, `set-git-graph-global-preferences`, `get-git-graph-remotes`, `get-git-graph-tag-details`, `get-git-graph-avatar-url`, `clear-git-graph-avatar-cache`, `run-git-graph-action`, `cancel-git-graph-action`, `save-git-graph-archive` |
 | Git Worktrees | 18 (all master) | `get-project-worktrees`, `get-worktree-settings`, `set-worktree-settings`, `list-worktree-branches`, `suggest-worktree-path`, `worktree-create`, `worktree-run-post-create`, `worktree-remove`, `worktree-delete-branch`, `worktree-merged`, `worktree-lock`, `worktree-unlock`, `worktree-move`, `worktree-repair`, `worktree-prune-preview`, `worktree-prune`, `worktree-attach`, `worktree-detach` |
+| Git Pull Requests | 4 (all master) | `get-pull-requests`, `get-pull-requests-page`, `get-pull-request-files`, `run-pull-request-action` |
 | Files, viewer, IDE panel | 20 (10 master) | `mcp-diff-response`, `resolve-terminal-files`, `open-file-externally`, `read-file-for-panel`, `list-project-directory`, `manage-project-entry`, `read-project-file`, `save-file-for-panel`, `watch-file`, `unwatch-file` (upstream); (master) `share-file`, `create-project-entry`, `duplicate-project-entry`, `paste-project-entry`, `get-file-timeline`, `get-file-timeline-diff`, `get-file-at-commit`, `open-file-with-app`, `search-project-files`, `replace-in-project-files` |
 | System helpers | 4 (1 master) | `open-external`, `open-path`, `clipboard-write-text`; (master) `reveal-file` |
 | Plans and Files tab | 12 (6 master) | `get-plans`, `read-plan`, `save-plan`, `get-memories`, `read-memory`, `save-memory`; (master) `get-opened-files`, `add-opened-files`, `remove-opened-file`, `set-file-pinned`, `move-pinned-file`, `open-file-window` |
@@ -412,7 +423,7 @@ Main to renderer events the new UI must subscribe to (names from `preload.js`): 
 
 ## Phone API: methods allowed in `apps/desktop/remote-api.js` (and the modules that add to it)
 
-Remote access is a whitelist: **130 methods** (80 in `remote-api.js`, 20 in `remote-git-graph.js`, 19 in `remote-worktrees.js`, 7 in `remote-tasks.js`, 4 in `remote-process-usage.js`), each with a check per parameter. The hello handshake sends the protocol version (1, `remote-protocol.js`) and the list of methods this desktop implements. Methods marked *local* have no IPC channel; they are implemented in `main.js` (`remoteLocalMethods`) or a `remote-*.js` module because they need to know which phone is calling. Everything here is master only.
+Remote access is a whitelist: **134 methods** (80 in `remote-api.js`, 20 in `remote-git-graph.js`, 19 in `remote-worktrees.js`, 4 in `remote-pull-requests.js`, 7 in `remote-tasks.js`, 4 in `remote-process-usage.js`), each with a check per parameter. The hello handshake sends the protocol version (1, `remote-protocol.js`) and the list of methods this desktop implements. Methods marked *local* have no IPC channel; they are implemented in `main.js` (`remoteLocalMethods`) or a `remote-*.js` module because they need to know which phone is calling. Everything here is master only.
 
 | Phone methods | Feature on the desktop |
 |---|---|
@@ -429,6 +440,7 @@ Remote access is a whitelist: **130 methods** (80 in `remote-api.js`, 20 in `rem
 | `get-project-git-status`, `get-project-git-info`, `get-project-git-diff`, `stage-project-git-files`, `stage-project-git-lines` | Git Changes and staging (section 8) |
 | `get-project-git-graph`, `get-git-graph-commit-detail`, `get-git-graph-compare-detail`, `get-git-graph-file-at-revision`, `get-git-graph-file-diff-between`, `get-git-graph-remotes`, `get-git-graph-tag-details`, `get-git-graph-user-details`, `get-git-graph-repo-config`, `get-git-graph-global-preferences`, `set-git-graph-repo-config`, `set-git-graph-global-preferences`, `trust-git-graph-repo-config`, `export-git-graph-repo-config`, `get-git-graph-avatar-url`, `clear-git-graph-avatar-cache`, `run-git-graph-action` (34 whitelisted actions, `PHONE_ACTIONS`), `cancel-git-graph-action`, `set-git-graph-avatars-gitlab-host`, `create-git-graph-archive` | Git History (section 9) |
 | `get-project-worktrees`, `get-worktree-settings`, `set-worktree-settings`, `list-worktree-branches`, `suggest-worktree-path`, `worktree-create`, `worktree-run-post-create`, `worktree-remove`, `worktree-delete-branch`, `worktree-merged`, `worktree-lock`, `worktree-unlock`, `worktree-move`, `worktree-repair`, `worktree-prune-preview`, `worktree-prune`, `worktree-attach`, `worktree-detach`, `list-env-files` | Worktrees (section 10) |
+| `get-pull-requests`, `get-pull-requests-page`, `get-pull-request-files`, `run-pull-request-action` (merge, draft, ready, close only) | Pull Requests (section 10b) |
 | `list-project-tasks`, `get-task-run`, `start-task`, `stop-task`, `restart-task`, `stop-all-tasks`, `task-input` (local) | Project tasks popover and task log (section 13) |
 | `get-process-usage`, `stop-owner`, `kill-owned-process`, `force-stop-owner` | Task Manager (section 18) |
 | `get-usage`, `get-codex-usage`, `get-stats`, `get-app-version` | Stats and the version row (sections 17, 19) |
@@ -481,7 +493,7 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 - [ ] Overview: a section per track (⋯ sheet: New session here…, Rename…, Mark as done / Reopen, Delete track…), Other sessions, Schedules (New, and per schedule Run now, Edit…, Pause / Resume, Delete…), Files (project folder and each attached folder), Attach a folder… — `components/project/tabs/OverviewTab.tsx`
 - [ ] Plan: phases and items with tick, long-press for "Start a session on this" and Edit…, "Add to the plan…"; Todos: the todos, the same way, with "Add a todo…" — `components/project/tabs/PlanTab.tsx` (`part`), `components/project/PlanSection.tsx`
 - [ ] Files: tree per root with New file, New folder, Paste, Collapse folders, and per-entry Open, Open in Terminal, Add file to Chat / New Chat, Open Timeline, Cut, Copy, Paste, Copy Path, Copy Relative Path, Rename…, Duplicate, Download, Delete; per folder Upload Files… and Upload Photos… (several at once, Replace or Keep Both for names already there); Enable Selection in the folder's ⋯ for Download N Selected… (into a folder picked on the phone, ticked folders with what is in them) and Delete N Selected… — `components/project/tabs/FilesTab.tsx`, `files/download.ts`, `files/upload.ts`
-- [ ] Git: Changes (branch, changes, latest commits), History (a Git Graph link per folder), Worktrees view — `components/project/tabs/GitTab.tsx`, `components/project/tabs/WorktreesTab.tsx`
+- [ ] Git: Changes (branch, changes, latest commits), History (a Git Graph link per folder), Worktrees view, Pull Requests view ("PRs") — `components/project/tabs/GitTab.tsx`, `components/project/tabs/WorktreesTab.tsx`, `components/project/tabs/PullRequestsTab.tsx`
 - [ ] Settings: Name, Project folder, Sessions start in, Folders (Show in Files, Copy path, Detach…), Worktree branch and "Same in every repo", Tracks (rename, folder, CLI, Done/Reopen, Delete…), Wake now, Mark as done, Remove project… — `components/project/tabs/SettingsTab.tsx`
 - [ ] Session tab: Chat or Terminal view of the open session, with Split screen, and the project actions in its ⋯ — `components/project/tabs/SessionTab.tsx`, `session/[id].tsx`
 
@@ -522,6 +534,11 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 
 - [ ] Worktrees list per repository with New worktree, Remove merged, Prune, Folder actions, Worktree settings, per-worktree sheet (New session…, Show in Files, Show in Git, Show in the Git Graph, Attach/Detach, Lock…, Unlock, Move…, Repair, Remove…) — `components/project/tabs/WorktreesTab.tsx`
 - [ ] New worktree (check out new, existing, remote or detached, folder, files to copy, then open), Remove worktree (with branch delete), Remove merged, Worktree settings, Worktree folder (move or repair a moved folder) — `worktrees/new.tsx`, `worktrees/remove.tsx`, `worktrees/merged.tsx`, `worktrees/settings.tsx`, `worktrees/folder.tsx`
+
+## `pulls/*`
+
+- [ ] Pull Requests view per repository (chips): every open one, drafts too, newest first; filter sheet Open, Draft, Closed, Merged with "Load 10 more" for closed and merged; Remote sheet with more than one GitHub remote; a row opens on its files and their diffs; Merge (off with the reason) and ⋯ with Convert to draft or Ready for review and Close, each asked first; "Update Switchboard Evolution on the computer" when the desktop lacks it — `components/project/tabs/PullRequestsTab.tsx`, `pulls/model.ts`, `pulls/queries.ts`
+- [ ] Merge pull request: merge method (only the repository's), Delete the branch after merging, warnings for checks and review, then a confirmation — `pulls/merge.tsx`
 
 ## `ide-diff.tsx`
 

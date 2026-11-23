@@ -49,7 +49,7 @@ What "an app of its own" means:
 - The phone sees and drives terminals: it starts Claude, Codex or OpenCode sessions, types, fits the terminal to its screen, attaches files and photos, and reads the tail of a long conversation.
 - Unread and needs-you marks are shared between window and phone. A session open on the phone counts as seen.
 - Projects, plans, todos, schedules and files work from the phone: upload, rename, trash, a safe save that refuses if the file changed meanwhile, and download of any file.
-- The Git Graph with all its actions, worktrees, project tasks, the Task Manager, search and replace, and staging also work from the phone.
+- The Git Graph with all its actions, worktrees, pull requests, project tasks, the Task Manager, search and replace, and staging also work from the phone.
 - IDE diffs can be answered from the phone. The first answer wins, and the window says the phone answered.
 - Internet access goes through Cloudflare or ngrok tunnels, set up from the devices dialog. Secrets are encrypted with the system keychain, and only a phone holding the access key gets in through a tunnel.
 - With remote access on, closing the window only hides it and sessions keep running. The computer stays awake while a session works.
@@ -78,6 +78,11 @@ What "an app of its own" means:
   - a guided New worktree (new, existing or remote branch, folder, local files to copy, a command after creating)
   - Lock, Move, Repair, Prune, "Remove merged…"
   - new sessions started right in a worktree
+- **Pull Requests**, through the GitHub CLI (`gh`) on the computer:
+  - one tab per repository; every open pull request, drafts too, newest first
+  - a filter for Open, Draft, Closed and Merged; closed and merged ones 10 at a time
+  - a row opens on its changed files and their diffs
+  - Merge (the repository's merge methods, the branch deleted on GitHub if you want), Convert to draft, Ready for review and Close, each asked first; the local checkout is never touched
 
 ### 4. Files
 

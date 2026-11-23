@@ -22,6 +22,7 @@ const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
 const gitGraphService = require('./git-graph-service');
+const pullRequests = require('./pull-requests');
 const planParser = require('./public/plan-parser');
 const sessionConfig = require('./public/session-config');
 
@@ -2036,6 +2037,32 @@ function cancelProjectGitGraphAction(projectId, folderPath, actionId) {
   return gitGraphService.cancelGitGraphAction(folder.path, actionId);
 }
 
+// --- Pull Requests tab: the same attached-folder boundary, then pull-requests.js ---
+
+/** Every open pull request of the folder's GitHub repository, with its merge settings. */
+async function projectPullRequests(projectId, folderPath, opts) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return pullRequests.listOpen(folder.path, opts || {});
+}
+
+/** One page of its closed and/or merged pull requests. */
+async function projectPullRequestsPage(projectId, folderPath, opts) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return pullRequests.listPage(folder.path, opts || {});
+}
+
+/** The changed files of one pull request, each with its patch. */
+async function projectPullRequestFiles(projectId, folderPath, opts) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return pullRequests.files(folder.path, opts || {});
+}
+
+/** Merge, convert to draft, mark ready or close: pull-requests.js allows only those. */
+async function runProjectPullRequestAction(projectId, folderPath, params) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return pullRequests.runAction(folder.path, params || {});
+}
+
 module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief,
@@ -2048,6 +2075,7 @@ module.exports = {
   exportProjectGitGraphRepoConfig, projectGitGraphUserDetails,
   projectGitGraphRemotes, projectGitGraphTagDetails, projectGitGraphAvatarUrl,
   runProjectGitGraphAction, cancelProjectGitGraphAction,
+  projectPullRequests, projectPullRequestsPage, projectPullRequestFiles, runProjectPullRequestAction,
   syncProjectBrief, syncAllProjectBriefs, saveBrief, createProjectFile, addProjectFiles, addProjectFileBytes, listAddedFiles, listRecentProjectFiles,
   launchContext, mergeAddDirs, worktreeParentFor,
   PROJECT_FILES, ADDED_FILES_DIR,
