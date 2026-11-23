@@ -801,6 +801,73 @@ ipcMain.handle('worktree-detach', guarded((id, worktreePath) => worktrees.detach
 ipcMain.handle('worktree-changes', guarded((id, worktreePath) => worktrees.worktreeChanges(id, wtPath(worktreePath))));
 ipcMain.handle('worktree-file-diff', guarded((id, worktreePath, filePath) => worktrees.worktreeFileDiff(id, wtPath(worktreePath), String(filePath || ''))));
 
+// --- IPC: Node Knowledge tab (codebase-memory-mcp) ---
+// knowledge.js checks every folder against the project and fills in the CBM
+// project name itself; cbm-client.js is the app's one MCP session with CBM.
+const cbmLocator = require('./cbm-locator');
+const { createCbmClient } = require('./cbm-client');
+const knowledge = require('./knowledge');
+const cbmClient = createCbmClient({
+  locate: () => cbmLocator.locateCbm({ configured: knowledge.globalSettings().binaryPath }),
+  env: () => buildPtyEnv(process.env),
+  cwd: () => {
+    const dir = path.join(app.getPath('userData'), 'cbm');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    return dir;
+  },
+  log,
+  clientInfo: { name: 'switchboard-evolution', version: app.getVersion() },
+});
+knowledge.init({ db: dbModule, log, projects, client: cbmClient, emit, watchRepo: (dir) => gitGraphService.ensureRepoWatch(dir) });
+addSink((channel, args) => {
+  if (channel === 'git-graph-repo-changed' && typeof args[0] === 'string') knowledge.scheduleRefresh(args[0]);
+});
+// Like guarded(), and the error's code too ('not-indexed', 'cbm-missing', …) for the tab's states.
+function knowledgeGuarded(fn) {
+  return async (_event, ...args) => {
+    try { return await fn(...args); } catch (err) {
+      if (!err.code) log.error('[knowledge]', err);
+      return { error: err.message, code: err.code || null };
+    }
+  };
+}
+const knPath = (value) => String(value || '');
+const knObject = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+ipcMain.handle('get-knowledge-status', knowledgeGuarded((id) => knowledge.status(id)));
+ipcMain.handle('get-knowledge-settings', knowledgeGuarded((id) => knowledge.getSettings(id)));
+ipcMain.handle('set-knowledge-settings', knowledgeGuarded((id, patch) => knowledge.setSettings(id, knObject(patch))));
+ipcMain.handle('knowledge-query', knowledgeGuarded((id, folder, tool, args) => knowledge.query(id, knPath(folder), String(tool || ''), args)));
+ipcMain.handle('knowledge-compare', knowledgeGuarded((id, base, target, opts) => knowledge.compare(id, knPath(base), knPath(target), knObject(opts))));
+ipcMain.handle('knowledge-prompt', knowledgeGuarded((id, folder, name, args) => knowledge.prompt(id, knPath(folder), String(name || ''), knObject(args))));
+ipcMain.handle('knowledge-index', knowledgeGuarded((id, folder, opts) => knowledge.index(id, knPath(folder), { mode: knObject(opts).mode })));
+ipcMain.handle('knowledge-index-all', knowledgeGuarded((id, opts) => knowledge.indexAll(id, { mode: knObject(opts).mode })));
+ipcMain.handle('knowledge-link-cross-repo', knowledgeGuarded((id) => knowledge.linkCrossRepo(id)));
+ipcMain.handle('knowledge-delete-index', knowledgeGuarded((id, folder) => knowledge.deleteIndex(id, knPath(folder))));
+ipcMain.handle('knowledge-adr', knowledgeGuarded((id, folder, opts) => knowledge.adr(id, knPath(folder), knObject(opts))));
+ipcMain.handle('knowledge-ingest-traces', knowledgeGuarded((id, folder, opts) => knowledge.ingestTraces(id, knPath(folder), knObject(opts))));
+// The traces file comes from this dialog, never as a path from the renderer.
+ipcMain.handle('knowledge-import-traces-file', knowledgeGuarded(async (id, folder, label) => {
+  const picked = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import runtime traces',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true };
+  return knowledge.ingestTracesFile(id, knPath(folder), picked.filePaths[0], label == null ? null : String(label));
+}));
+ipcMain.handle('get-knowledge-config', knowledgeGuarded(() => knowledge.getConfig()));
+ipcMain.handle('set-knowledge-config', knowledgeGuarded((key, value) => knowledge.setConfig(String(key || ''), value == null ? '' : String(value))));
+ipcMain.handle('get-knowledge-global', knowledgeGuarded(() => ({ ok: true, settings: knowledge.globalSettings() })));
+ipcMain.handle('set-knowledge-global', knowledgeGuarded((patch) => knowledge.setGlobalSettings(knObject(patch))));
+ipcMain.handle('knowledge-pick-binary', knowledgeGuarded(async () => {
+  const picked = await dialog.showOpenDialog(mainWindow, { title: 'Choose codebase-memory-mcp', properties: ['openFile', 'showHiddenFiles'] });
+  if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true };
+  return knowledge.setGlobalSettings({ binaryPath: picked.filePaths[0] });
+}));
+ipcMain.handle('knowledge-lens', knowledgeGuarded((id, folder, workspace) => knowledge.lens(id, knPath(folder), String(workspace || ''))));
+ipcMain.handle('knowledge-download-binary', knowledgeGuarded(() => knowledge.downloadBinary()));
+ipcMain.handle('knowledge-restart', knowledgeGuarded(() => knowledge.restart()));
+
 // --- IPC: get-projects ---
 ipcMain.handle('open-external', (_event, url) => {
   log.info('[open-external IPC]', url);
@@ -1842,6 +1909,7 @@ const PROJECT_WINDOW_RUN = new Set(['openSession', 'showSession', 'launchNewSess
 const PROJECT_WINDOW_EVENTS = new Set([
   'projects-changed', 'project-plan-changed', 'git-graph-repo-changed', 'git-graph-action-progress',
   'task-state-changed', 'project-tasks-changed', 'harnesses-changed', 'file-changed',
+  'knowledge-changed',
 ]);
 const projectWindows = new Map(); // `${projectId}\n${tab}` → BrowserWindow
 
@@ -3735,6 +3803,8 @@ function startScheduleTicker() {
       if (imported) log.info(`[schedule] Imported ${imported} schedule file(s) as folder schedules`);
     } catch (err) { log.error('[schedule] legacy import failed', err); }
     startScheduleTicker();
+    // Projects with the code graph on refresh it when their repositories move.
+    knowledge.startWatching();
     // The remote-access switch stays where it was left.
     if (remoteAccessSettings().enabled) startRemoteAccess();
 
@@ -3768,6 +3838,8 @@ app.on('before-quit', () => {
   freezeOpenWindows();
   remoteTunnels.stop();
   remoteServer.stop();
+  knowledge.stopWatching();
+  cbmClient.stop();
   // Shut down all MCP servers
   shutdownAllMcp();
   taskManager.shutdown();
