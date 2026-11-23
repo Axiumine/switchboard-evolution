@@ -114,10 +114,11 @@ test('Merge is on only for an open pull request that may be merged, and says why
   assert.match(draft, /pr-badge--draft/);
   assert.match(draft, /aria-expanded="true"/);
 
-  for (const state of ['CLOSED', 'MERGED']) {
-    const html = ctx.prRowHtml(pr(4, { state }), { repo: REPO });
-    assert.doesNotMatch(html, /data-act="merge"|data-act="more"/, state);
-  }
+  // No Merge once closed or merged; a closed one keeps "…" for Reopen, a merged one has none.
+  const closed = ctx.prRowHtml(pr(4, { state: 'CLOSED' }), { repo: REPO });
+  assert.doesNotMatch(closed, /data-act="merge"/);
+  assert.match(closed, /data-act="more"/);
+  assert.doesNotMatch(ctx.prRowHtml(pr(4, { state: 'MERGED' }), { repo: REPO }), /data-act="merge"|data-act="more"/);
 });
 
 test('before Merge, four icons copy the address and open the page here, in a window or in the browser, closed and merged ones too', () => {
@@ -131,9 +132,9 @@ test('before Merge, four icons copy the address and open the page here, in a win
   assert.match(open, /data-act="view" title="Open here" aria-label="Open here \(#4\)"><svg data-icon="panel">/);
   assert.match(open, /data-act="window" title="Open in a window of its own" aria-label="Open in a window of its own \(#4\)"><svg data-icon="popOut">/);
   assert.match(open, /data-act="browser" title="Open in the browser" aria-label="Open in the browser \(#4\)"><svg data-icon="globe">/);
-  for (const state of ['CLOSED', 'MERGED']) {
+  for (const [state, acts] of [['CLOSED', ['copy-url', 'view', 'window', 'browser', 'more']], ['MERGED', ['copy-url', 'view', 'window', 'browser']]]) {
     const done = ctx.prRowHtml(pr(4, { url, state }), { repo: REPO });
-    assert.deepEqual([...done.matchAll(/data-act="(copy-url|view|window|browser|merge|more)"/g)].map(m => m[1]), ['copy-url', 'view', 'window', 'browser'], state);
+    assert.deepEqual([...done.matchAll(/data-act="(copy-url|view|window|browser|merge|more)"/g)].map(m => m[1]), acts, state);
   }
   // No web address from gh, or not a web one: no icons.
   assert.doesNotMatch(ctx.prRowHtml(pr(4), { repo: REPO }), /pr-link-tools|data-act="browser"/);
@@ -153,17 +154,23 @@ test('a row\'s badges: conflicts, the review and the checks', () => {
   assert.equal(ctx.prBadgesHtml(pr(1, { state: 'MERGED', checks: 'FAILURE' })), '');
 });
 
-test('the "…" menu: Convert to draft or Ready for review, then Close', () => {
+test('the "…" menu: Convert to draft or Ready for review, Change base, then Close; Reopen on a closed one', () => {
   const calls = [];
   const ctx = loadContext();
-  const actions = { draft: () => calls.push('draft'), ready: () => calls.push('ready'), close: () => calls.push('close') };
+  const actions = { draft: () => calls.push('draft'), ready: () => calls.push('ready'), close: () => calls.push('close'), base: () => calls.push('base'), reopen: () => calls.push('reopen') };
   const open = ctx.prRowMenuItems(pr(1), REPO, actions);
   assert.deepEqual(plain(open.map(i => i.sep ? '—' : `${i.label}${i.danger ? ' (danger)' : ''}${i.disabled ? ' (off)' : ''}`)),
-    ['Convert to draft…', '—', 'Close pull request… (danger)']);
+    ['Convert to draft…', 'Change base…', '—', 'Close pull request… (danger)']);
   const draft = ctx.prRowMenuItems(pr(1, { isDraft: true }), REPO, actions);
   assert.equal(draft[0].label, 'Ready for review…');
-  open[0].onClick(); draft[0].onClick(); open[2].onClick();
-  assert.deepEqual(calls, ['draft', 'ready', 'close']);
+  open[0].onClick(); draft[0].onClick(); open[1].onClick(); open[3].onClick();
+  const closed = ctx.prRowMenuItems(pr(1, { state: 'CLOSED' }), REPO, actions);
+  assert.deepEqual(plain(closed.map(i => i.label)), ['Reopen pull request…']);
+  closed[0].onClick();
+  assert.deepEqual(calls, ['draft', 'ready', 'base', 'close', 'reopen']);
+  // GitHub's own word on reopening counts even without the right to write.
+  assert.equal(ctx.prRowMenuItems(pr(1, { state: 'CLOSED' }), { ...REPO, canWrite: false }, actions)[0].disabled, true);
+  assert.equal(ctx.prRowMenuItems(pr(1, { state: 'CLOSED', viewerCanReopen: true }), { ...REPO, canWrite: false }, actions)[0].disabled, false);
   assert.deepEqual(plain(ctx.prRowMenuItems(pr(1, { state: 'MERGED' }), REPO, actions)), []);
   // Neither the author nor allowed to write: the items are there but off.
   const reader = ctx.prRowMenuItems(pr(1), { ...REPO, canWrite: false }, actions);
@@ -421,4 +428,41 @@ test('files are kept per head commit, and none opens its diff by itself', async 
   assert.deepEqual(calls, [['getPullRequestFiles', 'p1', '/r', { remote: 'origin', number: 4 }]]);
   assert.equal(data.openFiles.has(`4@${HEAD}`), false);
   assert.equal(data.files.get(`4@${HEAD}`).files.length, 1);
+});
+
+test('the title: a pencil beside it when GitHub lets this account change it, a field and Save while it is edited', () => {
+  const ctx = loadContext();
+  assert.doesNotMatch(ctx.prRowHtml(pr(4), { repo: REPO }), /data-act="title-edit"/);
+  const editable = ctx.prRowHtml(pr(4, { viewerCanUpdate: true }), { repo: REPO });
+  assert.match(editable, /<span class="pr-title">Change 4<\/span><button type="button" class="pr-title-pencil" data-act="title-edit" title="Edit title" aria-label="Edit the title of #4"><svg data-icon="pencil">/);
+
+  const editing = ctx.prRowHtml(pr(4, { viewerCanUpdate: true }), { repo: REPO, titleEdit: { text: 'A "new" <title>', busy: false, error: '' } });
+  assert.doesNotMatch(editing, /class="pr-title"|data-act="title-edit"/);
+  assert.match(editing, /<input type="text" class="pr-title-input" value="A &quot;new&quot; &lt;title&gt;" maxlength="256"/);
+  assert.match(editing, /data-act="title-save"><svg data-icon="check"><\/svg><span>Save<\/span>/);
+  assert.match(editing, /title="Enter saves, Esc cancels"/);
+
+  const busy = ctx.prTitleEditHtml(pr(4), { text: 'x', busy: true, error: '' });
+  assert.match(busy, /class="pr-title-input"[^>]* disabled/);
+  assert.match(busy, /data-act="title-save" disabled><span class="gg-dialog-spinner"/);
+  assert.match(ctx.prTitleEditHtml(pr(4), { text: '', busy: false, error: 'A title cannot be empty.' }), /<span class="pr-title-error" role="alert">A title cannot be empty\.<\/span>/);
+
+  const data = ctx.prRepoData();
+  assert.equal(ctx.prTitleEditOf(data, pr(4)), null);
+  data.titleEdit = { number: 4, busy: false, error: '' };
+  assert.equal(ctx.prTitleEditOf(data, pr(5)), null);
+  assert.equal(ctx.prTitleEditOf(data, pr(4)).text, 'Change 4');
+  data.drafts.set('title:4', 'Draft title');
+  assert.equal(ctx.prTitleEditOf(data, pr(4)).text, 'Draft title');
+});
+
+test('a pull request\'s files can be marked as viewed, as on GitHub', () => {
+  const ctx = loadContext();
+  const html = ctx.prFilesHtml(FILES, { viewed: { 'src/app.js': 'VIEWED', 'logo.png': 'DISMISSED' } });
+  assert.match(html, /<div class="pr-file-line">\s*<button type="button" class="pr-file tree is-viewed" data-file="0"/);
+  assert.match(html, /<input type="checkbox" data-viewed="0" checked>/);
+  assert.match(html, /class="pr-viewed is-dismissed" title="Changed since you viewed it"><input type="checkbox" data-viewed="\d">/);
+  assert.match(html, /<span class="pr-viewed-count">1 of 4 viewed<\/span>/);
+  // A commit's files have no Viewed boxes.
+  assert.doesNotMatch(ctx.prFilesHtml(FILES), /pr-viewed|pr-file-line/);
 });

@@ -37,6 +37,7 @@ function node(number, extra = {}) {
     closedAt: null, mergedAt: null, author: { login: 'dev-one' },
     headRefName: `feature-${number}`, headRefOid: HEAD, baseRefName: 'main', isCrossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, viewerDidAuthor: true,
+    id: `PR_${number}`, viewerCanUpdate: true, viewerCanReopen: false,
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
     ...extra,
   };
@@ -127,17 +128,45 @@ test('every open pull request is read, 100 at a time, through gh api graphql', a
     mergeMethods: ['squash', 'rebase'], defaultMethod: 'rebase', deleteBranchOnMerge: true,
   });
   assert.deepEqual(result.items[100], {
-    number: 101, title: 'Change 101', url: 'https://github.com/acme/widgets/pull/101', state: 'OPEN', isDraft: true,
+    id: 'PR_101', number: 101, title: 'Change 101', url: 'https://github.com/acme/widgets/pull/101', state: 'OPEN', isDraft: true,
     createdAt: result.items[100].createdAt, closedAt: null, mergedAt: null, author: 'dev-one',
     head: 'feature-101', headOid: HEAD, base: 'main', crossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, checks: 'SUCCESS', viewerDidAuthor: true,
+    viewerCanUpdate: true, viewerCanReopen: false,
   });
+  // The pencil and Reopen need these; what GitHub computes per pull request stays out of the list.
+  assert.match(calls[0].input.query, /viewerCanUpdate viewerCanReopen/);
+  assert.doesNotMatch(calls[0].input.query, /mergeStateStatus|viewerCanUpdateBranch|totalCommentsCount/);
+});
+
+test('when GitHub gives up on a page of 100, the same page comes again in smaller ones', async () => {
+  const calls = setup({
+    answer: (_args, opts) => {
+      const { first } = JSON.parse(opts.input).variables;
+      if (first > 25) return { code: 1, stdout: '', stderr: 'gh: HTTP 502: Bad Gateway' };
+      return page([node(1)], { totalCount: 1 });
+    },
+  });
+  const result = await pr.listOpen(DIR);
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.map(c => c.input.variables.first), [100, 50, 25]);
+  // Not a time-out: no second try.
+  const refused = setup({ answer: () => ({ code: 1, stdout: '', stderr: 'gh: HTTP 403: Forbidden' }) });
+  assert.equal((await pr.listOpen(DIR)).ok, undefined);
+  assert.equal(refused.length, 1);
 });
 
 test('open pull requests stop at 1000 and say so', async () => {
-  const calls = setup({ answer: () => page([node(1)], { hasNextPage: true, endCursor: 'more' }) });
-  const result = await pr.listOpen(DIR);
+  const full = Array.from({ length: 100 }, (_, i) => node(i + 1));
+  let calls = setup({ answer: () => page(full, { hasNextPage: true, endCursor: 'more' }) });
+  let result = await pr.listOpen(DIR);
   assert.equal(calls.length, 10);
+  assert.equal(result.items.length, 1000);
+  assert.equal(result.truncated, true);
+  // Pages that never fill up still stop.
+  calls = setup({ answer: () => page([node(1)], { hasNextPage: true, endCursor: 'more' }) });
+  result = await pr.listOpen(DIR);
+  assert.equal(calls.length, 40);
   assert.equal(result.truncated, true);
 });
 
@@ -206,13 +235,14 @@ test('each action is one fixed gh command, always with -R', () => {
   assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'draft' }).args, ['pr', 'ready', '7', '-R', 'acme/widgets', '--undo']);
   assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'ready' }).args, ['pr', 'ready', '7', '-R', 'acme/widgets']);
   assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'close' }).args, ['pr', 'close', '7', '-R', 'acme/widgets']);
+  assert.deepEqual(pr.actionArgs(target, { number: 7, action: 'reopen' }).args, ['pr', 'reopen', '7', '-R', 'acme/widgets']);
   assert.deepEqual(pr.actionArgs({ ...target, host: 'github.example.com' }, { number: 7, action: 'close' }).args,
     ['pr', 'close', '7', '-R', 'github.example.com/acme/widgets']);
 });
 
 test('anything else is refused before gh runs', async () => {
   const target = { host: 'github.com', owner: 'acme', repo: 'widgets' };
-  assert.match(pr.actionArgs(target, { number: 7, action: 'reopen' }).error, /Unknown pull request action/);
+  assert.match(pr.actionArgs(target, { number: 7, action: 'lock' }).error, /Unknown pull request action/);
   assert.match(pr.actionArgs(target, { number: 7, action: 'merge', method: '--admin' }).error, /Unknown merge method/);
   assert.match(pr.actionArgs(target, { number: 7, action: 'merge', method: 'merge', headOid: 'main' }).error, /commit hash/);
   assert.match(pr.actionArgs(target, { number: '7 --admin', action: 'close' }).error, /number/);
@@ -234,7 +264,8 @@ test('an action says what it did, and one runs at a time per repository', async 
   assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'close' }), { ok: true, message: 'Closed pull request #8.' });
   assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'draft' }), { ok: true, message: 'Pull request #8 is a draft now.' });
   assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'ready' }), { ok: true, message: 'Pull request #8 is ready for review.' });
-  assert.equal(calls.length, 4);
+  assert.deepEqual(await pr.runAction(DIR, { number: 8, action: 'reopen' }), { ok: true, message: 'Reopened pull request #8.' });
+  assert.equal(calls.length, 5);
 });
 
 test('a merge queue or auto-merge is reported in gh\'s own words', async () => {

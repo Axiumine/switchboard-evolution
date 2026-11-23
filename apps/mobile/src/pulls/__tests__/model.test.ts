@@ -3,7 +3,9 @@ import { describe, expect, it } from '@jest/globals';
 import {
   ACTION_COPY, badges, canEdit, DEFAULT_FILE_VIEW, DEFAULT_FILTER, emptyText, errorTitle, FILE_TOOLS, fileRows, filterLabel, isDefaultFilter, menuActions, mergeBlock,
   mergeLists, mergeWarnings, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, webUrl, whenText, inAppWebUrl,
-  type PullRequest, type PullRequestFile, type PullRequestRepo,
+  baseChoices, checkDuration, checkFinishedJob, checkGroups, checksSummaryText, commentType, commitDays, detailCounts, eventText, hunkTail, labelColor,
+  logLines, messageActions, messageVerb, quoteText, reviewChoices, reviewProblem, rowMenu, sideChange, statusRows, timelineBlocks, titleProblem, toggleReaction,
+  type Check, type Message, type PullRequest, type PullRequestFile, type PullRequestHead, type PullRequestRepo, type ReviewThread, type TimelineItem,
 } from '../model';
 
 const HEAD = 'c'.repeat(40);
@@ -64,10 +66,15 @@ describe('what may be done', () => {
     expect(mergeBlock(pr(1, { state: 'MERGED' }), REPO)).toMatch(/Only an open/);
   });
 
-  it('offers Convert to draft or Ready for review, then Close, each with its question', () => {
+  it('offers Convert to draft or Ready for review, then Close, each with its question; Reopen on a closed one', () => {
     expect(menuActions(pr(1))).toEqual(['draft', 'close']);
     expect(menuActions(pr(1, { isDraft: true }))).toEqual(['ready', 'close']);
-    expect(menuActions(pr(1, { state: 'CLOSED' }))).toEqual([]);
+    expect(menuActions(pr(1, { state: 'CLOSED' }))).toEqual(['reopen']);
+    expect(menuActions(pr(1, { state: 'MERGED' }))).toEqual([]);
+    expect(rowMenu(pr(1), { canChangeBase: true })).toEqual(['draft', 'base', 'close']);
+    expect(rowMenu(pr(1), { canChangeBase: false })).toEqual(['draft', 'close']);
+    expect(rowMenu(pr(1, { state: 'CLOSED' }), { canChangeBase: true })).toEqual(['reopen']);
+    expect(ACTION_COPY.reopen.confirm).toBe('Reopen pull request');
     expect(ACTION_COPY.close.destructive).toBe(true);
     expect(ACTION_COPY.draft.text).toMatch(/cannot be merged/);
     expect(canEdit(pr(1), { ...REPO, canWrite: false })).toBe(false);
@@ -150,5 +157,134 @@ describe('files', () => {
     expect(noPatchText(file('x', null, { tooLarge: true }))).toMatch(/too large/);
     expect(noPatchText(file('x', null, { status: 'renamed', insertions: 0, deletions: 0 }))).toMatch(/Renamed/);
     expect(noPatchText(file('x', null))).toMatch(/binary/);
+  });
+});
+
+// --- An open pull request ---
+
+function message(extra: Partial<Message> = {}): Message {
+  return {
+    kind: 'comment', id: 'IC_1', url: 'https://github.com/acme/widgets/pull/7#issuecomment-1', author: 'dev-two', avatar: null, association: 'MEMBER',
+    body: 'Looks good', bodyHtml: '<p>Looks good</p>', createdAt: '2026-03-02T09:00:00Z', editedAt: null, mine: true,
+    can: { update: true, delete: true, minimize: false, react: true }, minimized: null, reactions: [], ...extra,
+  };
+}
+
+function head(extra: Partial<PullRequestHead> = {}): PullRequestHead {
+  return {
+    id: 'PR_7', number: 7, title: 'Add widgets', url: 'https://github.com/acme/widgets/pull/7', state: 'OPEN', isDraft: false, body: '', bodyHtml: '',
+    author: 'dev-one', avatar: null, association: 'OWNER', createdAt: null, editedAt: null, mine: true,
+    can: { update: true, react: true, close: true, reopen: false, updateBranch: true, label: true, assign: true },
+    mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE', reviewDecision: null, head: 'feature', headOid: HEAD, base: 'main', crossRepository: false,
+    checks: null, comments: 4, commitCount: 2, reactions: [], reviewers: [], assignees: [], labels: [], pendingReviewId: null, ...extra,
+  };
+}
+
+function thread(id: string, reviewId: string | null): ReviewThread {
+  return { id, path: 'src/a.ts', line: 3, resolved: false, outdated: false, resolvedBy: null, can: { resolve: true, unresolve: false, reply: true }, reviewId, diffHunk: '', comments: [] };
+}
+
+describe('an open pull request', () => {
+  it('counts its tabs from the conversation once read, the checks once read, the files from the list', () => {
+    expect(detailCounts({ changedFiles: 3 }, undefined, undefined, undefined)).toEqual({ conversation: null, commits: null, checks: null, files: 3 });
+    expect(detailCounts({ changedFiles: 3 }, head(), undefined, { ok: true, checks: [] })).toEqual({ conversation: 4, commits: 2, checks: 0, files: 3 });
+    expect(detailCounts({ changedFiles: 3 }, head(), { ok: true, totalCount: 9, commits: [] }, undefined).commits).toBe(9);
+  });
+
+  it('lays the timeline out as GitHub: commits grouped, each review with its threads, unread reviews\' threads last', () => {
+    const commit = (n: number): TimelineItem => ({ kind: 'commit', oid: String(n).repeat(40), short: String(n).repeat(7), headline: `Step ${n}`, author: 'dev-one', createdAt: null, checks: null, url: '' });
+    const items: TimelineItem[] = [
+      commit(1), commit(2),
+      message({ kind: 'review', id: 'PRR_1', state: 'COMMENTED', body: '' }),
+      { kind: 'event', type: 'closed', actor: 'dev-one', createdAt: null },
+      message({ kind: 'review', id: 'PRR_2', state: 'APPROVED', body: 'Nice' }),
+    ];
+    const threads = [thread('T1', 'PRR_1'), thread('T2', 'PRR_9')];
+    expect(timelineBlocks(items, threads, true).map((b) => b.kind)).toEqual(['commits', 'review-line', 'thread', 'event', 'message']);
+    expect(timelineBlocks(items, threads, false).map((b) => b.key).slice(-1)).toEqual(['t:T2']);
+  });
+
+  it('words events and messages as the desktop does', () => {
+    expect(eventText({ kind: 'event', type: 'base-changed', actor: 'dev-one', createdAt: null, from: 'develop', to: 'main' })).toBe('dev-one changed the base branch from develop to main');
+    expect(eventText({ kind: 'event', type: 'assigned', actor: 'dev-one', createdAt: null, subject: 'dev-one' })).toBe('dev-one self-assigned this');
+    expect(eventText({ kind: 'event', type: 'labeled', actor: 'bot', createdAt: null, label: { name: 'bug', color: 'd73a4a' } })).toBe('bot added the bug label');
+    expect(messageVerb({ kind: 'review', state: 'CHANGES_REQUESTED' })).toBe('requested changes');
+    expect(messageVerb({ kind: 'description' })).toBe('opened this');
+  });
+
+  it('offers on a message what GitHub lets this account do with it', () => {
+    expect(messageActions(message())).toEqual(['copy', 'quote', 'edit', 'web', 'delete']);
+    expect(messageActions(message({ can: { update: false, delete: false, minimize: true, react: true } }))).toEqual(['copy', 'quote', 'hide', 'web']);
+    expect(messageActions(message({ minimized: 'spam', can: { update: false, delete: false, minimize: true, react: true } }))).toEqual(['copy', 'quote', 'unhide', 'web']);
+    expect(messageActions(message({ kind: 'review', id: 'PRR_1' }))).toEqual(['copy', 'quote', 'edit', 'web']);
+    expect(commentType(message({ kind: 'review-comment' }))).toBe('review-comment');
+    expect(commentType(message())).toBe('issue');
+    expect(quoteText('a\n\nb')).toBe('> a\n>\n> b\n\n');
+  });
+
+  it('turns a reaction on and off before GitHub answers', () => {
+    expect(toggleReaction([], 'HEART')).toEqual([{ content: 'HEART', count: 1, mine: true }]);
+    expect(toggleReaction([{ content: 'HEART', count: 2, mine: false }], 'HEART')).toEqual([{ content: 'HEART', count: 3, mine: true }]);
+    expect(toggleReaction([{ content: 'HEART', count: 1, mine: true }], 'HEART')).toEqual([]);
+  });
+
+  it('checks a title and a review before they go', () => {
+    expect(titleProblem('  ')).toMatch(/empty/);
+    expect(titleProblem('a\nb')).toMatch(/one line/);
+    expect(titleProblem('x'.repeat(257))).toMatch(/256/);
+    expect(titleProblem('Fine')).toBeNull();
+    expect(reviewChoices(true).map((c) => [c.key, c.disabled])).toEqual([['COMMENT', false], ['APPROVE', true], ['REQUEST_CHANGES', true]]);
+    expect(reviewProblem('APPROVE', '', false)).toBeNull();
+    expect(reviewProblem('COMMENT', ' ', false)).toMatch(/Write/);
+    expect(reviewProblem('APPROVE', 'ok', true)).toMatch(/own pull request/);
+  });
+
+  it('says what the box at the end shows, Update branch only when behind and allowed', () => {
+    const behind = statusRows(head({ checks: 'SUCCESS', reviewDecision: 'REVIEW_REQUIRED', mergeStateStatus: 'BEHIND' }));
+    expect(behind.rows.map((r) => r.text)).toEqual(['All checks have passed', 'Review required', 'This branch is out-of-date with the base branch']);
+    expect(behind.canUpdateBranch).toBe(true);
+    expect(statusRows(head({ mergeStateStatus: 'BEHIND', can: { ...head().can, updateBranch: false } })).canUpdateBranch).toBe(false);
+    expect(statusRows(head({ state: 'MERGED' })).rows).toEqual([]);
+  });
+
+  it('keeps the end of a hunk, groups commits by day', () => {
+    expect(hunkTail('@@ -1,9 +1,9 @@\n1\n2\n3\n4\n5\n6\n7', 3)).toBe('@@ -1,9 +1,9 @@\n5\n6\n7');
+    const days = commitDays([
+      { oid: 'a', short: 'a', headline: '', body: '', date: '2026-03-02T10:00:00Z', author: '', avatar: null, url: '', checks: null },
+      { oid: 'b', short: 'b', headline: '', body: '', date: '2026-03-02T11:00:00Z', author: '', avatar: null, url: '', checks: null },
+      { oid: 'c', short: 'c', headline: '', body: '', date: '2026-03-04T10:00:00Z', author: '', avatar: null, url: '', checks: null },
+    ]);
+    expect(days.map((d) => [d.day, d.commits.length])).toEqual([['2 Mar 2026', 2], ['4 Mar 2026', 1]]);
+  });
+
+  it('sorts checks by workflow, with the failed runs to start again and the finished jobs with a log', () => {
+    const check = (extra: Partial<Check>): Check => ({ kind: 'run', id: 1, name: 'test', title: '', group: 'CI', app: '', runId: 5, event: '', status: 'COMPLETED', conclusion: 'FAILURE', bucket: 'fail', startedAt: '2026-03-02T10:00:00Z', completedAt: '2026-03-02T10:01:05Z', url: '', required: false, actions: true, ...extra });
+    const groups = checkGroups([check({}), check({ id: 2, bucket: 'pass' }), check({ kind: 'status', id: null, group: '', runId: null, actions: false, bucket: 'pass' })]);
+    expect(groups.map((g) => [g.name, g.checks.length, g.failedRuns])).toEqual([['CI', 2, [5]], ['Other checks', 1, []]]);
+    expect(checkFinishedJob(check({}))).toBe(true);
+    expect(checkFinishedJob(check({ status: 'IN_PROGRESS' }))).toBe(false);
+    expect(checkDuration('2026-03-02T10:00:00Z', '2026-03-02T10:01:05Z')).toBe('1m 5s');
+    expect(checksSummaryText({ fail: 1, pass: 2, pending: 0, skipped: 3, cancelled: 0 })).toBe('1 failing, 3 skipped, 2 successful');
+  });
+
+  it('shows the end of a log with GitHub Actions\' marks read', () => {
+    const shown = logLines('##[group]Run\nok\n##[endgroup]\n##[error]boom', 2);
+    expect(shown.cut).toBe(true);
+    expect(shown.lines).toEqual([{ text: 'ok', tone: 'plain' }, { text: 'boom', tone: 'error' }]);
+    expect(logLines('##[group]Run').lines).toEqual([{ text: '▸ Run', tone: 'group' }]);
+  });
+
+  it('offers branches for Change base and works out what a sidebar picker saves', () => {
+    expect(baseChoices({ ok: true, branches: ['develop', 'feature', 'main', 'release'], defaultBranch: 'release' }, { head: 'feature', base: 'main' })).toEqual(['release', 'develop']);
+    const h = head({
+      reviewers: [{ kind: 'user', login: 'dev-two', name: 'dev-two', state: 'APPROVED' }, { kind: 'team', login: 'core', name: 'Core', state: 'REQUESTED' }],
+      labels: [{ id: 'L_1', name: 'bug', color: 'd73a4a', description: '' }],
+    });
+    expect(sideChange('reviewers', h, new Set(['dev-two']))).toBeNull();
+    expect(sideChange('reviewers', h, new Set(['dev-two', 'dev-three']))).toEqual({ kind: 'reviewers', pullRequestId: 'PR_7', users: ['dev-two', 'dev-three'], teams: ['core'] });
+    expect(sideChange('labels', h, new Set(['L_2']))).toEqual({ kind: 'labels', pullRequestId: 'PR_7', add: ['L_2'], remove: ['L_1'] });
+    expect(sideChange('labels', h, new Set(['L_1']))).toBeNull();
+    expect(labelColor('d73a4a')).toBe('#d73a4a');
+    expect(labelColor('nope')).toBe('#8a8aa0');
   });
 });

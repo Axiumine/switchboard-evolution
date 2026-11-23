@@ -12,7 +12,8 @@
 //     all read, 100 per request;
 //   - a pull request's files, each with its own patch: the REST endpoint
 //     `pulls/{n}/files`, one JSON object per line through `--jq`;
-//   - the actions: `gh pr merge | ready [--undo] | close`.
+//   - the actions: `gh pr merge | ready [--undo] | close | reopen`; every other
+//     change (title, comments, reviews…) is in pull-request-edits.js.
 //
 // Every command names the repository with `-R` (or `--hostname` and the
 // owner/name in the query) and runs outside the repository's folder, so `gh`
@@ -38,12 +39,14 @@ const FILES_TIMEOUT_MS = 60_000;
 const ACTION_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const OPEN_PAGE_SIZE = 100;
-const MAX_OPEN_PAGES = 10; // at most 1000 open pull requests
+const MIN_OPEN_PAGE_SIZE = 25;
+const MAX_OPEN = 1000; // open pull requests listed at most
+const MAX_OPEN_REQUESTS = 40; // 1000 in pages of 25, the smallest
 const MAX_PAGE_SIZE = 100;
 const MAX_PATCH_BYTES = 4 * 1024 * 1024; // all the patches of one pull request together
 const MAX_FILES = 3000; // what GitHub itself lists at most
 const MERGE_METHODS = ['merge', 'squash', 'rebase'];
-const ACTIONS = ['merge', 'draft', 'ready', 'close'];
+const ACTIONS = ['merge', 'draft', 'ready', 'close', 'reopen'];
 const PAGE_STATES = ['CLOSED', 'MERGED'];
 const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
 
@@ -262,10 +265,11 @@ async function resolveRepo(dir, remoteName) {
 
 // --- Listing ---
 
-const PR_FIELDS = `number title url state isDraft createdAt closedAt mergedAt
+const PR_FIELDS = `id number title url state isDraft createdAt closedAt mergedAt
         author { login }
         headRefName headRefOid baseRefName isCrossRepository
         additions deletions changedFiles mergeable reviewDecision viewerDidAuthor
+        viewerCanUpdate viewerCanReopen
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
 const LIST_QUERY = `query($owner: String!, $repo: String!, $states: [PullRequestState!], $first: Int!, $after: String) {
@@ -282,7 +286,12 @@ const LIST_QUERY = `query($owner: String!, $repo: String!, $states: [PullRequest
   }
 }`;
 
-async function graphql(target, query, variables, timeoutMs = READ_TIMEOUT_MS) {
+/**
+ * One GraphQL request through gh, `{ ok, data }` or an error result. A read
+ * starts at `repository` and fails without one; a mutation passes
+ * `{ repository: false }`.
+ */
+async function graphql(target, query, variables, timeoutMs = READ_TIMEOUT_MS, { repository = true } = {}) {
   let result;
   try {
     result = await runGh(['api', 'graphql', '--hostname', target.host, '--input', '-'], {
@@ -299,13 +308,14 @@ async function graphql(target, query, variables, timeoutMs = READ_TIMEOUT_MS) {
   }
   if (result.code !== 0) return ghFailure(result, target);
   if (!json || !json.data) return { error: 'gh answered with something that is not GitHub data', code: 'gh-failed' };
-  if (!json.data.repository) return ghFailure({ code: 1, stderr: 'Could not resolve to a Repository' }, target);
+  if (repository && !json.data.repository) return ghFailure({ code: 1, stderr: 'Could not resolve to a Repository' }, target);
   return { ok: true, data: json.data };
 }
 
 function normalizePullRequest(node) {
   const commit = node.commits && node.commits.nodes && node.commits.nodes[0] && node.commits.nodes[0].commit;
   return {
+    id: node.id || '',
     number: node.number,
     title: node.title || '',
     url: node.url || '',
@@ -326,6 +336,12 @@ function normalizePullRequest(node) {
     reviewDecision: node.reviewDecision || null, // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED
     checks: (commit && commit.statusCheckRollup && commit.statusCheckRollup.state) || null,
     viewerDidAuthor: !!node.viewerDidAuthor,
+    // The pencil beside the title, Reopen in the "…" menu. The rest of what an
+    // open pull request needs (merge state, counts) comes with its
+    // conversation (pull-request-detail.js): computed by GitHub for each pull
+    // request, it would make a page of 100 too slow for GitHub's time limit.
+    viewerCanUpdate: !!node.viewerCanUpdate,
+    viewerCanReopen: !!node.viewerCanReopen,
   };
 }
 
@@ -369,10 +385,17 @@ async function listOpen(dir, { remote = null } = {}) {
   let info = null;
   let totalCount = 0;
   let hasNextPage = false;
-  for (let page = 0; page < MAX_OPEN_PAGES; page++) {
+  let size = OPEN_PAGE_SIZE;
+  for (let request = 0; request < MAX_OPEN_REQUESTS && items.length < MAX_OPEN; request++) {
     const answer = await graphql(target, LIST_QUERY, {
-      owner: target.owner, repo: target.repo, states: ['OPEN'], first: OPEN_PAGE_SIZE, after,
+      owner: target.owner, repo: target.repo, states: ['OPEN'], first: Math.min(size, MAX_OPEN - items.length), after,
     });
+    // A busy repository can make GitHub give up on 100 at once (a 502 or 504
+    // after about ten seconds): the same page again, in smaller ones.
+    if (!answer.ok && size > MIN_OPEN_PAGE_SIZE && isGitHubTimeout(answer.error)) {
+      size = Math.max(MIN_OPEN_PAGE_SIZE, Math.floor(size / 2));
+      continue;
+    }
     if (!answer.ok) return { ...answer, ...targetSummary(target) };
     const repository = answer.data.repository;
     if (!info) info = repositoryInfo(repository);
@@ -384,6 +407,11 @@ async function listOpen(dir, { remote = null } = {}) {
     if (!hasNextPage || !after) break;
   }
   return { ok: true, ...targetSummary(target), repo: info, items, totalCount, truncated: hasNextPage };
+}
+
+/** GitHub, or gh, gave up waiting: worth asking again for less. */
+function isGitHubTimeout(error) {
+  return /HTTP 50[234]|Bad Gateway|Gateway Time-?out|did not answer within|timed? ?out|Something went wrong while executing your query/i.test(String(error || ''));
 }
 
 function validCursor(value) {
@@ -441,10 +469,19 @@ async function files(dir, { remote = null, number } = {}) {
     return thrownFailure(err);
   }
   if (result.code !== 0) return ghFailure(result, target);
+  return { ok: true, number: n, ...parseFileLines(result.stdout) };
+}
+
+/**
+ * The files of a REST answer, one JSON object per line ({filename,
+ * previous_filename, status, additions, deletions, patch}), in History's shape.
+ * The patches stop at MAX_PATCH_BYTES all together, the files at MAX_FILES.
+ */
+function parseFileLines(stdout) {
   const list = [];
   let patchBytes = 0;
   let truncated = false;
-  for (const line of result.stdout.split('\n')) {
+  for (const line of String(stdout || '').split('\n')) {
     if (!line.trim()) continue;
     if (list.length >= MAX_FILES) { truncated = true; break; }
     let entry;
@@ -466,7 +503,7 @@ async function files(dir, { remote = null, number } = {}) {
       tooLarge,
     });
   }
-  return { ok: true, number: n, files: list, truncated };
+  return { files: list, truncated };
 }
 
 // --- Actions ---
@@ -480,6 +517,7 @@ function actionArgs(target, { number, action, method, deleteBranch, headOid } = 
   if (action === 'draft') return { args: ['pr', 'ready', String(n), ...repo, '--undo'] };
   if (action === 'ready') return { args: ['pr', 'ready', String(n), ...repo] };
   if (action === 'close') return { args: ['pr', 'close', String(n), ...repo] };
+  if (action === 'reopen') return { args: ['pr', 'reopen', String(n), ...repo] };
   if (!MERGE_METHODS.includes(method)) return { error: `Unknown merge method: ${method}` };
   if (headOid != null && !/^[0-9a-f]{40}$/.test(String(headOid))) return { error: 'Not a commit hash' };
   const args = ['pr', 'merge', String(n), ...repo, `--${method}`];
@@ -495,10 +533,11 @@ function doneMessage(action, n, ghText) {
   if (action === 'merge') return `Merged pull request #${n}.`;
   if (action === 'draft') return `Pull request #${n} is a draft now.`;
   if (action === 'ready') return `Pull request #${n} is ready for review.`;
+  if (action === 'reopen') return `Reopened pull request #${n}.`;
   return `Closed pull request #${n}.`;
 }
 
-/** Merge, convert to draft, mark ready for review or close one pull request. */
+/** Merge, convert to draft, mark ready for review, close or reopen one pull request. */
 async function runAction(dir, params = {}) {
   const { target, failure } = await targetFor(dir, params.remote || null);
   if (failure) return failure;
@@ -519,10 +558,35 @@ async function runAction(dir, params = {}) {
   }
 }
 
+// --- For the sibling modules (pull-request-detail.js, pull-request-edits.js) ---
+
+/** Run gh through the runner init() set, so a test's fake gh answers for every module. */
+function run(args, opts) {
+  return runGh(args, opts);
+}
+
+/** One write at a time per key: a repository folder, as runAction uses it. False when one is running. */
+function claim(key) {
+  if (inFlight.has(key)) return false;
+  inFlight.add(key);
+  return true;
+}
+
+function release(key) {
+  inFlight.delete(key);
+}
+
+function info(...args) {
+  log.info(...args);
+}
+
 module.exports = {
   init,
   listOpen, listPage, files, runAction,
+  // for pull-request-detail.js and pull-request-edits.js
+  run, graphql, targetFor, ghFailure, thrownFailure, validNumber, validCursor, parseFileLines, claim, release, info,
+  READ_TIMEOUT_MS, FILES_TIMEOUT_MS, ACTION_TIMEOUT_MS,
   // exported for tests
-  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghFailure, ghEnv, locateGh,
+  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghEnv, locateGh,
   normalizePullRequest, repositoryInfo, LIST_QUERY, MERGE_METHODS, ACTIONS,
 };

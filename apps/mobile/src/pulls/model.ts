@@ -7,11 +7,13 @@ import { treeRows, type TreeRow } from '@/git/model';
 
 export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
-export type PullRequestAction = 'merge' | 'draft' | 'ready' | 'close';
+export type PullRequestAction = 'merge' | 'draft' | 'ready' | 'close' | 'reopen';
 /** Closed and merged pull requests come in pages; open ones all at once. */
 export type PageState = 'CLOSED' | 'MERGED';
 
 export type PullRequest = {
+  /** GitHub's id of the pull request, what every change names (edit-pull-request). */
+  id?: string;
   number: number;
   title: string;
   url: string;
@@ -34,6 +36,9 @@ export type PullRequest = {
   /** The last commit's checks: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED, or none. */
   checks: string | null;
   viewerDidAuthor: boolean;
+  /** GitHub lets this account change the title (and the description). From a newer desktop only. */
+  viewerCanUpdate?: boolean;
+  viewerCanReopen?: boolean;
 };
 
 export type PullRequestRepo = {
@@ -202,12 +207,27 @@ export const ACTION_COPY: Record<ConfirmAction, { menu: string; title: string; c
     text: 'It is closed without merging. Its branch stays, and the pull request can be reopened on GitHub.',
     destructive: true,
   },
+  reopen: {
+    menu: 'Reopen pull request…',
+    title: 'Reopen pull request',
+    confirm: 'Reopen pull request',
+    text: 'It is open again, with its branch, its commits and its conversation as they were.',
+  },
 };
 
-/** The "…" menu of an open pull request: Convert to draft or Ready for review, then Close. */
+/** The "…" menu of an open pull request: Convert to draft or Ready for review, then Close; Reopen on a closed one. */
 export function menuActions(pr: PullRequest): ConfirmAction[] {
+  if (pr.state === 'CLOSED') return ['reopen'];
   if (pr.state !== 'OPEN') return [];
   return [pr.isDraft ? 'ready' : 'draft', 'close'];
+}
+
+/** The row's "…": the actions above, with Change base on an open one (a desktop that has edit-pull-request). */
+export type RowMenuKey = ConfirmAction | 'base';
+export function rowMenu(pr: PullRequest, { canChangeBase }: { canChangeBase: boolean }): RowMenuKey[] {
+  const actions: RowMenuKey[] = menuActions(pr);
+  if (pr.state === 'OPEN' && canChangeBase) actions.splice(1, 0, 'base');
+  return actions;
 }
 
 export const METHOD_LABELS: Record<MergeMethod, string> = {
@@ -320,4 +340,462 @@ export const FILE_TOOLS = {
 export function fileRows(files: readonly PullRequestFile[], view: FileView, collapsed: ReadonlySet<string> = new Set()): TreeRow<PullRequestFile>[] {
   if (view === 'tree') return treeRows([...files], { collapsed, compact: true });
   return files.map((file) => ({ kind: 'file', key: file.path, depth: 0, name: file.path.split('/').pop() || file.path, item: file }));
+}
+
+// --- An open pull request, as GitHub's page shows it (pull-request-detail.js on the desktop) ---
+
+export type DetailTab = 'conversation' | 'commits' | 'checks' | 'files';
+export const DETAIL_TABS: readonly { key: DetailTab; label: string; short: string }[] = [
+  { key: 'conversation', label: 'Conversation', short: 'Conversation' },
+  { key: 'commits', label: 'Commits', short: 'Commits' },
+  { key: 'checks', label: 'Checks', short: 'Checks' },
+  { key: 'files', label: 'Files changed', short: 'Files' },
+];
+
+export type Reaction = { content: ReactionContent; count: number; mine: boolean };
+export type ReactionContent = 'THUMBS_UP' | 'THUMBS_DOWN' | 'LAUGH' | 'HOORAY' | 'CONFUSED' | 'HEART' | 'ROCKET' | 'EYES';
+export const REACTIONS: readonly { content: ReactionContent; emoji: string; label: string }[] = [
+  { content: 'THUMBS_UP', emoji: '👍', label: 'Thumbs up' },
+  { content: 'THUMBS_DOWN', emoji: '👎', label: 'Thumbs down' },
+  { content: 'LAUGH', emoji: '😄', label: 'Laugh' },
+  { content: 'HOORAY', emoji: '🎉', label: 'Hooray' },
+  { content: 'CONFUSED', emoji: '😕', label: 'Confused' },
+  { content: 'HEART', emoji: '❤️', label: 'Heart' },
+  { content: 'ROCKET', emoji: '🚀', label: 'Rocket' },
+  { content: 'EYES', emoji: '👀', label: 'Eyes' },
+];
+
+export type HideReason = 'OUTDATED' | 'RESOLVED' | 'DUPLICATE' | 'OFF_TOPIC' | 'SPAM' | 'ABUSE';
+export const HIDE_REASONS: readonly { key: HideReason; label: string }[] = [
+  { key: 'OUTDATED', label: 'Outdated' }, { key: 'RESOLVED', label: 'Resolved' }, { key: 'DUPLICATE', label: 'Duplicate' },
+  { key: 'OFF_TOPIC', label: 'Off-topic' }, { key: 'SPAM', label: 'Spam' }, { key: 'ABUSE', label: 'Abuse' },
+];
+
+export type MessageKind = 'description' | 'comment' | 'review' | 'review-comment';
+
+/** The description, a comment, a review or a review comment, with what this account may do with it. */
+export type Message = {
+  kind: MessageKind;
+  id: string;
+  url: string;
+  author: string;
+  avatar: string | null;
+  association: string;
+  body: string;
+  bodyHtml: string;
+  createdAt: string | null;
+  editedAt: string | null;
+  mine: boolean;
+  can: { update: boolean; delete: boolean; minimize: boolean; react: boolean };
+  /** Why it was hidden (lowercase), or null. */
+  minimized: string | null;
+  reactions: Reaction[];
+  /** A review's decision. */
+  state?: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING';
+  submittedAt?: string | null;
+  replyTo?: string | null;
+};
+
+export type TimelineCommit = { kind: 'commit'; oid: string; short: string; headline: string; author: string; createdAt: string | null; checks: string | null; url: string };
+export type TimelineEvent = {
+  kind: 'event';
+  type: 'force-pushed' | 'base-changed' | 'renamed' | 'closed' | 'reopened' | 'merged' | 'ready' | 'draft' | 'review-requested'
+    | 'review-request-removed' | 'review-dismissed' | 'labeled' | 'unlabeled' | 'assigned' | 'unassigned' | 'branch-deleted' | 'branch-restored';
+  actor: string;
+  createdAt: string | null;
+  from?: string;
+  to?: string;
+  commit?: string;
+  subject?: string;
+  message?: string;
+  label?: { name: string; color: string };
+};
+export type TimelineItem = Message | TimelineCommit | TimelineEvent;
+
+export type ReviewThread = {
+  id: string;
+  path: string;
+  line: number | null;
+  resolved: boolean;
+  outdated: boolean;
+  resolvedBy: string | null;
+  can: { resolve: boolean; unresolve: boolean; reply: boolean };
+  reviewId: string | null;
+  diffHunk: string;
+  comments: Message[];
+};
+
+export type Reviewer = { kind: 'user' | 'team' | 'bot'; login: string; name: string; avatar?: string | null; state: string };
+export type Label = { id: string; name: string; color: string; description: string };
+export type Person = { id: string; login: string; avatar: string | null; name?: string };
+
+/** The pull request as its conversation reads it: the description, the sidebar, what this account may do. */
+export type PullRequestHead = {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  state: PullRequestState;
+  isDraft: boolean;
+  body: string;
+  bodyHtml: string;
+  author: string;
+  avatar: string | null;
+  association: string;
+  createdAt: string | null;
+  editedAt: string | null;
+  mine: boolean;
+  can: { update: boolean; react: boolean; close: boolean; reopen: boolean; updateBranch: boolean; label: boolean; assign: boolean };
+  mergeStateStatus: string;
+  mergeable: PullRequest['mergeable'];
+  reviewDecision: PullRequest['reviewDecision'];
+  head: string;
+  headOid: string;
+  base: string;
+  crossRepository: boolean;
+  checks: string | null;
+  comments?: number;
+  commitCount?: number;
+  reactions: Reaction[];
+  reviewers: Reviewer[];
+  assignees: Person[];
+  labels: Label[];
+  pendingReviewId: string | null;
+};
+
+export type ConversationAnswer = Answer & {
+  number?: number;
+  /** The first page only. */
+  pr?: PullRequestHead;
+  threads?: ReviewThread[];
+  timeline?: { items: TimelineItem[]; totalCount: number; hasNextPage: boolean; endCursor: string | null };
+};
+
+export type Commit = { oid: string; short: string; headline: string; body: string; date: string | null; author: string; avatar: string | null; url: string; checks: string | null };
+export type CommitsAnswer = Answer & { commits?: Commit[]; totalCount?: number; truncated?: boolean };
+export type CommitFilesAnswer = Answer & { sha?: string; files?: PullRequestFile[]; truncated?: boolean };
+
+export type CheckBucket = 'pass' | 'fail' | 'pending' | 'skipped' | 'cancelled';
+export type Check = {
+  kind: 'run' | 'status';
+  id: number | null;
+  name: string;
+  title: string;
+  group: string;
+  app: string;
+  runId: number | null;
+  event: string;
+  status: string;
+  conclusion: string | null;
+  bucket: CheckBucket;
+  startedAt: string | null;
+  completedAt: string | null;
+  url: string;
+  required: boolean;
+  /** A GitHub Actions job: it has a log and can run again. */
+  actions: boolean;
+};
+export type ChecksAnswer = Answer & { headOid?: string; rollup?: string | null; checks?: Check[]; summary?: Record<CheckBucket, number>; truncated?: boolean };
+export type LogAnswer = Answer & { jobId?: number; text?: string; truncated?: boolean };
+export type ViewedAnswer = Answer & { viewed?: Record<string, 'VIEWED' | 'DISMISSED'> };
+export type BranchesAnswer = Answer & { defaultBranch?: string | null; branches?: string[]; totalCount?: number };
+export type CandidatesAnswer = Answer & { kind?: 'labels' | 'users'; items?: (Label | Person)[]; totalCount?: number };
+export type MarkdownAnswer = Answer & { html?: string };
+export type EditAnswer = Answer & { kind?: string; message?: string };
+
+/** One change to a pull request: the kinds pull-request-edits.js on the desktop takes. */
+export type EditParams =
+  | { kind: 'title'; pullRequestId: string; title: string }
+  | { kind: 'body'; pullRequestId: string; body: string }
+  | { kind: 'base'; pullRequestId: string; base: string }
+  | { kind: 'comment'; pullRequestId: string; body: string }
+  | { kind: 'comment-edit'; type: 'issue' | 'review-comment' | 'review'; id: string; body: string }
+  | { kind: 'comment-delete'; type: 'issue' | 'review-comment'; id: string }
+  | { kind: 'comment-hide'; id: string; reason: HideReason }
+  | { kind: 'comment-unhide'; id: string }
+  | { kind: 'thread-reply'; threadId: string; body: string }
+  | { kind: 'thread-resolve' | 'thread-unresolve'; threadId: string }
+  | { kind: 'react' | 'unreact'; subjectId: string; content: ReactionContent }
+  | { kind: 'review'; pullRequestId: string; event: ReviewEvent; body?: string; pendingReviewId?: string }
+  | { kind: 'update-branch'; pullRequestId: string; headOid: string; method: 'MERGE' | 'REBASE' }
+  | { kind: 'viewed' | 'unviewed'; pullRequestId: string; path: string }
+  | { kind: 'reviewers'; pullRequestId: string; users: string[]; teams: string[] }
+  | { kind: 'labels' | 'assignees'; pullRequestId: string; add: string[]; remove: string[] }
+  | { kind: 'rerun'; runId: number; failedOnly?: boolean }
+  | { kind: 'rerun-job'; jobId: number };
+
+export type ReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+export const REVIEW_EVENTS: readonly { key: ReviewEvent; label: string; help: string }[] = [
+  { key: 'COMMENT', label: 'Comment', help: 'General feedback, without approving.' },
+  { key: 'APPROVE', label: 'Approve', help: 'Feedback, and approval to merge.' },
+  { key: 'REQUEST_CHANGES', label: 'Request changes', help: 'Feedback that must be addressed before merging.' },
+];
+
+/** Which review choices are open: on one's own pull request GitHub takes only Comment. */
+export function reviewChoices(mine: boolean): { key: ReviewEvent; label: string; help: string; disabled: boolean }[] {
+  return REVIEW_EVENTS.map((event) => ({ ...event, disabled: mine && event.key !== 'COMMENT' }));
+}
+
+/** Why a review cannot be sent yet, or null. */
+export function reviewProblem(event: ReviewEvent, body: string, mine: boolean): string | null {
+  if (mine && event !== 'COMMENT') return 'GitHub does not let you approve or request changes on your own pull request.';
+  if (event !== 'APPROVE' && !body.trim()) return 'Write what the review says.';
+  return null;
+}
+
+/** Why a title cannot be saved, or null: as GitHub, not empty, one line, at most 256 characters. */
+export function titleProblem(title: string): string | null {
+  const text = title.trim();
+  if (!text) return 'A title cannot be empty.';
+  if (/[\r\n]/.test(title)) return 'A title is one line.';
+  if (text.length > 256) return 'A title is at most 256 characters.';
+  return null;
+}
+
+/** The tabs' counts: the conversation's own once read, else the list's; the checks once read. */
+export function detailCounts(pr: Pick<PullRequest, 'changedFiles'> & { comments?: number; commitCount?: number }, head: PullRequestHead | undefined, commits: CommitsAnswer | undefined, checks: ChecksAnswer | undefined): Record<DetailTab, number | null> {
+  return {
+    conversation: head?.comments ?? pr.comments ?? null,
+    commits: commits?.ok ? (commits.totalCount ?? commits.commits?.length ?? null) : (head?.commitCount ?? pr.commitCount ?? null),
+    checks: checks?.ok ? (checks.checks?.length ?? 0) : null,
+    files: pr.changedFiles ?? null,
+  };
+}
+
+export function isMessage(item: TimelineItem): item is Message {
+  return item.kind === 'comment' || item.kind === 'review' || item.kind === 'review-comment' || item.kind === 'description';
+}
+
+export type TimelineBlock =
+  | { kind: 'message'; key: string; message: Message }
+  | { kind: 'review-line'; key: string; message: Message }
+  | { kind: 'commits'; key: string; commits: TimelineCommit[] }
+  | { kind: 'event'; key: string; event: TimelineEvent }
+  | { kind: 'thread'; key: string; thread: ReviewThread };
+
+/**
+ * The timeline as GitHub shows it: commits in a row grouped, each review with
+ * its threads under it (a review that is only its threads as one line), and
+ * the threads whose review is on a page not read yet at the end, once every
+ * page is read.
+ */
+export function timelineBlocks(items: readonly TimelineItem[], threads: readonly ReviewThread[], hasNextPage: boolean): TimelineBlock[] {
+  const blocks: TimelineBlock[] = [];
+  const byReview = new Map<string | null, ReviewThread[]>();
+  for (const thread of threads) byReview.set(thread.reviewId, [...(byReview.get(thread.reviewId) || []), thread]);
+  const shown = new Set<string>();
+  let commits: TimelineCommit[] = [];
+  const flush = () => {
+    if (commits.length) blocks.push({ kind: 'commits', key: `c:${commits[0].oid}`, commits });
+    commits = [];
+  };
+  items.forEach((item, index) => {
+    if (item.kind === 'commit') { commits.push(item); return; }
+    flush();
+    if (item.kind === 'event') { blocks.push({ kind: 'event', key: `e:${index}`, event: item }); return; }
+    const message = item as Message;
+    const own = message.kind === 'review' ? byReview.get(message.id) || [] : [];
+    if (message.kind === 'review' && !message.body.trim() && own.length && message.state === 'COMMENTED') blocks.push({ kind: 'review-line', key: `m:${message.id}`, message });
+    else blocks.push({ kind: 'message', key: `m:${message.id}`, message });
+    for (const thread of own) { shown.add(thread.id); blocks.push({ kind: 'thread', key: `t:${thread.id}`, thread }); }
+  });
+  flush();
+  if (!hasNextPage) for (const thread of threads) if (!shown.has(thread.id)) blocks.push({ kind: 'thread', key: `t:${thread.id}`, thread });
+  return blocks;
+}
+
+/** One event of the timeline as a sentence, as the desktop words it. */
+export function eventText(event: TimelineEvent): string {
+  const who = event.actor || 'ghost';
+  switch (event.type) {
+    case 'force-pushed': return `${who} force-pushed the branch from ${event.from} to ${event.to}`;
+    case 'base-changed': return `${who} changed the base branch from ${event.from} to ${event.to}`;
+    case 'renamed': return `${who} changed the title from “${event.from}” to “${event.to}”`;
+    case 'closed': return `${who} closed this`;
+    case 'reopened': return `${who} reopened this`;
+    case 'merged': return `${who} merged commit ${event.commit} into ${event.to}`;
+    case 'ready': return `${who} marked this pull request as ready for review`;
+    case 'draft': return `${who} marked this pull request as draft`;
+    case 'review-requested': return `${who} requested a review from ${event.subject || 'someone'}`;
+    case 'review-request-removed': return `${who} removed the review request for ${event.subject || 'someone'}`;
+    case 'review-dismissed': return `${who} dismissed ${event.subject || 'someone'}'s review${event.message ? `: ${event.message}` : ''}`;
+    case 'labeled': return `${who} added the ${event.label?.name || ''} label`;
+    case 'unlabeled': return `${who} removed the ${event.label?.name || ''} label`;
+    case 'assigned': return event.subject === event.actor ? `${who} self-assigned this` : `${who} assigned ${event.subject || 'someone'}`;
+    case 'unassigned': return `${who} unassigned ${event.subject || 'someone'}`;
+    case 'branch-deleted': return `${who} deleted the ${event.to} branch`;
+    case 'branch-restored': return `${who} restored the head branch`;
+    default: return who;
+  }
+}
+
+const REVIEW_WORDS: Record<string, string> = {
+  APPROVED: 'approved these changes', CHANGES_REQUESTED: 'requested changes', COMMENTED: 'reviewed', DISMISSED: 'reviewed (dismissed)', PENDING: 'started a review',
+};
+
+/** "commented", "approved these changes"… */
+export function messageVerb(message: Pick<Message, 'kind' | 'state'>): string {
+  if (message.kind === 'description') return 'opened this';
+  if (message.kind === 'review') return REVIEW_WORDS[message.state || 'COMMENTED'] || 'reviewed';
+  return 'commented';
+}
+
+export type MessageAction = 'copy' | 'quote' | 'edit' | 'hide' | 'unhide' | 'web' | 'delete';
+
+/** The "…" of a message: what GitHub lets this account do with it, as on the desktop. */
+export function messageActions(message: Pick<Message, 'kind' | 'url' | 'can' | 'minimized' | 'id'>): MessageAction[] {
+  const actions: MessageAction[] = [];
+  if (message.url) actions.push('copy');
+  actions.push('quote');
+  if (message.can.update) actions.push('edit');
+  if (message.can.minimize && message.id && message.kind !== 'description' && message.kind !== 'review') actions.push(message.minimized ? 'unhide' : 'hide');
+  if (message.url) actions.push('web');
+  if (message.can.delete && (message.kind === 'comment' || message.kind === 'review-comment')) actions.push('delete');
+  return actions;
+}
+
+/** Which kind of comment a change names (comment-edit, comment-delete). */
+export function commentType(message: Pick<Message, 'kind'>): 'issue' | 'review-comment' | 'review' {
+  if (message.kind === 'review') return 'review';
+  if (message.kind === 'review-comment') return 'review-comment';
+  return 'issue';
+}
+
+/** A quote reply: every line behind "> ", then an empty line. */
+export function quoteText(body: string): string {
+  const lines = String(body || '').replace(/\r\n/g, '\n').trimEnd().split('\n');
+  return `${lines.map((line) => (line ? `> ${line}` : '>')).join('\n')}\n\n`;
+}
+
+/** A reaction on or off in a list of reactions, as it shows before GitHub answers. */
+export function toggleReaction(reactions: readonly Reaction[], content: ReactionContent): Reaction[] {
+  const existing = reactions.find((r) => r.content === content);
+  if (!existing) return [...reactions, { content, count: 1, mine: true }];
+  if (!existing.mine) return reactions.map((r) => (r === existing ? { ...r, count: r.count + 1, mine: true } : r));
+  return reactions.map((r) => (r === existing ? { ...r, count: r.count - 1, mine: false } : r)).filter((r) => r.count > 0);
+}
+
+/** The end of a review thread's diff hunk: its header and the last lines, where the comment was made. */
+export function hunkTail(hunk: string, lines = 5): string {
+  const all = String(hunk || '').split('\n');
+  const head = all[0]?.startsWith('@@') ? [all[0]] : [];
+  return [...head, ...all.slice(head.length).slice(-lines)].join('\n');
+}
+
+/** What the status box at the end of an open conversation says, and whether Update branch is there. */
+export function statusRows(head: PullRequestHead): { rows: { tone: 'good' | 'bad' | 'warn' | 'muted'; text: string }[]; canUpdateBranch: boolean } {
+  const rows: { tone: 'good' | 'bad' | 'warn' | 'muted'; text: string }[] = [];
+  if (head.state !== 'OPEN') return { rows, canUpdateBranch: false };
+  if (head.checks === 'SUCCESS') rows.push({ tone: 'good', text: 'All checks have passed' });
+  else if (head.checks === 'FAILURE' || head.checks === 'ERROR') rows.push({ tone: 'bad', text: 'Some checks were not successful' });
+  else if (head.checks === 'PENDING' || head.checks === 'EXPECTED') rows.push({ tone: 'warn', text: 'Some checks haven’t completed yet' });
+  if (head.reviewDecision === 'APPROVED') rows.push({ tone: 'good', text: 'Changes approved' });
+  else if (head.reviewDecision === 'CHANGES_REQUESTED') rows.push({ tone: 'bad', text: 'Changes requested' });
+  else if (head.reviewDecision === 'REVIEW_REQUIRED') rows.push({ tone: 'warn', text: 'Review required' });
+  if (head.mergeable === 'CONFLICTING') rows.push({ tone: 'bad', text: `This branch has conflicts with ${head.base} that must be resolved` });
+  if (head.isDraft) rows.push({ tone: 'muted', text: 'This pull request is still a work in progress' });
+  const behind = head.mergeStateStatus === 'BEHIND';
+  if (behind) rows.push({ tone: 'warn', text: 'This branch is out-of-date with the base branch' });
+  return { rows, canUpdateBranch: behind && head.can.updateBranch };
+}
+
+/** Commits by the day they were made, as GitHub's Commits tab lists them. */
+export function commitDays(commits: readonly Commit[]): { day: string; commits: Commit[] }[] {
+  const days: { day: string; commits: Commit[] }[] = [];
+  for (const commit of commits) {
+    const date = new Date(commit.date || '');
+    const day = Number.isNaN(date.getTime()) ? 'Unknown date' : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    if (!days.length || days[days.length - 1].day !== day) days.push({ day, commits: [] });
+    days[days.length - 1].commits.push(commit);
+  }
+  return days;
+}
+
+/** "2 failing, 1 in progress, 10 successful" */
+export function checksSummaryText(summary: Partial<Record<CheckBucket, number>> | undefined): string {
+  const s = summary || {};
+  const parts: string[] = [];
+  if (s.fail) parts.push(`${s.fail} failing`);
+  if (s.pending) parts.push(`${s.pending} in progress`);
+  if (s.cancelled) parts.push(`${s.cancelled} cancelled`);
+  if (s.skipped) parts.push(`${s.skipped} skipped`);
+  if (s.pass) parts.push(`${s.pass} successful`);
+  return parts.join(', ');
+}
+
+/** Checks by workflow (or app), each group with the runs whose failed jobs can run again. */
+export function checkGroups(checks: readonly Check[]): { name: string; checks: Check[]; failedRuns: number[] }[] {
+  const groups: { name: string; checks: Check[]; failedRuns: number[] }[] = [];
+  for (const check of checks) {
+    const name = check.group || 'Other checks';
+    let group = groups.find((g) => g.name === name);
+    if (!group) { group = { name, checks: [], failedRuns: [] }; groups.push(group); }
+    group.checks.push(check);
+    if (check.actions && check.runId && check.bucket === 'fail' && !group.failedRuns.includes(check.runId)) group.failedRuns.push(check.runId);
+  }
+  return groups;
+}
+
+/** A finished GitHub Actions job: it has a log and can run again. */
+export function checkFinishedJob(check: Check): boolean {
+  return check.actions && !!check.id && check.status === 'COMPLETED';
+}
+
+/** "3m 12s", "45s", "1h 2m". */
+export function checkDuration(start: string | null, end: string | null): string {
+  const a = Date.parse(start || '');
+  const b = Date.parse(end || '');
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '';
+  const secs = Math.round((b - a) / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+/**
+ * A job's log for a phone: GitHub Actions' marks read (a group's title kept,
+ * its end gone), and only the last `lines`, as a long text is slow to draw.
+ */
+export function logLines(text: string, lines = 400): { lines: { text: string; tone: 'group' | 'error' | 'warning' | 'plain' }[]; cut: boolean } {
+  const all = String(text || '').split('\n').filter((line) => !line.startsWith('##[endgroup]'));
+  const shown = all.slice(-lines);
+  return {
+    cut: all.length > shown.length,
+    lines: shown.map((line) => {
+      const group = /^##\[group\](.*)$/.exec(line);
+      if (group) return { text: `▸ ${group[1]}`, tone: 'group' };
+      const mark = /^##\[(error|warning|notice|command|debug)\](.*)$/.exec(line);
+      if (mark) return { text: mark[2], tone: mark[1] === 'error' ? 'error' : mark[1] === 'warning' ? 'warning' : 'plain' };
+      return { text: line, tone: 'plain' };
+    }),
+  };
+}
+
+/** The branches Change base offers: the default first, never the head or the current base. */
+export function baseChoices(answer: BranchesAnswer | undefined, pr: Pick<PullRequest, 'head' | 'base'>): string[] {
+  const names = (answer?.branches || []).filter((name) => name !== pr.head && name !== pr.base);
+  const def = answer?.defaultBranch;
+  if (def && names.includes(def)) return [def, ...names.filter((n) => n !== def)];
+  return names;
+}
+
+/** What a sidebar picker saves: the whole set for reviewers (team requests kept), additions and removals for the rest. */
+export function sideChange(side: 'reviewers' | 'assignees' | 'labels', head: PullRequestHead, chosen: ReadonlySet<string>): EditParams | null {
+  if (side === 'reviewers') {
+    const before = head.reviewers.filter((r) => r.kind !== 'team').map((r) => r.login);
+    const same = before.length === chosen.size && before.every((login) => chosen.has(login));
+    if (same) return null;
+    return { kind: 'reviewers', pullRequestId: head.id, users: [...chosen], teams: head.reviewers.filter((r) => r.kind === 'team' && r.state === 'REQUESTED').map((r) => r.login) };
+  }
+  const before = new Set((side === 'labels' ? head.labels : head.assignees).map((x) => x.id));
+  const add = [...chosen].filter((id) => !before.has(id));
+  const remove = [...before].filter((id) => !chosen.has(id));
+  if (!add.length && !remove.length) return null;
+  return { kind: side, pullRequestId: head.id, add, remove };
+}
+
+/** A label's colour as GitHub gives it (six hex digits), or a grey. */
+export function labelColor(color: string): string {
+  return /^[0-9a-f]{6}$/i.test(color || '') ? `#${color}` : '#8a8aa0';
 }

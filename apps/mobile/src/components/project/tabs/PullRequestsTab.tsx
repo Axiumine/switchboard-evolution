@@ -4,22 +4,22 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { LINE_STYLES, mono } from '@/components/git/diff-style';
+import { mono } from '@/components/git/diff-style';
 import { usePullRefresh } from '@/components/PullRefresh';
+import { PullRequestFiles } from '@/components/pulls/PullRequestFiles';
 import { openInAppBrowser } from '@/components/pulls/PullRequestWebPage';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { useGitInfo } from '@/git/info-query';
-import { diffLines } from '@/git/model';
 import { chooseRepo, historyRepos, type RepoRef } from '@/git/repo-choice';
 import type { Project } from '@/projects/model';
 import { useProjectUi } from '@/projects/ui-store';
 import {
-  ACTION_COPY, badges, canEdit, DEFAULT_FILTER, emptyText, errorTitle, FILE_TOOLS, fileLetter, fileRows, filterLabel, isDefaultFilter, menuActions, mergeBlock,
-  inAppWebUrl, mergeLists, noPatchText, pagedWords, pageStates, PR_FILTERS, prStatus, summaryText, toggleFilter, webUrl, whenText,
-  type Badge, type ConfirmAction, type PrFilterKey, type PrStatus, type PullRequest, type PullRequestFile, type PullRequestRepo,
+  ACTION_COPY, badges, canEdit, DEFAULT_FILTER, emptyText, errorTitle, filterLabel, isDefaultFilter, mergeBlock,
+  inAppWebUrl, mergeLists, pagedWords, pageStates, PR_FILTERS, prStatus, rowMenu, summaryText, toggleFilter, webUrl, whenText,
+  type Badge, type ConfirmAction, type PrFilterKey, type PrStatus, type PullRequest, type PullRequestRepo,
 } from '@/pulls/model';
 import {
-  runPullRequestAction, setPullFileView, setPullNotice, useOpenPullRequests, usePagedPullRequests, usePullFileView, usePullNotice, usePullRequestFiles, type Notice,
+  runPullRequestAction, setPullNotice, useOpenPullRequests, usePagedPullRequests, usePullNotice, type Notice,
 } from '@/pulls/queries';
 import { openPullRequestWindow, windowActionLabel } from '@/pulls/web';
 import { relativeTime } from '@/sessions/model';
@@ -58,6 +58,9 @@ const STALE_MS = 60_000;
 export function PullRequestsTab({ project, active = true }: { project: Project; active?: boolean }) {
   const pid = project.id;
   const supported = useCapability('get-pull-requests');
+  // A newer desktop shows an open pull request as GitHub does, on a screen of its own, and takes every change.
+  const detailed = useCapability('get-pull-request-conversation');
+  const editable = useCapability('edit-pull-request');
   const online = useConnection((s) => s.status.state === 'online');
   const scroll = useTabScroll(pid, 'pulls');
   const [gitRepo, patchUi] = useProjectUi(pid, (ui) => ui.gitRepo);
@@ -123,9 +126,23 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
     router.push({ pathname: '/pulls/merge', params: { projectId: pid, folder, number: String(pr.number), remote: remote ?? '' } });
   };
 
+  const openDetail = (pr: PullRequest) => {
+    if (!folder) return;
+    router.push({ pathname: '/pulls/[number]', params: { number: String(pr.number), projectId: pid, folder, remote: remote ?? '', title: pr.title } });
+  };
+
+  const changeBase = (pr: PullRequest) => {
+    if (!folder) return;
+    if (!canEdit(pr, repoInfo)) { Alert.alert('Change base', 'Your GitHub account cannot change this pull request.'); return; }
+    router.push({ pathname: '/pulls/base', params: { projectId: pid, folder, remote: remote ?? '', number: String(pr.number), id: pr.id ?? '', head: pr.head, base: pr.base } });
+  };
+
   const menuOptions = (): SheetOption[] => {
     if (menu?.kind === 'row') {
-      return menuActions(menu.pr).map((action) => ({ label: ACTION_COPY[action].menu, destructive: ACTION_COPY[action].destructive, onPress: () => confirm(menu.pr, action) }));
+      const pr = menu.pr;
+      return rowMenu(pr, { canChangeBase: editable && !!pr.id }).map((key) => (key === 'base'
+        ? { label: 'Change base…', onPress: () => changeBase(pr) }
+        : { label: ACTION_COPY[key].menu, destructive: ACTION_COPY[key].destructive, onPress: () => confirm(pr, key) }));
     }
     if (menu?.kind === 'remote' && folder) {
       const current = listing?.remote || remote;
@@ -217,6 +234,7 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
                 remote={remote}
                 onMerge={merge}
                 onMore={(item) => setMenu({ kind: 'row', pr: item })}
+                onOpen={detailed ? openDetail : undefined}
               />
             ))}
           </View>
@@ -248,7 +266,11 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
             ) : null}
           </View>
         ) : null}
-        <Text style={styles.footer}>Tap a pull request for its files and diffs. Merge asks how; “…” converts it to a draft, marks it ready or closes it. Pull down to read them again.</Text>
+        <Text style={styles.footer}>
+          {detailed
+            ? 'Tap a pull request for its conversation, commits, checks and files. Merge asks how; “…” converts it to a draft, marks it ready, changes its base, closes or reopens it. Pull down to read them again.'
+            : 'Tap a pull request for its files and diffs. Merge asks how; “…” converts it to a draft, marks it ready or closes it. Pull down to read them again.'}
+        </Text>
       </>
     );
   }
@@ -340,9 +362,11 @@ function PullRequestLinkTools({ pr }: { pr: PullRequest }) {
   );
 }
 
-const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folder, remote, onMerge, onMore }: {
+const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folder, remote, onMerge, onMore, onOpen }: {
   pr: PullRequest; repo: PullRequestRepo | undefined; projectId: string; folder: string; remote: string | undefined;
   onMerge: (pr: PullRequest) => void; onMore: (pr: PullRequest) => void;
+  /** Open it on a screen of its own (a newer desktop); without it the row opens on its files. */
+  onOpen?: (pr: PullRequest) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const status = prStatus(pr);
@@ -352,13 +376,13 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
   return (
     <View style={styles.item}>
       <Pressable
-        onPress={() => setExpanded(!expanded)}
+        onPress={() => (onOpen ? onOpen(pr) : setExpanded(!expanded))}
         style={({ pressed }) => [styles.row, expanded && styles.rowOpen, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityState={{ expanded }}
+        accessibilityState={onOpen ? undefined : { expanded }}
         accessibilityLabel={`${icon.label} pull request ${pr.number}, ${pr.title}`}
       >
-        <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={13} color={colors.textFaint} style={styles.rowChevron} />
+        <Ionicons name={!onOpen && expanded ? 'chevron-down' : 'chevron-forward'} size={13} color={colors.textFaint} style={styles.rowChevron} />
         <Ionicons name={icon.name} size={17} color={icon.color} style={styles.rowIcon} />
         <View style={styles.flex}>
           <Text style={styles.title} numberOfLines={2}>{pr.title}</Text>
@@ -391,154 +415,22 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
               <Ionicons name="ellipsis-horizontal" size={18} color={colors.textDim} />
             </Pressable>
           </View>
-        ) : webUrl(pr) ? <View style={styles.rowActions}>{linkTools}</View> : null}
+        ) : pr.state === 'CLOSED' || webUrl(pr) ? (
+          <View style={styles.rowActions}>
+            {linkTools}
+            {/* A closed one can be reopened. */}
+            {pr.state === 'CLOSED' ? (
+              <Pressable onPress={() => onMore(pr)} hitSlop={4} style={({ pressed }) => [styles.moreIcon, pressed && styles.pressedButton]} accessibilityRole="button" accessibilityLabel={`More for pull request ${pr.number}`}>
+                <Ionicons name="ellipsis-horizontal" size={18} color={colors.textDim} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </Pressable>
-      {expanded ? <PullRequestFiles projectId={projectId} folder={folder} remote={remote} pr={pr} /> : null}
+      {!onOpen && expanded ? <PullRequestFiles projectId={projectId} folder={folder} remote={remote} number={pr.number} headOid={pr.headOid} /> : null}
     </View>
   );
 });
-
-// How far each level of the tree goes in, and how long a tool's name stays up.
-const INDENT = 14;
-const HINT_MS = 1600;
-
-function PullRequestFiles({ projectId, folder, remote, pr }: { projectId: string; folder: string; remote: string | undefined; pr: PullRequest }) {
-  const files = usePullRequestFiles(projectId, folder, remote, pr.number, pr.headOid);
-  const list = files.data?.files;
-  const view = usePullFileView((s) => s.view);
-  // Every diff starts closed; folders start open, so every file is in sight.
-  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  // A tool's name, shown for a moment in place of the summary after a long press.
-  const [hint, setHint] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hint) return undefined;
-    const timer = setTimeout(() => setHint(null), HINT_MS);
-    return () => clearTimeout(timer);
-  }, [hint]);
-  const rows = useMemo(() => (list ? fileRows(list, view, collapsed) : []), [list, view, collapsed]);
-  const flip = (set: ReadonlySet<string>, key: string) => {
-    const next = new Set(set);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
-  };
-
-  if (files.isLoading) return <View style={styles.filesNote}><ActivityIndicator size="small" color={colors.accent} /><Text style={styles.footerText}>Reading the changed files…</Text></View>;
-  if (!files.data?.ok || !list) {
-    return (
-      <View style={styles.filesNote}>
-        <Text style={[styles.footerText, { color: colors.danger, flex: 1 }]}>{files.data?.error || 'The changed files could not be read.'}</Text>
-        <Pressable onPress={() => files.refetch()} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
-      </View>
-    );
-  }
-  if (!list.length) return <View style={styles.filesNote}><Text style={styles.footerText}>No files changed.</Text></View>;
-  const insertions = list.reduce((n, file) => n + (file.insertions || 0), 0);
-  const deletions = list.reduce((n, file) => n + (file.deletions || 0), 0);
-  // Expand all opens every folder and every diff; Collapse all closes the diffs only.
-  const expandAll = () => { setCollapsed(new Set()); setOpened(new Set(list.map((file) => file.path))); };
-  const collapseAll = () => setOpened(new Set());
-  return (
-    <View style={styles.files}>
-      <View style={styles.filesHead}>
-        <Text style={[styles.filesSummary, hint ? styles.filesHint : null]} numberOfLines={1} accessibilityLiveRegion="polite">
-          {hint ?? <>{list.length} file{list.length === 1 ? '' : 's'} changed  <Text style={styles.add}>+{insertions}</Text> <Text style={styles.del}>−{deletions}</Text></>}
-        </Text>
-        <View style={styles.toolGroup}>
-          <ToolButton icon="chevron-expand-outline" label={FILE_TOOLS.expandAll} onPress={expandAll} onHint={setHint} />
-          <ToolButton icon="chevron-collapse-outline" label={FILE_TOOLS.collapseAll} onPress={collapseAll} onHint={setHint} />
-        </View>
-        <View style={styles.toolGroup}>
-          <ToolButton icon="folder-open-outline" label={FILE_TOOLS.tree} selected={view === 'tree'} onPress={() => setPullFileView('tree')} onHint={setHint} />
-          <ToolButton icon="list-outline" label={FILE_TOOLS.list} selected={view === 'list'} onPress={() => setPullFileView('list')} onHint={setHint} />
-        </View>
-      </View>
-      {files.data.truncated ? <Text style={styles.filesWarn}>GitHub lists the first 3000 files.</Text> : null}
-      {rows.map((row) => (row.kind === 'folder' ? (
-        <Pressable
-          key={`d:${row.key}`}
-          onPress={() => setCollapsed((previous) => flip(previous, row.key))}
-          style={({ pressed }) => [styles.folder, { paddingLeft: spacing.lg + row.depth * INDENT }, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: !row.collapsed }}
-          accessibilityLabel={`Folder ${row.key}, ${row.count} file${row.count === 1 ? '' : 's'}`}
-        >
-          <Ionicons name={row.collapsed ? 'chevron-forward' : 'chevron-down'} size={12} color={colors.textFaint} />
-          <Ionicons name={row.collapsed ? 'folder-outline' : 'folder-open-outline'} size={14} color={colors.textDim} />
-          {/* A compacted chain loses its start first: the deepest folder says the most. */}
-          <Text style={styles.folderName} numberOfLines={1} ellipsizeMode="head">{row.name}</Text>
-          <Text style={styles.folderCount}>{row.count}</Text>
-        </Pressable>
-      ) : (
-        <FileDiff
-          key={`f:${row.key}`}
-          file={row.item}
-          tree={view === 'tree'}
-          depth={row.depth}
-          open={opened.has(row.item.path)}
-          onToggle={() => setOpened((previous) => flip(previous, row.item.path))}
-        />
-      )))}
-    </View>
-  );
-}
-
-/** An icon for a tool over the files; a long press shows its name, as the desktop's tooltip does. */
-function ToolButton({ icon, label, selected, onPress, onHint }: {
-  icon: keyof typeof Ionicons.glyphMap; label: string; selected?: boolean; onPress: () => void; onHint: (label: string) => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={() => onHint(label)}
-      hitSlop={4}
-      style={({ pressed }) => [styles.tool, selected && styles.toolOn, pressed && styles.pressed]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={selected === undefined ? undefined : { selected }}
-    >
-      <Ionicons name={icon} size={17} color={selected ? colors.accent : colors.textDim} />
-    </Pressable>
-  );
-}
-
-function FileDiff({ file, tree, depth, open, onToggle }: { file: PullRequestFile; tree: boolean; depth: number; open: boolean; onToggle: () => void }) {
-  const name = file.path.split('/').pop() || file.path;
-  const dir = file.path.slice(0, Math.max(0, file.path.length - name.length - 1));
-  // In the tree the folders say where a file is; the list says it under the name.
-  const where = [tree ? '' : dir, file.oldPath ? `from ${file.oldPath}` : ''].filter(Boolean).join('  ');
-  const lines = useMemo(() => (open && file.patch ? diffLines(file.patch) : []), [open, file.patch]);
-  return (
-    <View>
-      <Pressable
-        onPress={onToggle}
-        style={({ pressed }) => [styles.file, { paddingLeft: spacing.lg + (tree ? depth * INDENT : 0) }, open && styles.fileOpen, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${file.path}, ${file.status}`}
-      >
-        <Ionicons name={open ? 'chevron-down' : 'chevron-forward'} size={12} color={colors.textFaint} />
-        <Text style={[styles.fileLetter, { color: FILE_COLORS[file.status] }]}>{fileLetter(file)}</Text>
-        <View style={styles.flex}>
-          <Text style={styles.fileName} numberOfLines={1}>{name}</Text>
-          {where ? <Text style={styles.fileDir} numberOfLines={1}>{where}</Text> : null}
-        </View>
-        <Text style={styles.fileStats}><Text style={styles.add}>+{file.insertions}</Text> <Text style={styles.del}>−{file.deletions}</Text></Text>
-      </Pressable>
-      {open ? (
-        file.patch ? (
-          <ScrollView horizontal style={styles.diff} contentContainerStyle={styles.diffContent}>
-            <View>
-              {lines.map((line, i) => <Text key={i} style={[styles.line, LINE_STYLES[line.kind]]}>{line.text || ' '}</Text>)}
-            </View>
-          </ScrollView>
-        ) : <Text style={styles.noPatch}>{noPatchText(file)}</Text>
-      ) : null}
-    </View>
-  );
-}
-
-const FILE_COLORS: Record<PullRequestFile['status'], string> = { added: colors.running, modified: colors.attention, deleted: colors.danger, renamed: colors.accent };
 
 function NoticeBar({ notice, onClose }: { notice: Notice; onClose: () => void }) {
   const tone = notice.kind === 'error' ? colors.danger : notice.kind === 'ok' ? colors.running : colors.accent;
@@ -602,31 +494,6 @@ const styles = StyleSheet.create({
   moreButton: { marginLeft: 'auto', height: 34, paddingHorizontal: spacing.md, borderRadius: 8, borderWidth: 1, borderColor: colors.border, justifyContent: 'center' },
   moreText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   footer: { color: colors.textFaint, fontSize: 12, lineHeight: 17, padding: spacing.lg },
-  files: { backgroundColor: 'rgba(0,0,0,0.15)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  filesNote: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: 'rgba(0,0,0,0.15)' },
-  filesWarn: { color: colors.attention, fontSize: 12, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
-  filesHead: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingLeft: spacing.lg, paddingRight: spacing.md, paddingVertical: spacing.xs,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-  },
-  filesSummary: { flex: 1, minWidth: 0, color: colors.textDim, fontSize: 12.5 },
-  filesHint: { color: colors.text, fontWeight: '600' },
-  toolGroup: { flexDirection: 'row', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, overflow: 'hidden' },
-  tool: { width: 36, height: 34, alignItems: 'center', justifyContent: 'center' },
-  toolOn: { backgroundColor: 'rgba(128,136,255,0.16)' },
-  folder: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingRight: spacing.md, paddingVertical: spacing.sm, minHeight: 40 },
-  folderName: { flexShrink: 1, color: colors.textDim, fontSize: 13, fontFamily: mono },
-  folderCount: { color: colors.textFaint, fontSize: 11.5 },
-  file: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingRight: spacing.md, paddingVertical: spacing.sm, minHeight: 44 },
-  fileOpen: { backgroundColor: 'rgba(128,136,255,0.07)' },
-  fileLetter: { width: 14, fontFamily: mono, fontSize: 12, fontWeight: '700', textAlign: 'center' },
-  fileName: { color: colors.text, fontSize: 13.5, fontFamily: mono },
-  fileDir: { color: colors.textFaint, fontSize: 11 },
-  fileStats: { fontSize: 11.5, fontFamily: mono },
-  diff: { backgroundColor: '#14141a' },
-  diffContent: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
-  line: { fontFamily: mono, fontSize: 11.5, lineHeight: 16, paddingHorizontal: 4 },
-  noPatch: { color: colors.textFaint, fontSize: 12.5, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   filterLabel: { color: colors.text, fontSize: 16 },
   pressed: { backgroundColor: colors.surface },
