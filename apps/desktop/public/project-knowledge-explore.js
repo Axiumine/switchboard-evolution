@@ -157,6 +157,7 @@ function renderKnowledgeSearch(project, view, folder, body) {
   });
   wireResults();
   if (d.symbol) knRenderSymbol(project, folder, view.querySelector('[data-kn-symbol]'), d);
+  if (d.autorun) { d.autorun = false; run(); }
   const input = field('query');
   if (input && !d.symbol) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 }

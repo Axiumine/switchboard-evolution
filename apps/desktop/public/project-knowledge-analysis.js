@@ -121,6 +121,7 @@ function renderKnowledgeImpact(project, view, folder, body) {
   const more = view.querySelector('[data-kn-act="more"]');
   if (more) more.onclick = () => run({ more: true });
   if (typeof knWireAskAgent === 'function') knWireAskAgent(project, view, folder, () => ({ change: d.against === 'uncommitted' ? 'the uncommitted changes' : d.ref.trim() || 'this branch', base_branch: d.against === 'branch' ? d.ref.trim() : '' }));
+  if (d.autorun) { d.autorun = false; run(); }
 }
 
 // --- Query ---

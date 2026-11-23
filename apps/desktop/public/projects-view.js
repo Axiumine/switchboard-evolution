@@ -2765,6 +2765,7 @@ function renderSideCards(project, side) {
           <button type="button" class="ws-ghost ws-ghost--sm ws-frow-x" title="Detach from the project" aria-label="${escapeHtml(`Detach ${pathBasename(f.path)}`)}">${PICONS.x(12)}</button>
         </div>`).join('') : '<div class="ws-card-text muted">No folders attached. Sessions run in the project folder.</div>'}
     </div>
+    <div class="ws-card kn-side-card" id="ws-kn-card" hidden></div>
     <div class="ws-card ws-added-files-card">
       <div class="ws-card-h"><span class="ws-card-title">Added Files</span><span class="ws-card-meta">${addedFiles.length ? `${addedFiles.length} file${addedFiles.length === 1 ? '' : 's'}` : ''}</span><span class="ws-flex"></span>${addedFiles.length ? '<button type="button" class="ws-ghost ws-ghost--sm" id="ws-added-files-open">Open</button>' : ''}</div>
       <div class="ws-added-drop" id="ws-added-files-drop">
@@ -2789,6 +2790,8 @@ function renderSideCards(project, side) {
   });
   bindAddedFilesCard(project, side);
   bindRecentFilesCard(project, side);
+  // The Code graph card, for projects with the graph on (project-knowledge-links.js).
+  if (typeof knRenderSideCard === 'function') knRenderSideCard(project, side.querySelector('#ws-kn-card')).catch(() => {});
   side.querySelectorAll('.ws-todo input').forEach(box => {
     box.onchange = async () => {
       box.disabled = true;

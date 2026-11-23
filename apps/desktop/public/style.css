@@ -9532,3 +9532,10 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .kn-config-input { width: 96px; }
 .kn-title-actions { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
 .kn-install-preview { max-height: 46vh; font-size: 11px; padding: 10px 12px; white-space: pre-wrap; }
+.kn-side-search { padding: 4px 14px 8px; }
+.kn-side-search .ws-input { width: 100%; }
+.kn-git-impact {
+  display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; height: 20px; padding: 0 6px;
+  border: 0; border-radius: 4px; background: none; color: #9a9fff; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.kn-git-impact:hover { background: rgba(120,130,255,0.12); color: #c0c4ff; }
