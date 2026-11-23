@@ -12,6 +12,8 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../public/project-pull-requests-view.js'), 'utf8');
 // The files' tree is the Changes tab's (buildGitChangeTree, gitTreeRows), loaded before, as in index.html.
 const gitViewSource = fs.readFileSync(path.join(__dirname, '../public/project-git-view.js'), 'utf8');
+// The search's pure parts, loaded before the view, as in index.html.
+const searchSource = fs.readFileSync(path.join(__dirname, '../public/pull-request-search.js'), 'utf8');
 
 function loadContext(api = {}, extra = {}) {
   const icon = name => () => `<svg data-icon="${name}"></svg>`;
@@ -25,6 +27,7 @@ function loadContext(api = {}, extra = {}) {
     ...extra,
   });
   vm.runInContext(gitViewSource, context);
+  vm.runInContext(searchSource, context);
   vm.runInContext(source, context);
   return context;
 }
@@ -465,4 +468,92 @@ test('a pull request\'s files can be marked as viewed, as on GitHub', () => {
   assert.match(html, /<span class="pr-viewed-count">1 of 4 viewed<\/span>/);
   // A commit's files have no Viewed boxes.
   assert.doesNotMatch(ctx.prFilesHtml(FILES), /pr-viewed|pr-file-line/);
+});
+
+// --- The search and the footer it changes ---
+
+function viewState(extra = {}) {
+  return { filter: ['open', 'draft'], search: '', repos: new Map(), ...extra };
+}
+
+function listData(ctx, items, texts = []) {
+  const data = ctx.prRepoData();
+  data.open = { repo: REPO, items, totalCount: items.length, truncated: false };
+  for (const t of texts) data.texts.map.set(t.number, t);
+  return data;
+}
+
+const texts = (number, extra = {}) => ({ number, updatedAt: null, body: '', comments: [], files: [], truncated: false, ...extra });
+
+test('the search shows what matches, marks the title, says where else it found the words and how far it has read', () => {
+  const ctx = loadContext();
+  const items = [pr(3, { title: 'Add the login page' }), pr(2, { title: 'Rework sessions' }), pr(1, { title: 'Docs' })];
+  const data = listData(ctx, items, [texts(2, { files: ['db/002_sessions.sql'], comments: ['see the login flow'] })]);
+  const view = ctx.prShownView(data, viewState({ search: 'login' }));
+  // 3 by its title, 2 by a comment; 1 waits for its texts.
+  assert.deepEqual(plain(view.items.map(p => p.number)), [3, 2]);
+  assert.equal(view.read, 1);
+  assert.equal(view.unread, 2);
+  const html = ctx.prListHtml(data, ['open'], new Date('2026-04-01T00:00:00Z'), view);
+  assert.match(html, /Add the <mark class="pr-hit">login<\/mark> page/);
+  assert.match(html, /Found in 1 comment/);
+  assert.match(html, /Searching descriptions, comments and files: 1 of 3 read/);
+  const files = ctx.prShownView(data, viewState({ search: '*.sql' }));
+  assert.deepEqual(plain(files.items.map(p => p.number)), [2]);
+  assert.match(ctx.prListHtml(data, ['open'], new Date(), files), /title="Files: db\/002_sessions\.sql">Found in 1 file/);
+});
+
+test('once everything is read, the search says how many match, or that none does', () => {
+  const ctx = loadContext();
+  const data = listData(ctx, [pr(2, { title: 'Two' }), pr(1, { title: 'One' })], [texts(2, { body: 'about caching' }), texts(1)]);
+  const view = ctx.prShownView(data, viewState({ search: 'caching' }));
+  assert.match(ctx.prListHtml(data, ['open'], new Date(), view), /1 of 2 pull requests match/);
+  const none = ctx.prListHtml(data, ['open'], new Date(), ctx.prShownView(data, viewState({ search: 'nothing' })));
+  assert.match(none, /No open pull requests matching “nothing”/);
+  data.texts.failed.add(1);
+  data.texts.map.delete(1);
+  data.texts.error = 'HTTP 502';
+  const failed = ctx.prListHtml(data, ['open'], new Date(), ctx.prShownView(data, viewState({ search: 'caching' })));
+  assert.match(failed, /1 pull request could not be searched: HTTP 502/);
+  assert.match(failed, /data-act="texts-retry"/);
+});
+
+test('with the search on, closed and merged ones are read 100 at a time and the footer counts what was read', () => {
+  const ctx = loadContext();
+  const data = listData(ctx, [pr(9)]);
+  data.page = { ...ctx.prEmptyPage('MERGED'), items: [pr(4, { state: 'MERGED' })], totalCount: 40, hasNextPage: true, endCursor: 'c', loaded: true };
+  assert.match(ctx.prFooterHtml(data, ['merged']), /1 of 40 merged shown[\s\S]*Load 10 more/);
+  assert.match(ctx.prFooterHtml(data, ['merged'], { narrowed: true }), /1 of 40 merged read[\s\S]*Load 100 more/);
+});
+
+test('the search reads the texts it needs, 20 pull requests a request and two requests at once', async () => {
+  const asked = [];
+  const answers = [];
+  const api = {
+    getPullRequestTexts: (projectId, repoPath, opts) => new Promise((resolve) => {
+      asked.push(opts.numbers);
+      answers.push(() => resolve({ ok: true, items: opts.numbers.map(n => texts(n, { body: `body ${n}` })) }));
+    }),
+  };
+  const ctx = loadContext(api);
+  const project = { id: 'p1' };
+  const items = Array.from({ length: 45 }, (_, i) => pr(i + 1, { title: `Change ${i + 1}` }));
+  const state = viewState({ search: 'body' });
+  const data = listData(ctx, items);
+  state.repos.set('/code/widgets', data);
+  ctx.prSearchEnsure(project, state, '/code/widgets', ctx.prShownView(data, state));
+  assert.equal(asked.length, 2);
+  assert.deepEqual(asked.map(a => a.length), [20, 20]);
+  // Newest first, as the list shows them.
+  assert.equal(asked[0][0], 45);
+  // Asking again while they run asks for nothing more.
+  ctx.prSearchEnsure(project, state, '/code/widgets', ctx.prShownView(data, state));
+  assert.equal(asked.length, 2);
+  answers.forEach(answer => answer());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(data.texts.map.size, 40);
+  assert.equal(data.texts.running, 0);
+  // The last 5 come with the next ask (a repaint makes it).
+  ctx.prSearchEnsure(project, state, '/code/widgets', ctx.prShownView(data, state));
+  assert.deepEqual(asked[2].length, 5);
 });

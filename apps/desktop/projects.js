@@ -24,6 +24,7 @@ const git = require('./git');
 const gitGraphService = require('./git-graph-service');
 const pullRequests = require('./pull-requests');
 const pullRequestDetail = require('./pull-request-detail');
+const pullRequestSearch = require('./pull-request-search');
 const pullRequestEdits = require('./pull-request-edits');
 const planParser = require('./public/plan-parser');
 const sessionConfig = require('./public/session-config');
@@ -2118,6 +2119,11 @@ async function renderProjectPullRequestMarkdown(projectId, folderPath, opts) {
   return pullRequestDetail.renderMarkdown(requireAttachedFolder(projectId, folderPath).path, opts || {});
 }
 
+/** What the list's search looks through: descriptions, comments, changed files' paths (pull-request-search.js). */
+async function projectPullRequestTexts(projectId, folderPath, opts) {
+  return pullRequestSearch.texts(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+
 /** Title, description, base, comments, reviews, labels…: pull-request-edits.js allows only its own kinds. */
 async function editProjectPullRequest(projectId, folderPath, params) {
   return pullRequestEdits.edit(requireAttachedFolder(projectId, folderPath).path, params || {});
@@ -2138,6 +2144,7 @@ module.exports = {
   projectPullRequests, projectPullRequestsPage, projectPullRequestFiles, runProjectPullRequestAction,
   projectPullRequestConversation, projectPullRequestCommits, projectPullRequestCommitFiles, projectPullRequestChecks,
   projectPullRequestJobLog, projectPullRequestViewed, projectPullRequestBranches, projectPullRequestCandidates, renderProjectPullRequestMarkdown,
+  projectPullRequestTexts,
   editProjectPullRequest,
   syncProjectBrief, syncAllProjectBriefs, saveBrief, createProjectFile, addProjectFiles, addProjectFileBytes, listAddedFiles, listRecentProjectFiles,
   launchContext, mergeAddDirs, worktreeParentFor,

@@ -731,6 +731,9 @@ function prdPaintConversation(ctx, slot) {
   slot.querySelector('[data-act="tab-retry"]')?.addEventListener('click', () => prdLoad(ctx, 'conversation'));
   const conv = d.conversation;
   if (!conv?.pr) return;
+  // The list's search: its words marked in the description and every comment.
+  const search = typeof prSearchOf === 'function' ? prSearchOf(ctx.state) : null;
+  if (search?.terms.length && typeof prMarkIn === 'function') prMarkIn(slot.querySelectorAll('.pr-msg-body.pr-md'), search);
   prWireLinks(slot);
   const head = conv.pr;
   const messages = new Map([['description', { ...head, kind: 'description' }]]);

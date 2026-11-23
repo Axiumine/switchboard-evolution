@@ -153,6 +153,7 @@ contextBridge.exposeInMainWorld('api', {
   getPullRequestBranches: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-branches', id, folderPath, opts),
   getPullRequestCandidates: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-candidates', id, folderPath, opts),
   renderPullRequestMarkdown: (id, folderPath, opts) => ipcRenderer.invoke('render-pull-request-markdown', id, folderPath, opts),
+  getPullRequestTexts: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-texts', id, folderPath, opts),
   editPullRequest: (id, folderPath, params) => ipcRenderer.invoke('edit-pull-request', id, folderPath, params),
   listEnvFiles: (folderPath) => ipcRenderer.invoke('list-env-files', folderPath),
   saveProjectBrief: (id, content) => ipcRenderer.invoke('save-project-brief', id, content),

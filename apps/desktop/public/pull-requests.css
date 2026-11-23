@@ -4,8 +4,9 @@
    Worktrees' notices (.wt-notice) and the diff lines of Changes (.git-diff). */
 
 .pr-shell { gap: 12px; }
-.pr-heading { min-width: 0; }
-.pr-top-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pr-heading { flex: 0 0 auto; max-width: 45%; min-width: 0; }
+/* The toolbar takes the room the title leaves, so the search box can grow without pushing the buttons to a second line. */
+.pr-top-actions { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .pr-top-actions #pr-remote-slot:empty { display: none; }
 .pr-remote { max-width: 260px; }
 
@@ -39,6 +40,42 @@
   cursor: pointer;
 }
 .pr-filter-reset:hover { background: rgba(255,255,255,0.06); }
+
+/* The search box, first in the toolbar (as the Worktrees view's). */
+.pr-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 200px;
+  min-width: 150px;
+  max-width: 300px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  color: #6f6f84;
+}
+.pr-search:focus-within { border-color: rgb(from var(--accent) r g b / 0.4); }
+.pr-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #d0d0e0;
+  font: inherit;
+  font-size: 11.5px;
+}
+.pr-search input::placeholder { color: #6f6f84; }
+.pr-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* The search's words wherever they show: titles, messages, files. */
+mark.pr-hit { padding: 0 1px; border-radius: 2px; background: rgba(250, 204, 21, 0.3); color: inherit; }
+.pr-search-status { display: flex; align-items: center; gap: 8px; min-height: 18px; color: #8a8aa2; font-size: 11.5px; }
+.pr-search-status.is-error { color: #e0a0b0; }
+.pr-found { color: #c9b45a; }
+.pr-file.is-hit { background: rgba(250, 204, 21, 0.05); }
 
 .pr-list { display: flex; flex-direction: column; gap: 10px; }
 .pr-rows {
@@ -234,7 +271,9 @@
 @container (max-width: 560px) {
   .git-tab-body.pr-tab-body { padding: 14px 16px 20px; }
   .pr-shell .git-tab-top { flex-direction: column; align-items: stretch; }
-  .pr-top-actions { justify-content: flex-start; }
+  .pr-heading { max-width: none; }
+  .pr-top-actions { flex: 0 0 auto; justify-content: flex-start; }
+  .pr-search { flex-basis: 100%; max-width: none; }
   .pr-row { grid-template-columns: 12px 18px minmax(0, 1fr); }
   .pr-actions { grid-column: 3; justify-content: flex-start; }
   .pr-branches { max-width: 100%; }

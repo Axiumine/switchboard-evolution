@@ -265,7 +265,7 @@ async function resolveRepo(dir, remoteName) {
 
 // --- Listing ---
 
-const PR_FIELDS = `id number title url state isDraft createdAt closedAt mergedAt
+const PR_FIELDS = `id number title url state isDraft createdAt updatedAt closedAt mergedAt
         author { login }
         headRefName headRefOid baseRefName isCrossRepository
         additions deletions changedFiles mergeable reviewDecision viewerDidAuthor
@@ -322,6 +322,8 @@ function normalizePullRequest(node) {
     state: node.state, // OPEN | CLOSED | MERGED
     isDraft: !!node.isDraft,
     createdAt: node.createdAt || null,
+    // What the search has read of it is read again once this moves on (pull-request-search.js).
+    updatedAt: node.updatedAt || null,
     closedAt: node.closedAt || null,
     mergedAt: node.mergedAt || null,
     author: (node.author && node.author.login) || 'ghost',

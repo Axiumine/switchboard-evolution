@@ -20,6 +20,8 @@ export type PullRequest = {
   state: PullRequestState;
   isDraft: boolean;
   createdAt: string | null;
+  /** When GitHub last changed it. From a newer desktop only. */
+  updatedAt?: string | null;
   closedAt: string | null;
   mergedAt: string | null;
   author: string;

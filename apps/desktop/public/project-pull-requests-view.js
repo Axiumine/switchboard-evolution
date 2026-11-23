@@ -6,6 +6,9 @@
 // Convert to draft (or Ready for review) and Close; each of them asks first.
 // Before Merge, icons copy the pull request's address and open its page on
 // GitHub: in a panel, in a window of its own (web-page-view.js), or in the browser.
+// Over the list, before the states filter, a search box (titles,
+// descriptions, comments and the changed files' paths, *.sql as a pattern;
+// pull-request-search.js).
 // gh runs in main (pull-requests.js); this file paints and asks.
 
 const projectPullRequestsTabState = new Map();
@@ -40,6 +43,11 @@ const PR_ICONS = {
   merged: prSvg('<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>'),
   filter: prSvg('<path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/>'),
 };
+// Pull requests whose texts one request reads, and how many requests at once.
+const PR_TEXTS_BATCH = 20;
+const PR_TEXTS_PARALLEL = 2;
+// With the search on, a page of closed and merged ones holds this many.
+const PR_NARROWED_PAGE_SIZE = 100;
 
 // One sequence for every request this view makes, so an answer that arrives
 // after a newer request (or after the remote or the filter changed) is dropped.
@@ -53,6 +61,8 @@ function prTabState(projectId) {
       // The filter's choice, kept while the app runs (not saved): every start
       // shows the open pull requests, drafts included.
       filter: [...PR_DEFAULT_FILTER],
+      // The search box's text: kept while the app runs, as the filter is.
+      search: '',
       repos: new Map(), // repository path → its pull requests (prRepoData)
       notice: null,
       dialogOpen: false,
@@ -84,6 +94,9 @@ function prRepoData(remote = null) {
     drafts: new Map(),    // editor key → its text, kept while it is open
     titleEdit: null,      // { number, busy, error } while a title is edited in place
     listPending: false,   // a repaint waiting for the focus to leave a field
+    // What the search reads per pull request (pull-request-search.js in main):
+    // number → { updatedAt, body, comments, files, truncated }.
+    texts: { map: new Map(), pending: new Set(), failed: new Set(), running: 0, error: null },
   };
 }
 
@@ -190,8 +203,70 @@ function prWordList(words) {
   return words.length > 1 ? `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}` : (words[0] || '');
 }
 
-function prEmptyText(filter) {
-  return `No ${prWordList(PR_FILTERS.filter(([key]) => (filter || []).includes(key)).map(([, label]) => label.toLowerCase()))} pull requests`;
+function prEmptyText(filter, { search = '' } = {}) {
+  const states = prWordList(PR_FILTERS.filter(([key]) => (filter || []).includes(key)).map(([, label]) => label.toLowerCase()));
+  const matching = String(search || '').trim() ? ` matching “${String(search).trim()}”` : '';
+  return `No ${states} pull requests${matching}`;
+}
+
+// --- Search (pull-request-search.js has the pure parts) ---
+
+let prSearchCache = { raw: null, parsed: { raw: '', terms: [] } };
+
+/** The search box's text, parsed once per text. */
+function prSearchOf(state) {
+  const raw = String(state?.search || '');
+  if (typeof prParseSearch !== 'function') return { raw: '', terms: [] };
+  if (prSearchCache.raw !== raw) prSearchCache = { raw, parsed: prParseSearch(raw) };
+  return prSearchCache.parsed;
+}
+
+/**
+ * What the list shows for the states filter and the search: { items,
+ * candidates (what the search looks through), search, where (number → where
+ * the words were found), read (how many candidates' texts have come), unread
+ * (how many are still to come), narrowed }.
+ */
+function prShownView(data, state) {
+  const candidates = prMergeLists(data.open?.items, data.page?.items, state?.filter || PR_DEFAULT_FILTER);
+  const search = prSearchOf(state);
+  const narrowed = search.terms.length > 0;
+  if (!search.terms.length) return { items: candidates, candidates, search, where: null, read: 0, unread: 0, narrowed };
+  const texts = data.texts || { map: new Map(), failed: new Set() };
+  const where = new Map();
+  const items = [];
+  let read = 0;
+  let unread = 0;
+  for (const pr of candidates) {
+    const known = texts.map.get(pr.number) || null;
+    if (known) read++;
+    else if (!texts.failed.has(pr.number)) unread++;
+    const result = prSearchMatch(pr, known, search);
+    if (result.match) { items.push(pr); where.set(pr.number, result.where); }
+  }
+  return { items, candidates, search, where, read, unread, narrowed };
+}
+
+/** The line over the rows while the search runs: how far it has read, or why it stopped. */
+function prSearchStatusHtml(data, view) {
+  if (!view || !view.search?.terms.length) return '';
+  const texts = data.texts || { failed: new Set() };
+  const total = view.candidates.length;
+  const failed = view.candidates.filter(pr => texts.failed.has(pr.number) && !texts.map?.has(pr.number)).length;
+  let inner;
+  if (failed && texts.error) {
+    inner = `<span>${escapeHtml(`${prPlural(failed, 'pull request')} could not be searched: ${texts.error}`)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="texts-retry">Retry</button>`;
+  } else if (view.unread) {
+    inner = `<span class="git-loading-dot"></span><span>Searching descriptions, comments and files: ${view.read} of ${total} read</span>`;
+  } else {
+    inner = `<span>${view.items.length} of ${prPlural(total, 'pull request')} match</span>`;
+  }
+  return `<div class="pr-search-status${failed && texts.error ? ' is-error' : ''}" id="pr-search-status" role="status">${inner}</div>`;
+}
+
+/** What makes the rows what they are (not the status line): the list is painted again only when it changes. */
+function prViewKey(view) {
+  return view.items.map(pr => `${pr.number}:${view.where ? prSearchWhereText(view.where.get(pr.number)) : ''}`).join(',');
 }
 
 /** "closed", "merged" or "closed and merged", for the pages' footer. */
@@ -332,7 +407,7 @@ function prTitleEditHtml(pr, edit) {
   return `<span class="pr-title-edit"><input type="text" class="pr-title-input" value="${prAttr(edit.text)}" maxlength="256" spellcheck="true" aria-label="Title of #${pr.number}" title="Enter saves, Esc cancels"${off}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-title-save" data-act="title-save"${off}>${edit.busy ? '<span class="gg-dialog-spinner" aria-hidden="true"></span>' : PICONS.check(12)}<span>Save</span></button>${edit.error ? `<span class="pr-title-error" role="alert">${escapeHtml(edit.error)}</span>` : ''}</span>`;
 }
 
-function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleEdit = null } = {}) {
+function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleEdit = null, search = null, where = null } = {}) {
   const status = prStatus(pr);
   const block = prMergeBlock(pr, repo);
   const branches = `${pr.head} → ${pr.base}`;
@@ -344,7 +419,13 @@ function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleE
   const actions = link + (pr.state === 'OPEN' ? `
           <span class="pr-merge-wrap"${block ? ` title="${prAttr(block)}"` : ''}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-merge-btn" data-act="merge"${block ? ' disabled' : ''}>${PR_ICONS.merged(12)}<span>Merge</span></button></span>` : '') + more;
   const pencil = pr.viewerCanUpdate ? `<button type="button" class="pr-title-pencil" data-act="title-edit" title="Edit title" aria-label="Edit the title of #${pr.number}">${PICONS.pencil(12)}</button>` : '';
-  const title = titleEdit ? prTitleEditHtml(pr, titleEdit) : `<span class="pr-title">${escapeHtml(pr.title)}</span>${pencil}`;
+  const searching = !!(search && search.terms && search.terms.length && typeof prMarkHtml === 'function');
+  const titleText = searching ? prMarkHtml(pr.title, search) : escapeHtml(pr.title);
+  const title = titleEdit ? prTitleEditHtml(pr, titleEdit) : `<span class="pr-title">${titleText}</span>${pencil}`;
+  // Where the search found its words beyond the title: the files by name in the tooltip.
+  const found = searching && where ? prSearchWhereText(where) : '';
+  const foundTip = found && where.files.length ? `Files: ${where.files.slice(0, 12).join(', ')}${where.files.length > 12 ? '…' : ''}` : '';
+  const foundHtml = found ? `<span class="pr-found"${foundTip ? ` title="${prAttr(foundTip)}"` : ''}>Found in ${escapeHtml(found)}</span>` : '';
   return `
     <div class="pr-item${expanded ? ' open' : ''}" data-pr="${pr.number}">
       <div class="pr-row" data-act="toggle" role="button" tabindex="0" aria-expanded="${expanded}">
@@ -352,7 +433,7 @@ function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleE
         <span class="pr-state pr-state--${status}" title="${PR_STATE_LABELS[status]}">${PR_ICONS[status](15)}</span>
         <div class="pr-main">
           <div class="pr-line">${title}${prBadgesHtml(pr)}</div>
-          <div class="pr-meta"><span class="pr-number">#${pr.number}</span><span>${escapeHtml(prWhenText(pr, now))} by ${escapeHtml(pr.author)}</span><span class="pr-branches mono" title="${prAttr(branches)}">${escapeHtml(branches)}</span><span class="pr-stats mono"><span class="pr-add">+${pr.additions || 0}</span> <span class="pr-del">−${pr.deletions || 0}</span></span><span>${prPlural(pr.changedFiles || 0, 'file')}</span></div>
+          <div class="pr-meta"><span class="pr-number">#${pr.number}</span><span>${escapeHtml(prWhenText(pr, now))} by ${escapeHtml(pr.author)}</span><span class="pr-branches mono" title="${prAttr(branches)}">${escapeHtml(branches)}</span><span class="pr-stats mono"><span class="pr-add">+${pr.additions || 0}</span> <span class="pr-del">−${pr.deletions || 0}</span></span><span>${prPlural(pr.changedFiles || 0, 'file')}</span>${foundHtml}</div>
         </div>
         <div class="pr-actions">${actions}</div>
       </div>
@@ -360,21 +441,23 @@ function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleE
     </div>`;
 }
 
-function prFooterHtml(data, filter) {
+function prFooterHtml(data, filter, { narrowed = false } = {}) {
   const states = prPageStates(filter);
   if (!states.length) return '';
   const page = data.page;
   const words = prPagedWords(states);
+  // With the search on, the footer counts what was looked through, not what shows.
+  const size = narrowed ? PR_NARROWED_PAGE_SIZE : PR_PAGE_SIZE;
   if (page.error) {
     return `<div class="pr-footer is-error"><span>${escapeHtml(page.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="page-retry">Retry</button></div>`;
   }
   if (!page.loaded) return `<div class="pr-footer"><span class="git-loading-dot"></span><span>Reading ${escapeHtml(words)} pull requests…</span></div>`;
-  const shown = `${page.items.length} of ${page.totalCount} ${words} shown`;
+  const shown = `${page.items.length} of ${page.totalCount} ${words} ${narrowed ? 'read' : 'shown'}`;
   if (!page.hasNextPage) return page.totalCount ? `<div class="pr-footer"><span>${escapeHtml(shown)}</span></div>` : '';
   return `
     <div class="pr-footer">
       <span>${escapeHtml(shown)}</span>
-      <button type="button" class="ws-btn ws-btn--sm pr-more-btn" data-act="page-more"${page.loading ? ' disabled' : ''}>${page.loading ? 'Loading…' : `Load ${PR_PAGE_SIZE} more`}</button>
+      <button type="button" class="ws-btn ws-btn--sm pr-more-btn" data-act="page-more"${page.loading ? ' disabled' : ''}>${page.loading ? 'Loading…' : `Load ${size} more`}</button>
     </div>`;
 }
 
@@ -385,16 +468,23 @@ function prTitleEditOf(data, pr) {
   return { text: data.drafts?.get(`title:${pr.number}`) ?? pr.title, busy: !!edit.busy, error: edit.error || '' };
 }
 
-/** The list for one repository's data and the filter: rows, an empty line, the pages' footer. */
-function prListHtml(data, filter, now = new Date()) {
-  const items = prMergeLists(data.open?.items, data.page.items, filter);
+/**
+ * The list for one repository's data and the filter: the search's line, rows,
+ * an empty line, the pages' footer. `view` (prShownView) narrows it by the
+ * search; without one every pull request of the filter's states shows.
+ */
+function prListHtml(data, filter, now = new Date(), view = null) {
+  const items = view ? view.items : prMergeLists(data.open?.items, data.page.items, filter);
+  const search = view && view.search?.terms.length ? view.search : null;
   const repo = data.open?.repo || null;
   const truncated = data.open?.truncated ? '<div class="pr-footer">Only the newest 1000 open pull requests are listed.</div>' : '';
   const waitingForPage = prPageStates(filter).length && !data.page.loaded;
+  const waitingForTexts = !!(view && view.unread);
+  const empty = prEmptyText(filter, { search: search ? search.raw : '' });
   const rows = items.length
-    ? `<div class="pr-rows">${items.map(pr => prRowHtml(pr, { expanded: data.expanded.has(pr.number), repo, now, titleEdit: prTitleEditOf(data, pr) })).join('')}</div>`
-    : (waitingForPage ? '' : `<div class="git-empty-state"><div class="git-empty-title">${escapeHtml(prEmptyText(filter))}</div></div>`);
-  return `${rows}${truncated}${prFooterHtml(data, filter)}`;
+    ? `<div class="pr-rows">${items.map(pr => prRowHtml(pr, { expanded: data.expanded.has(pr.number), repo, now, titleEdit: prTitleEditOf(data, pr), search, where: view?.where?.get(pr.number) || null })).join('')}</div>`
+    : (waitingForPage || waitingForTexts ? '' : `<div class="git-empty-state"><div class="git-empty-title">${escapeHtml(empty)}</div></div>`);
+  return `${prSearchStatusHtml(data, view)}${rows}${truncated}${prFooterHtml(data, filter, { narrowed: !!view?.narrowed })}`;
 }
 
 // --- Files and diffs ---
@@ -433,7 +523,7 @@ function prFilesToolsHtml(view) {
  * An open pull request's changed files, as a tree or a list. Every diff starts
  * closed: a file opens its own, Expand all opens them all.
  */
-function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = new Set(), viewed = null } = {}) {
+function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = new Set(), viewed = null, search = null } = {}) {
   if (!entry || entry.loading) return '<div class="pr-files-empty"><span class="git-loading-dot"></span>Reading the changed files…</div>';
   if (entry.error) {
     return `<div class="pr-files-empty is-error"><span>${escapeHtml(entry.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="files-retry">Retry</button></div>`;
@@ -443,13 +533,16 @@ function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = n
   const insertions = files.reduce((n, f) => n + (f.insertions || 0), 0);
   const deletions = files.reduce((n, f) => n + (f.deletions || 0), 0);
   const tree = view === 'tree';
+  // The search's words marked in the names, a file a pattern found marked whole.
+  const searching = !!(search && search.terms && search.terms.length && typeof prMarkHtml === 'function');
+  const mark = (text) => (searching ? prMarkHtml(text, search) : escapeHtml(text));
   const rows = prFileRows(files, view, closedFolders).map((row) => {
     if (row.kind === 'folder') {
       return `
       <button type="button" class="pr-folder" data-folder="${prAttr(row.key)}" aria-expanded="${!row.collapsed}" style="--depth:${row.depth}" title="${prAttr(row.key)}">
         <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
         <span class="pr-folder-icon">${PICONS.folder(12)}</span>
-        <span class="pr-folder-name mono">${escapeHtml(row.name)}</span>
+        <span class="pr-folder-name mono">${mark(row.name)}</span>
         <span class="pr-folder-count">${row.count}</span>
       </button>`;
     }
@@ -461,17 +554,19 @@ function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = n
     const icon = typeof fileIconHtml === 'function' ? fileIconHtml(name) : '';
     const title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
     // In the tree the folders say where a file is; the list says it after the name.
-    const where = tree ? '' : escapeHtml(dir);
+    const where = tree ? '' : mark(dir);
+    const hit = searching && prFileHit(file.path, search);
+    const byPattern = hit && search.terms.some(t => t.kind === 'glob' && prGlobMatches(t, file.path));
     const from = file.oldPath ? ` <span class="pr-file-from">from ${escapeHtml(file.oldPath)}</span>` : '';
     // A pull request's files (not a commit's) can be marked as viewed, as on GitHub.
     const seen = viewed ? viewed[file.path] : null;
     const box = viewed ? `<label class="pr-viewed${seen === 'DISMISSED' ? ' is-dismissed' : ''}" title="${seen === 'DISMISSED' ? 'Changed since you viewed it' : 'Mark as viewed'}"><input type="checkbox" data-viewed="${file.index}"${seen === 'VIEWED' ? ' checked' : ''}><span>Viewed</span></label>` : '';
     const button = `
-      <button type="button" class="pr-file${tree ? ' tree' : ''}${isOpen ? ' open' : ''}${seen === 'VIEWED' ? ' is-viewed' : ''}" data-file="${file.index}" aria-expanded="${isOpen}" style="--depth:${row.depth}" title="${prAttr(title)}">
+      <button type="button" class="pr-file${tree ? ' tree' : ''}${isOpen ? ' open' : ''}${seen === 'VIEWED' ? ' is-viewed' : ''}${hit ? ' is-hit' : ''}" data-file="${file.index}" aria-expanded="${isOpen}" style="--depth:${row.depth}" title="${prAttr(title)}">
         <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
         <span class="git-file-code ${prAttr(file.status)}">${PR_STATUS_LETTERS[file.status] || 'M'}</span>
         ${icon}
-        <span class="pr-file-name mono">${escapeHtml(name)}</span>
+        <span class="pr-file-name mono">${byPattern ? prMarkHtml(name, search, { whole: true }) : mark(name)}</span>
         <span class="pr-file-dir">${where}${from}</span>
         <span class="pr-stats mono"><span class="pr-add">+${file.insertions || 0}</span> <span class="pr-del">−${file.deletions || 0}</span></span>
       </button>`;
@@ -645,6 +740,7 @@ function prPaint(project, state, body) {
       <div class="git-tab-top">
         <div class="pr-heading"><div class="git-tab-title">Pull Requests</div><div class="git-tab-path" id="pr-summary" title="${prAttr(repo.path)}">${escapeHtml(prSummaryText(data))}</div></div>
         <div class="pr-top-actions">
+          <label class="pr-search" title="Words in a title, a description or a comment, or in a changed file's path, never in the code. A word with * or ? is a pattern for the files: *.sql finds the pull requests that change a .sql file.">${PICONS.search(12)}<input type="search" id="pr-search" placeholder="Search titles, comments, files" autocomplete="off" spellcheck="false" aria-label="Search pull requests" value="${prAttr(state.search)}"></label>
           <span id="pr-remote-slot">${prRemoteSelectHtml(data)}</span>
           <div class="pr-filter-wrap">
             <button type="button" class="ws-btn ws-btn--sm pr-filter-btn${prIsDefaultFilter(state.filter) ? '' : ' is-on'}" id="pr-filter" aria-haspopup="true" aria-expanded="false" title="Which pull requests to show">${PR_ICONS.filter(12)}<span id="pr-filter-label">${escapeHtml(prFilterLabel(state.filter))}</span>${PICONS.chevronDown(10)}</button>
@@ -662,7 +758,29 @@ function prPaint(project, state, body) {
   body.onfocusout = () => setTimeout(() => { if (typeof prFlushPending === 'function') prFlushPending(project, state); }, 200);
   body.querySelector('#pr-refresh').onclick = () => prRefresh(project, state, repo.path, { notice: true });
   body.querySelector('#pr-filter').onclick = (e) => prOpenFilterMenu(project, state, body, e.currentTarget);
+  prWireSearch(project, state, body);
   prWireRemote(project, state, body, repo.path);
+}
+
+/** The search box: the list follows the text a moment after typing stops, at once on Enter; Escape empties it. */
+function prWireSearch(project, state, body) {
+  const input = body.querySelector('#pr-search');
+  if (!input) return;
+  let timer = null;
+  const apply = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (state.search === input.value) return;
+    state.search = input.value;
+    prPaintList(project, state, body);
+  };
+  input.oninput = () => { clearTimeout(timer); timer = setTimeout(apply, 200); };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); apply(); }
+    else if (e.key === 'Escape' && input.value) { e.preventDefault(); e.stopPropagation(); input.value = ''; apply(); }
+  };
+  // The field's own clear button.
+  input.addEventListener('search', apply);
 }
 
 function prWireRepoPicker(project, state, body) {
@@ -738,15 +856,30 @@ function prPaintList(project, state, body) {
     list.querySelector('[data-act="retry"]')?.addEventListener('click', () => prLoad(project, state, repo.path));
     return;
   }
-  list.innerHTML = prListHtml(data, state.filter);
-  const byNumber = new Map(prMergeLists(data.open.items, data.page.items, state.filter).map(pr => [pr.number, pr]));
+  const view = prShownView(data, state);
+  data.viewKey = prViewKey(view);
+  list.innerHTML = prListHtml(data, state.filter, new Date(), view);
+  const byNumber = new Map(view.items.map(pr => [pr.number, pr]));
   list.querySelectorAll('.pr-item').forEach((item) => {
     const pr = byNumber.get(Number(item.dataset.pr));
     if (pr) prWireItem(project, state, repo.path, item, pr);
   });
   list.querySelector('[data-act="page-more"]')?.addEventListener('click', () => prLoadPage(project, state, repo.path, { more: true }));
   list.querySelector('[data-act="page-retry"]')?.addEventListener('click', () => prLoadPage(project, state, repo.path, { more: data.page.loaded }));
+  prWireTextsRetry(project, state, body, list);
   scroller.scrollTop = scrollTop;
+  prSearchEnsure(project, state, repo.path, view);
+}
+
+function prWireTextsRetry(project, state, body, list) {
+  list.querySelector('[data-act="texts-retry"]')?.addEventListener('click', () => {
+    const repo = prSelectedRepo(state);
+    if (!repo) return;
+    const texts = prRepoState(project.id, state, repo.path).texts;
+    texts.failed.clear();
+    texts.error = null;
+    prPaintList(project, state, body);
+  });
 }
 
 /** The icons before Merge (prLinkToolsHtml). */
@@ -814,7 +947,22 @@ function prToggle(project, state, repoPath, item, pr) {
   const detail = item.querySelector('.pr-detail');
   detail.hidden = !open;
   if (!open) { detail.innerHTML = ''; return; }
+  prOpenOnHits(data, state, pr);
   prPaintDetail(project, state, repoPath, item, pr);
+}
+
+/**
+ * Opened while the search is on: the tab where its words are, so they show
+ * marked: Conversation for the description and the comments, Files changed
+ * for the files. Not kept as the tab to open next time.
+ */
+function prOpenOnHits(data, state, pr) {
+  const search = prSearchOf(state);
+  if (!search.terms.length || typeof prdState !== 'function') return;
+  const where = prSearchMatch(pr, data.texts?.map.get(pr.number) || null, search).where;
+  const d = prdState(data, pr);
+  if (where.body || where.comments) d.tab = 'conversation';
+  else if (where.files.length) d.tab = 'files';
 }
 
 /** What is under an open row: the four tabs (pull-request-detail-view.js), or the files alone without it. */
@@ -842,6 +990,7 @@ function prPaintFiles(project, state, repoPath, item, pr, slot) {
     openPaths,
     closedFolders: data.closedFolders.get(key),
     viewed,
+    search: prSearchOf(state),
     repaint: () => prPaintDetail(project, state, repoPath, item, pr),
     retry: () => { data.files.delete(key); prPaintDetail(project, state, repoPath, item, pr); },
     onView: () => prRepaint(project, state, repoPath),
@@ -854,8 +1003,8 @@ function prPaintFiles(project, state, repoPath, item, pr, slot) {
  * folder closes, Expand all and Collapse all, Tree and List (`onView`), and
  * the Viewed boxes (`onViewed`). Used by Files changed and by each commit.
  */
-function prWireFiles(slot, entry, { openPaths, closedFolders, viewed = null, repaint, retry, onView, onViewed = null }) {
-  slot.innerHTML = prFilesHtml(entry, { open: openPaths, view: prFileView(), closedFolders, viewed });
+function prWireFiles(slot, entry, { openPaths, closedFolders, viewed = null, search = null, repaint, retry, onView, onViewed = null }) {
+  slot.innerHTML = prFilesHtml(entry, { open: openPaths, view: prFileView(), closedFolders, viewed, search });
   slot.querySelector('[data-act="files-retry"]')?.addEventListener('click', () => retry?.());
   const files = entry.files || [];
   const setOpen = (button, open) => {
@@ -919,7 +1068,9 @@ function prRepaintItem(project, state, repoPath, number) {
   const pr = typeof prFindPr === 'function' ? prFindPr(data, number) : null;
   if (!item || !pr) return null;
   const holder = document.createElement('div');
-  holder.innerHTML = prRowHtml(pr, { expanded: data.expanded.has(number), repo: data.open?.repo || null, titleEdit: prTitleEditOf(data, pr) }).trim();
+  const search = prSearchOf(state);
+  const where = search.terms.length ? prSearchMatch(pr, data.texts?.map.get(number) || null, search).where : null;
+  holder.innerHTML = prRowHtml(pr, { expanded: data.expanded.has(number), repo: data.open?.repo || null, titleEdit: prTitleEditOf(data, pr), search: search.terms.length ? search : null, where }).trim();
   const fresh = holder.firstElementChild;
   item.replaceWith(fresh);
   prWireItem(project, state, repoPath, fresh, pr);
@@ -1150,7 +1301,9 @@ async function prLoadPage(project, state, repoPath, { more = false, refill = 0 }
   page.loading = true;
   page.error = null;
   prRepaint(project, state, repoPath);
-  const first = refill ? Math.min(100, Math.max(PR_PAGE_SIZE, refill)) : PR_PAGE_SIZE;
+  const narrowed = prSearchOf(state).terms.length > 0;
+  const size = narrowed ? PR_NARROWED_PAGE_SIZE : PR_PAGE_SIZE;
+  const first = refill ? Math.min(100, Math.max(size, refill)) : size;
   const opts = prRemoteOpts(data, { states, first });
   if (more) opts.after = page.endCursor;
   const result = await prApi('getPullRequestsPage', project.id, repoPath, opts);
@@ -1184,9 +1337,69 @@ async function prLoadFiles(project, state, repoPath, pr) {
   prRepaintDetail(project, state, repoPath, pr);
 }
 
+/**
+ * The search needs the texts of the pull requests it looks through: those
+ * never read, or changed on GitHub since, PR_TEXTS_BATCH a request, at most
+ * PR_TEXTS_PARALLEL requests at once; each answer asks for the next ones.
+ */
+function prSearchEnsure(project, state, repoPath, view) {
+  if (!view || !view.search?.terms.length) return;
+  const data = prRepoState(project.id, state, repoPath);
+  const texts = data.texts;
+  const need = view.candidates
+    .filter(pr => !texts.pending.has(pr.number) && !texts.failed.has(pr.number) && prTextsStale(texts.map.get(pr.number), pr))
+    .map(pr => pr.number);
+  while (texts.running < PR_TEXTS_PARALLEL && need.length) prReadTexts(project, state, repoPath, need.splice(0, PR_TEXTS_BATCH));
+}
+
+async function prReadTexts(project, state, repoPath, numbers) {
+  const data = prRepoState(project.id, state, repoPath);
+  const texts = data.texts;
+  texts.running++;
+  for (const n of numbers) texts.pending.add(n);
+  const result = await prApi('getPullRequestTexts', project.id, repoPath, prRemoteOpts(data, { numbers }));
+  texts.running--;
+  for (const n of numbers) texts.pending.delete(n);
+  if (state.repos.get(repoPath) !== data) return;
+  if (result?.ok) {
+    const got = new Set();
+    for (const item of result.items || []) { texts.map.set(item.number, item); got.add(item.number); }
+    const missing = numbers.filter(n => !got.has(n));
+    for (const n of missing) texts.failed.add(n);
+    if (missing.length) texts.error = 'GitHub did not give them.';
+  } else {
+    for (const n of numbers) texts.failed.add(n);
+    texts.error = result?.error || 'GitHub could not be read.';
+  }
+  prAfterTexts(project, state, repoPath);
+}
+
+/** After texts came: the rows again if what shows changed, else only the search's line; then the next ones. */
+function prAfterTexts(project, state, repoPath) {
+  const body = prActiveBody(project);
+  const list = body?.querySelector('#pr-list');
+  if (!list || state.selectedRepo !== repoPath) return;
+  const data = prRepoState(project.id, state, repoPath);
+  const view = prShownView(data, state);
+  if (prViewKey(view) !== data.viewKey) { prPaintList(project, state, body); return; }
+  const line = list.querySelector('#pr-search-status');
+  if (line) {
+    line.outerHTML = prSearchStatusHtml(data, view);
+    prWireTextsRetry(project, state, body, list);
+  } else if (view.search.terms.length) {
+    prPaintList(project, state, body);
+    return;
+  }
+  prSearchEnsure(project, state, repoPath, view);
+}
+
 async function prRefresh(project, state, repoPath, { notice = false } = {}) {
   if (notice) {
     prSetNotice(project, state, { kind: 'busy', text: 'Reading pull requests…' });
+    // The search tries again the pull requests it could not read.
+    const texts = prRepoState(project.id, state, repoPath).texts;
+    texts.failed.clear();
+    texts.error = null;
     // What the open pull requests' tabs read is read again when they are painted.
     for (const d of prRepoState(project.id, state, repoPath).detail.values()) {
       for (const what of ['conversation', 'commits', 'checks', 'viewed']) if (d[what]) d[what].loadedAt = 0;
@@ -1343,6 +1556,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     PR_FILTERS, PR_DEFAULT_FILTER, PR_PAGE_SIZE,
     prStatus, prVisible, prPageStates, prMergeLists, prFilterLabel, prIsDefaultFilter, prToggleFilter, prEmptyText,
+    prSearchOf, prShownView, prSearchStatusHtml, prViewKey, prSearchEnsure,
     prCanEdit, prMergeBlock, prRowMenuItems, prWebUrl, prLinkToolsHtml, prWebTitle, prFileRows, prFileView, prFilesToolsHtml, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
     prTitleEditHtml, prTitleEditOf,
     prPatchHtml, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,

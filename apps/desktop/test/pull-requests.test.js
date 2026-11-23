@@ -34,7 +34,8 @@ function node(number, extra = {}) {
   return {
     number, title: `Change ${number}`, url: `https://github.com/acme/widgets/pull/${number}`,
     state: 'OPEN', isDraft: false, createdAt: `2026-01-${String(30 - number).padStart(2, '0')}T10:00:00Z`,
-    closedAt: null, mergedAt: null, author: { login: 'dev-one' },
+    updatedAt: '2026-02-01T08:00:00Z', closedAt: null, mergedAt: null,
+    author: { login: 'dev-one' },
     headRefName: `feature-${number}`, headRefOid: HEAD, baseRefName: 'main', isCrossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, viewerDidAuthor: true,
     id: `PR_${number}`, viewerCanUpdate: true, viewerCanReopen: false,
@@ -129,13 +130,16 @@ test('every open pull request is read, 100 at a time, through gh api graphql', a
   });
   assert.deepEqual(result.items[100], {
     id: 'PR_101', number: 101, title: 'Change 101', url: 'https://github.com/acme/widgets/pull/101', state: 'OPEN', isDraft: true,
-    createdAt: result.items[100].createdAt, closedAt: null, mergedAt: null, author: 'dev-one',
+    createdAt: result.items[100].createdAt, updatedAt: '2026-02-01T08:00:00Z', closedAt: null, mergedAt: null,
+    author: 'dev-one',
     head: 'feature-101', headOid: HEAD, base: 'main', crossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, checks: 'SUCCESS', viewerDidAuthor: true,
     viewerCanUpdate: true, viewerCanReopen: false,
   });
   // The pencil and Reopen need these; what GitHub computes per pull request stays out of the list.
   assert.match(calls[0].input.query, /viewerCanUpdate viewerCanReopen/);
+  // The search reads a pull request's texts again once it moves on.
+  assert.match(calls[0].input.query, /createdAt updatedAt closedAt/);
   assert.doesNotMatch(calls[0].input.query, /mergeStateStatus|viewerCanUpdateBranch|totalCommentsCount/);
 });
 
