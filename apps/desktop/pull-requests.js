@@ -262,10 +262,12 @@ async function resolveRepo(dir, remoteName) {
 
 // --- Listing ---
 
-const PR_FIELDS = `number title url state isDraft createdAt closedAt mergedAt
+const PR_FIELDS = `id number title url state isDraft createdAt closedAt mergedAt
         author { login }
         headRefName headRefOid baseRefName isCrossRepository
         additions deletions changedFiles mergeable reviewDecision viewerDidAuthor
+        viewerCanUpdate viewerCanClose viewerCanReopen viewerCanUpdateBranch mergeStateStatus totalCommentsCount
+        allCommits: commits { totalCount }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
 const LIST_QUERY = `query($owner: String!, $repo: String!, $states: [PullRequestState!], $first: Int!, $after: String) {
@@ -282,7 +284,12 @@ const LIST_QUERY = `query($owner: String!, $repo: String!, $states: [PullRequest
   }
 }`;
 
-async function graphql(target, query, variables, timeoutMs = READ_TIMEOUT_MS) {
+/**
+ * One GraphQL request through gh, `{ ok, data }` or an error result. A read
+ * starts at `repository` and fails without one; a mutation passes
+ * `{ repository: false }`.
+ */
+async function graphql(target, query, variables, timeoutMs = READ_TIMEOUT_MS, { repository = true } = {}) {
   let result;
   try {
     result = await runGh(['api', 'graphql', '--hostname', target.host, '--input', '-'], {
@@ -299,13 +306,14 @@ async function graphql(target, query, variables, timeoutMs = READ_TIMEOUT_MS) {
   }
   if (result.code !== 0) return ghFailure(result, target);
   if (!json || !json.data) return { error: 'gh answered with something that is not GitHub data', code: 'gh-failed' };
-  if (!json.data.repository) return ghFailure({ code: 1, stderr: 'Could not resolve to a Repository' }, target);
+  if (repository && !json.data.repository) return ghFailure({ code: 1, stderr: 'Could not resolve to a Repository' }, target);
   return { ok: true, data: json.data };
 }
 
 function normalizePullRequest(node) {
   const commit = node.commits && node.commits.nodes && node.commits.nodes[0] && node.commits.nodes[0].commit;
   return {
+    id: node.id || '',
     number: node.number,
     title: node.title || '',
     url: node.url || '',
@@ -326,6 +334,14 @@ function normalizePullRequest(node) {
     reviewDecision: node.reviewDecision || null, // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED
     checks: (commit && commit.statusCheckRollup && commit.statusCheckRollup.state) || null,
     viewerDidAuthor: !!node.viewerDidAuthor,
+    // What GitHub lets this account do, and the counts of the detail's tabs.
+    viewerCanUpdate: !!node.viewerCanUpdate,
+    viewerCanClose: !!node.viewerCanClose,
+    viewerCanReopen: !!node.viewerCanReopen,
+    viewerCanUpdateBranch: !!node.viewerCanUpdateBranch,
+    mergeStateStatus: node.mergeStateStatus || 'UNKNOWN', // BEHIND | BLOCKED | CLEAN | DIRTY | DRAFT | HAS_HOOKS | UNSTABLE | UNKNOWN
+    comments: node.totalCommentsCount || 0,
+    commitCount: (node.allCommits && node.allCommits.totalCount) || 0,
   };
 }
 
@@ -441,10 +457,19 @@ async function files(dir, { remote = null, number } = {}) {
     return thrownFailure(err);
   }
   if (result.code !== 0) return ghFailure(result, target);
+  return { ok: true, number: n, ...parseFileLines(result.stdout) };
+}
+
+/**
+ * The files of a REST answer, one JSON object per line ({filename,
+ * previous_filename, status, additions, deletions, patch}), in History's shape.
+ * The patches stop at MAX_PATCH_BYTES all together, the files at MAX_FILES.
+ */
+function parseFileLines(stdout) {
   const list = [];
   let patchBytes = 0;
   let truncated = false;
-  for (const line of result.stdout.split('\n')) {
+  for (const line of String(stdout || '').split('\n')) {
     if (!line.trim()) continue;
     if (list.length >= MAX_FILES) { truncated = true; break; }
     let entry;
@@ -466,7 +491,7 @@ async function files(dir, { remote = null, number } = {}) {
       tooLarge,
     });
   }
-  return { ok: true, number: n, files: list, truncated };
+  return { files: list, truncated };
 }
 
 // --- Actions ---
@@ -519,10 +544,35 @@ async function runAction(dir, params = {}) {
   }
 }
 
+// --- For the sibling modules (pull-request-detail.js, pull-request-edits.js) ---
+
+/** Run gh through the runner init() set, so a test's fake gh answers for every module. */
+function run(args, opts) {
+  return runGh(args, opts);
+}
+
+/** One write at a time per key: a repository folder, as runAction uses it. False when one is running. */
+function claim(key) {
+  if (inFlight.has(key)) return false;
+  inFlight.add(key);
+  return true;
+}
+
+function release(key) {
+  inFlight.delete(key);
+}
+
+function info(...args) {
+  log.info(...args);
+}
+
 module.exports = {
   init,
   listOpen, listPage, files, runAction,
+  // for pull-request-detail.js and pull-request-edits.js
+  run, graphql, targetFor, ghFailure, thrownFailure, validNumber, validCursor, parseFileLines, claim, release, info,
+  READ_TIMEOUT_MS, FILES_TIMEOUT_MS, ACTION_TIMEOUT_MS,
   // exported for tests
-  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghFailure, ghEnv, locateGh,
+  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghEnv, locateGh,
   normalizePullRequest, repositoryInfo, LIST_QUERY, MERGE_METHODS, ACTIONS,
 };

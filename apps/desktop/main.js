@@ -743,6 +743,16 @@ ipcMain.handle('get-pull-requests', guarded((id, folderPath, opts) => projects.p
 ipcMain.handle('get-pull-requests-page', guarded((id, folderPath, opts) => projects.projectPullRequestsPage(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('get-pull-request-files', guarded((id, folderPath, opts) => projects.projectPullRequestFiles(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('run-pull-request-action', guarded((id, folderPath, params) => projects.runProjectPullRequestAction(id, String(folderPath || ''), params || {})));
+// What an open pull request shows: its conversation, commits, checks and viewed files, and what its editors need.
+ipcMain.handle('get-pull-request-conversation', guarded((id, folderPath, opts) => projects.projectPullRequestConversation(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-commits', guarded((id, folderPath, opts) => projects.projectPullRequestCommits(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-commit-files', guarded((id, folderPath, opts) => projects.projectPullRequestCommitFiles(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-checks', guarded((id, folderPath, opts) => projects.projectPullRequestChecks(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-job-log', guarded((id, folderPath, opts) => projects.projectPullRequestJobLog(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-viewed', guarded((id, folderPath, opts) => projects.projectPullRequestViewed(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-branches', guarded((id, folderPath, opts) => projects.projectPullRequestBranches(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-candidates', guarded((id, folderPath, opts) => projects.projectPullRequestCandidates(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('render-pull-request-markdown', guarded((id, folderPath, opts) => projects.renderProjectPullRequestMarkdown(id, String(folderPath || ''), opts || {})));
 // The .env files a folder has, and the ones the dialog ticks by default,
 // so a new worktree can be offered its repository's local environment.
 ipcMain.handle('list-env-files', guarded((folderPath) => ({

@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const git = require('./git');
 const gitGraphService = require('./git-graph-service');
 const pullRequests = require('./pull-requests');
+const pullRequestDetail = require('./pull-request-detail');
 const planParser = require('./public/plan-parser');
 const sessionConfig = require('./public/session-config');
 
@@ -2063,6 +2064,35 @@ async function runProjectPullRequestAction(projectId, folderPath, params) {
   return pullRequests.runAction(folder.path, params || {});
 }
 
+// What an open pull request shows, as GitHub's page does (pull-request-detail.js).
+async function projectPullRequestConversation(projectId, folderPath, opts) {
+  return pullRequestDetail.conversation(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestCommits(projectId, folderPath, opts) {
+  return pullRequestDetail.commits(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestCommitFiles(projectId, folderPath, opts) {
+  return pullRequestDetail.commitFiles(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestChecks(projectId, folderPath, opts) {
+  return pullRequestDetail.checks(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestJobLog(projectId, folderPath, opts) {
+  return pullRequestDetail.jobLog(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestViewed(projectId, folderPath, opts) {
+  return pullRequestDetail.viewed(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestBranches(projectId, folderPath, opts) {
+  return pullRequestDetail.branches(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectPullRequestCandidates(projectId, folderPath, opts) {
+  return pullRequestDetail.candidates(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function renderProjectPullRequestMarkdown(projectId, folderPath, opts) {
+  return pullRequestDetail.renderMarkdown(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+
 module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief,
@@ -2076,6 +2106,8 @@ module.exports = {
   projectGitGraphRemotes, projectGitGraphTagDetails, projectGitGraphAvatarUrl,
   runProjectGitGraphAction, cancelProjectGitGraphAction,
   projectPullRequests, projectPullRequestsPage, projectPullRequestFiles, runProjectPullRequestAction,
+  projectPullRequestConversation, projectPullRequestCommits, projectPullRequestCommitFiles, projectPullRequestChecks,
+  projectPullRequestJobLog, projectPullRequestViewed, projectPullRequestBranches, projectPullRequestCandidates, renderProjectPullRequestMarkdown,
   syncProjectBrief, syncAllProjectBriefs, saveBrief, createProjectFile, addProjectFiles, addProjectFileBytes, listAddedFiles, listRecentProjectFiles,
   launchContext, mergeAddDirs, worktreeParentFor,
   PROJECT_FILES, ADDED_FILES_DIR,

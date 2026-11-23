@@ -37,6 +37,8 @@ function node(number, extra = {}) {
     closedAt: null, mergedAt: null, author: { login: 'dev-one' },
     headRefName: `feature-${number}`, headRefOid: HEAD, baseRefName: 'main', isCrossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, viewerDidAuthor: true,
+    id: `PR_${number}`, viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, viewerCanUpdateBranch: true,
+    mergeStateStatus: 'BEHIND', totalCommentsCount: 2, allCommits: { totalCount: 3 },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
     ...extra,
   };
@@ -127,11 +129,16 @@ test('every open pull request is read, 100 at a time, through gh api graphql', a
     mergeMethods: ['squash', 'rebase'], defaultMethod: 'rebase', deleteBranchOnMerge: true,
   });
   assert.deepEqual(result.items[100], {
-    number: 101, title: 'Change 101', url: 'https://github.com/acme/widgets/pull/101', state: 'OPEN', isDraft: true,
+    id: 'PR_101', number: 101, title: 'Change 101', url: 'https://github.com/acme/widgets/pull/101', state: 'OPEN', isDraft: true,
     createdAt: result.items[100].createdAt, closedAt: null, mergedAt: null, author: 'dev-one',
     head: 'feature-101', headOid: HEAD, base: 'main', crossRepository: false,
     additions: 3, deletions: 1, changedFiles: 2, mergeable: 'MERGEABLE', reviewDecision: null, checks: 'SUCCESS', viewerDidAuthor: true,
+    viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, viewerCanUpdateBranch: true,
+    mergeStateStatus: 'BEHIND', comments: 2, commitCount: 3,
   });
+  // What the detail's tabs and the title's pencil need comes with the list.
+  assert.match(calls[0].input.query, /viewerCanUpdate viewerCanClose viewerCanReopen viewerCanUpdateBranch mergeStateStatus totalCommentsCount/);
+  assert.match(calls[0].input.query, /allCommits: commits \{ totalCount \}/);
 });
 
 test('open pull requests stop at 1000 and say so', async () => {
