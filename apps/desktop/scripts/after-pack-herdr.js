@@ -24,7 +24,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const HC_VERSION = '0.1.21';
+const HC_VERSION = '0.1.22';
 const RELEASES = 'https://releases.herdr.dev';
 // electron-builder's Arch enum (builder-util), by number.
 const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
