@@ -249,6 +249,16 @@ test('the checks of the last commit come with their workflow, their job and a co
   assert.deepEqual([deploy.kind, deploy.name, deploy.bucket, deploy.url, deploy.actions], ['status', 'deploy/preview', 'pass', 'https://preview.example/7', false]);
 });
 
+test('of the same check in several runs of one commit (a push, a reopen, a re-run), the latest stays', () => {
+  const run = (id, runId, startedAt, bucket, name = 'test') => ({ kind: 'run', id, name, group: 'CI', event: 'pull_request', runId, startedAt, bucket });
+  const kept = detail.latestChecks([
+    run(1, 10, '2026-01-04T10:00:00Z', 'fail'), run(2, 10, '2026-01-04T10:00:01Z', 'pass', 'lint'),
+    run(3, 11, '2026-01-04T11:00:00Z', 'pass'), run(4, 11, '2026-01-04T11:00:01Z', 'pass', 'lint'),
+    { ...run(5, 12, '2026-01-04T12:00:00Z', 'pass'), event: 'push' },
+  ]);
+  assert.deepEqual(kept.map(c => c.id), [3, 4, 5]);
+});
+
 test('a pull request without checks has none', async () => {
   setup(() => pullRequest({ headRefOid: SHA, commits: { nodes: [{ commit: { oid: SHA, statusCheckRollup: null } }] } }));
   const result = await detail.checks(DIR, { number: 7 });

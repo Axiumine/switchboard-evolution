@@ -574,6 +574,27 @@ function checkOf(node) {
   return null;
 }
 
+/**
+ * The latest of each check, as GitHub's Checks tab and gh pr checks show
+ * them: one commit can carry several runs of the same workflow (a push, a
+ * reopen, a re-run), each with the same jobs. Same kind, group, name and
+ * event: the one started last stays.
+ */
+function latestChecks(list) {
+  const latest = new Map();
+  for (const check of list) {
+    const key = `${check.kind}|${check.group}|${check.name}|${check.event}`;
+    const kept = latest.get(key);
+    const newer = !kept
+      || String(check.startedAt || '') > String(kept.startedAt || '')
+      || (String(check.startedAt || '') === String(kept.startedAt || '') && Number(check.id || 0) > Number(kept.id || 0));
+    if (newer) latest.set(key, check);
+  }
+  // In GitHub's order, the first of each kept where it first came.
+  const kept = new Set(latest.values());
+  return list.filter(check => kept.has(check));
+}
+
 function checksSummary(list) {
   const summary = { pass: 0, fail: 0, pending: 0, skipped: 0, cancelled: 0 };
   for (const check of list) summary[check.bucket] = (summary[check.bucket] || 0) + 1;
@@ -608,7 +629,8 @@ async function checks(dir, { remote = null, number } = {}) {
     after = connection.pageInfo && connection.pageInfo.endCursor;
     if (!hasNextPage || !after) break;
   }
-  return { ok: true, number: n, headOid, rollup, checks: list, summary: checksSummary(list), truncated: hasNextPage };
+  const shown = latestChecks(list);
+  return { ok: true, number: n, headOid, rollup, checks: shown, summary: checksSummary(shown), truncated: hasNextPage };
 }
 
 /** A job's log as plain lines: no colours, no timestamp in front of each line, at most the last MAX_LOG_BYTES. */
@@ -733,6 +755,6 @@ async function renderMarkdown(dir, { remote = null, text } = {}) {
 module.exports = {
   conversation, commits, commitFiles, checks, jobLog, viewed, branches, candidates, renderMarkdown,
   // exported for tests
-  timelineItem, thread, pullRequestHead, reviewers, checkOf, checkBucket, cleanLog, reactions,
+  timelineItem, thread, pullRequestHead, reviewers, checkOf, checkBucket, latestChecks, cleanLog, reactions,
   CONVERSATION_QUERY, COMMITS_QUERY, CHECKS_QUERY, TIMELINE_TYPES, MAX_LOG_BYTES, MAX_MARKDOWN,
 };
