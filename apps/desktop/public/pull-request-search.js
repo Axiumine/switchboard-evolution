@@ -1,6 +1,6 @@
-// pull-request-search.js — the Pull Requests view's search box and its
-// People filter: the parts with no document and no window.api, so node --test
-// loads them (project-pull-requests-view.js paints and asks).
+// pull-request-search.js — the Pull Requests view's search box, its People
+// filter and its Prompt menu: the parts with no document and no window.api,
+// so node --test loads them (project-pull-requests-view.js paints and asks).
 //
 // The search takes words, and every word must be found in a pull request: in
 // its title, its number (#12), its description, its comments, or the path of
@@ -245,9 +245,50 @@ function prByPeople(pr, people) {
   return !people || !people.length || people.includes(pr.author || 'ghost');
 }
 
+// --- Prompt ---
+
+const PR_PROMPTS = [
+  ['numbers', 'Numbers'],
+  ['titles', 'Numbers and titles'],
+];
+
+/** What gh's --repo takes: OWNER/REPO on github.com, HOST/OWNER/REPO elsewhere. */
+function prRepoRef(repo) {
+  const name = repo?.nameWithOwner || '';
+  let host = 'github.com';
+  try { host = new URL(repo?.url || '').host || host; } catch {}
+  return host === 'github.com' ? name : `${host}/${name}`;
+}
+
+/**
+ * A prompt, in English, for an agent to read the pull requests shown, through
+ * the GitHub CLI: their numbers (`numbers`) or their numbers and titles
+ * (`titles`). Empty without pull requests.
+ */
+function prPromptText(kind, prs, repo) {
+  const list = (prs || []).filter(pr => pr && Number.isInteger(pr.number));
+  if (!list.length) return '';
+  const ref = prRepoRef(repo);
+  const these = list.length === 1 ? 'this pull request' : `these ${list.length} pull requests`;
+  const where = ref ? ` in ${ref}` : '';
+  const head = kind === 'titles'
+    ? `Get the information about ${these}${where} on GitHub:\n${list.map(pr => `- #${pr.number} ${String(pr.title || '').trim()}`.trimEnd()).join('\n')}`
+    : `Get the information about ${these}${where} on GitHub: ${list.map(pr => `#${pr.number}`).join(', ')}.`;
+  const repoArg = ref ? ` --repo ${ref}` : '';
+  const each = list.length === 1 ? 'Read with the GitHub CLI' : 'For each one, read with the GitHub CLI';
+  return `${head}
+
+${each}:
+- its title, state, author, branches, description, reviews and comments: gh pr view <number>${repoArg} --comments
+- its changed files: gh pr diff <number>${repoArg} --name-only
+- its checks: gh pr checks <number>${repoArg}
+`;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     prGlobRegExp, prParseSearch, prGlobMatches, prSearchMatch, prTextsStale, prSearchWhereText, prSearchRanges, prMarkHtml, prFileHit, prMarkIn,
     prPeopleChoices, prPeopleLabel, prTogglePerson, prByPeople,
+    PR_PROMPTS, prRepoRef, prPromptText,
   };
 }

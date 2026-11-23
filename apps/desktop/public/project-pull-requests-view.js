@@ -7,8 +7,9 @@
 // Before Merge, icons copy the pull request's address and open its page on
 // GitHub: in a panel, in a window of its own (web-page-view.js), or in the browser.
 // Over the list: a search box (titles, descriptions, comments and the changed
-// files' paths, *.sql as a pattern; pull-request-search.js), the states filter
-// and a People filter (the authors, several at once).
+// files' paths, *.sql as a pattern; pull-request-search.js), the states filter,
+// a People filter (the authors, several at once), and Prompt, which copies a
+// prompt naming the pull requests shown.
 // gh runs in main (pull-requests.js); this file paints and asks.
 
 const projectPullRequestsTabState = new Map();
@@ -43,6 +44,7 @@ const PR_ICONS = {
   merged: prSvg('<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>'),
   filter: prSvg('<path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/>'),
   people: prSvg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  prompt: prSvg('<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M8 11h8"/><path d="M8 15h5"/>'),
 };
 // Pull requests whose texts one request reads, and how many requests at once.
 const PR_TEXTS_BATCH = 20;
@@ -752,6 +754,7 @@ function prPaint(project, state, body) {
             <button type="button" class="ws-btn ws-btn--sm pr-filter-btn${prIsDefaultFilter(state.filter) ? '' : ' is-on'}" id="pr-filter" aria-haspopup="true" aria-expanded="false" title="Which pull requests to show">${PR_ICONS.filter(12)}<span id="pr-filter-label">${escapeHtml(prFilterLabel(state.filter))}</span>${PICONS.chevronDown(10)}</button>
           </div>
           <button type="button" class="ws-btn ws-btn--sm pr-filter-btn${(state.people || []).length ? ' is-on' : ''}" id="pr-people" aria-haspopup="true" aria-expanded="false" title="Whose pull requests to show, by their author">${PR_ICONS.people(12)}<span id="pr-people-label">${escapeHtml(prPeopleLabel(state.people))}</span>${PICONS.chevronDown(10)}</button>
+          <button type="button" class="ws-btn ws-btn--sm pr-filter-btn" id="pr-prompt" aria-haspopup="menu" title="Copy a prompt about the pull requests shown">${PR_ICONS.prompt(12)}<span>Prompt</span>${PICONS.chevronDown(10)}</button>
           <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" id="pr-refresh" title="Refresh">${PICONS.refresh(13)}</button>
         </div>
       </div>
@@ -766,6 +769,7 @@ function prPaint(project, state, body) {
   body.querySelector('#pr-refresh').onclick = () => prRefresh(project, state, repo.path, { notice: true });
   body.querySelector('#pr-filter').onclick = (e) => prOpenFilterMenu(project, state, body, e.currentTarget);
   body.querySelector('#pr-people').onclick = (e) => prOpenPeopleMenu(project, state, body, e.currentTarget);
+  body.querySelector('#pr-prompt').onclick = (e) => prOpenPromptMenu(project, state, e.currentTarget);
   prWireSearch(project, state, body);
   prWireRemote(project, state, body, repo.path);
 }
@@ -1257,6 +1261,27 @@ function prSetPeople(project, state, body, people) {
   if (label) label.textContent = prPeopleLabel(people);
   body.querySelector('#pr-people')?.classList.toggle('is-on', people.length > 0);
   prPaintList(project, state, body);
+}
+
+/** Prompt: copy a prompt, in English, naming the pull requests shown right now (pull-request-search.js, prPromptText). */
+function prOpenPromptMenu(project, state, button) {
+  const repo = prSelectedRepo(state);
+  if (!repo) return;
+  const data = prRepoState(project.id, state, repo.path);
+  const shown = data.open ? prShownView(data, state).items : [];
+  const what = { numbers: 'the numbers', titles: 'the numbers and titles' };
+  showContextMenu([
+    { head: shown.length ? `${prPlural(shown.length, 'pull request')} shown` : 'No pull requests shown' },
+    ...PR_PROMPTS.map(([kind, label]) => ({
+      label,
+      icon: PR_ICONS.prompt(13),
+      disabled: !shown.length,
+      onClick: () => {
+        window.api?.writeClipboard?.(prPromptText(kind, shown, data.open?.repo));
+        prSetNotice(project, state, { kind: 'ok', text: `Copied a prompt with ${what[kind]} of ${prPlural(shown.length, 'pull request')}.` });
+      },
+    })),
+  ], { anchor: button });
 }
 
 function prSetFilter(project, state, body, filter) {

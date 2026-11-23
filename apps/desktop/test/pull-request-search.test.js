@@ -1,6 +1,7 @@
 // What the Pull Requests view's search reads from GitHub (pull-request-search.js
 // in main) and how it matches, marks and names what it finds
-// (public/pull-request-search.js), with the People filter's pure parts.
+// (public/pull-request-search.js), with the People filter's and the Prompt
+// menu's pure parts.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -8,7 +9,7 @@ const pr = require('../pull-requests');
 const search = require('../pull-request-search');
 const {
   prGlobRegExp, prParseSearch, prGlobMatches, prSearchMatch, prTextsStale, prSearchWhereText, prSearchRanges, prMarkHtml, prFileHit,
-  prPeopleChoices, prPeopleLabel, prTogglePerson, prByPeople,
+  prPeopleChoices, prPeopleLabel, prTogglePerson, prByPeople, PR_PROMPTS, prRepoRef, prPromptText,
 } = require('../public/pull-request-search');
 
 const DIR = '/code/widgets';
@@ -201,4 +202,26 @@ test('People lists the authors, the account first, then by how many they wrote; 
   assert.equal(prByPeople({ author: 'bob' }, []), true);
   assert.equal(prByPeople({ author: 'bob' }, ['alice']), false);
   assert.equal(prByPeople({ author: 'bob' }, ['alice', 'bob']), true);
+});
+
+// --- Prompt ---
+
+test('the prompt names the pull requests shown and how to read them with gh', () => {
+  assert.deepEqual(PR_PROMPTS.map(([kind]) => kind), ['numbers', 'titles']);
+  const repo = { nameWithOwner: 'acme/widgets', url: 'https://github.com/acme/widgets' };
+  const list = [{ number: 12, title: 'Add the login page ' }, { number: 7, title: 'Fix the build' }];
+  const numbers = prPromptText('numbers', list, repo);
+  assert.match(numbers, /^Get the information about these 2 pull requests in acme\/widgets on GitHub: #12, #7\.\n/);
+  assert.match(numbers, /For each one, read with the GitHub CLI:/);
+  assert.match(numbers, /gh pr view <number> --repo acme\/widgets --comments/);
+  assert.match(numbers, /gh pr diff <number> --repo acme\/widgets --name-only/);
+  assert.match(numbers, /gh pr checks <number> --repo acme\/widgets/);
+  const titles = prPromptText('titles', list, repo);
+  assert.match(titles, /on GitHub:\n- #12 Add the login page\n- #7 Fix the build\n\n/);
+  const one = prPromptText('numbers', list.slice(0, 1), repo);
+  assert.match(one, /^Get the information about this pull request in acme\/widgets on GitHub: #12\./);
+  assert.match(one, /\nRead with the GitHub CLI:/);
+  assert.equal(prPromptText('numbers', [], repo), '');
+  assert.equal(prRepoRef({ nameWithOwner: 'team/app', url: 'https://git.example.com/team/app' }), 'git.example.com/team/app');
+  assert.equal(prRepoRef(repo), 'acme/widgets');
 });
