@@ -1,6 +1,6 @@
-// pull-request-search.js — the Pull Requests view's search box: the parts
-// with no document and no window.api, so node --test loads them
-// (project-pull-requests-view.js paints and asks).
+// pull-request-search.js — the Pull Requests view's search box and its
+// People filter: the parts with no document and no window.api, so node --test
+// loads them (project-pull-requests-view.js paints and asks).
 //
 // The search takes words, and every word must be found in a pull request: in
 // its title, its number (#12), its description, its comments, or the path of
@@ -206,8 +206,48 @@ function prMarkIn(roots, search) {
   return count;
 }
 
+// --- People ---
+
+/**
+ * The People filter's choices: every author among `items`, with how many of
+ * them each wrote, the account's own first, then the busiest; anyone chosen
+ * and not among them stays, with 0, so they can be taken off.
+ */
+function prPeopleChoices(items, chosen = []) {
+  const byLogin = new Map();
+  for (const pr of items || []) {
+    const login = pr.author || 'ghost';
+    const entry = byLogin.get(login) || { login, count: 0, avatar: null, you: false };
+    entry.count++;
+    if (pr.viewerDidAuthor) entry.you = true;
+    if (!entry.avatar && pr.authorAvatar) entry.avatar = pr.authorAvatar;
+    byLogin.set(login, entry);
+  }
+  for (const login of chosen || []) if (!byLogin.has(login)) byLogin.set(login, { login, count: 0, avatar: null, you: false });
+  return [...byLogin.values()].sort((a, b) => (Number(b.you) - Number(a.you)) || (b.count - a.count) || a.login.localeCompare(b.login));
+}
+
+/** The People button's words: Everyone, one or two names, or how many people. */
+function prPeopleLabel(people) {
+  const list = people || [];
+  if (!list.length) return 'Everyone';
+  if (list.length <= 2) return list.join(', ');
+  return `${list.length} people`;
+}
+
+/** The people chosen with `login` added or taken off; none chosen is everyone. */
+function prTogglePerson(people, login) {
+  const list = people || [];
+  return list.includes(login) ? list.filter(l => l !== login) : [...list, login];
+}
+
+function prByPeople(pr, people) {
+  return !people || !people.length || people.includes(pr.author || 'ghost');
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     prGlobRegExp, prParseSearch, prGlobMatches, prSearchMatch, prTextsStale, prSearchWhereText, prSearchRanges, prMarkHtml, prFileHit, prMarkIn,
+    prPeopleChoices, prPeopleLabel, prTogglePerson, prByPeople,
   };
 }

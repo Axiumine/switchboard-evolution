@@ -25,6 +25,8 @@ export type PullRequest = {
   closedAt: string | null;
   mergedAt: string | null;
   author: string;
+  /** The author's avatar. From a newer desktop only. */
+  authorAvatar?: string | null;
   head: string;
   headOid: string;
   base: string;

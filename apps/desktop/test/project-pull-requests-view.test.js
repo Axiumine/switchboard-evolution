@@ -470,10 +470,10 @@ test('a pull request\'s files can be marked as viewed, as on GitHub', () => {
   assert.doesNotMatch(ctx.prFilesHtml(FILES), /pr-viewed|pr-file-line/);
 });
 
-// --- The search and the footer it changes ---
+// --- Search, People and the footer they change ---
 
 function viewState(extra = {}) {
-  return { filter: ['open', 'draft'], search: '', repos: new Map(), ...extra };
+  return { filter: ['open', 'draft'], people: [], search: '', repos: new Map(), ...extra };
 }
 
 function listData(ctx, items, texts = []) {
@@ -484,6 +484,17 @@ function listData(ctx, items, texts = []) {
 }
 
 const texts = (number, extra = {}) => ({ number, updatedAt: null, body: '', comments: [], files: [], truncated: false, ...extra });
+
+test('People shows the pull requests of the authors chosen; none chosen is everyone', () => {
+  const ctx = loadContext();
+  const data = listData(ctx, [pr(3, { author: 'bob' }), pr(2, { author: 'alice' }), pr(1, { author: 'bob' })]);
+  assert.deepEqual(plain(ctx.prShownView(data, viewState()).items.map(p => p.number)), [3, 2, 1]);
+  const view = ctx.prShownView(data, viewState({ people: ['bob'] }));
+  assert.deepEqual(plain(view.items.map(p => p.number)), [3, 1]);
+  assert.equal(view.narrowed, true);
+  const html = ctx.prListHtml(data, ['open'], new Date('2026-04-01T00:00:00Z'), ctx.prShownView(data, viewState({ people: ['carol'] })));
+  assert.match(html, /No open pull requests by carol/);
+});
 
 test('the search shows what matches, marks the title, says where else it found the words and how far it has read', () => {
   const ctx = loadContext();
@@ -518,7 +529,7 @@ test('once everything is read, the search says how many match, or that none does
   assert.match(failed, /data-act="texts-retry"/);
 });
 
-test('with the search on, closed and merged ones are read 100 at a time and the footer counts what was read', () => {
+test('with the search or People on, closed and merged ones are read 100 at a time and the footer counts what was read', () => {
   const ctx = loadContext();
   const data = listData(ctx, [pr(9)]);
   data.page = { ...ctx.prEmptyPage('MERGED'), items: [pr(4, { state: 'MERGED' })], totalCount: 40, hasNextPage: true, endCursor: 'c', loaded: true };

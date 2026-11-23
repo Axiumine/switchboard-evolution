@@ -40,6 +40,7 @@
   cursor: pointer;
 }
 .pr-filter-reset:hover { background: rgba(255,255,255,0.06); }
+.pr-filter-empty { padding: 8px; color: #77778d; font-size: 11.5px; }
 
 /* The search box, first in the toolbar (as the Worktrees view's). */
 .pr-search {
@@ -69,6 +70,19 @@
 }
 .pr-search input::placeholder { color: #6f6f84; }
 .pr-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* People: each author with its avatar and how many pull requests it wrote. */
+.pr-people-menu { min-width: 210px; max-height: min(360px, 60vh); overflow-y: auto; }
+.pr-person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-person-you {
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: #9a9ab0;
+  font-size: 10px;
+}
+.pr-person-count { color: #77778d; font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* The search's words wherever they show: titles, messages, files. */
 mark.pr-hit { padding: 0 1px; border-radius: 2px; background: rgba(250, 204, 21, 0.3); color: inherit; }

@@ -1,6 +1,6 @@
 // What the Pull Requests view's search reads from GitHub (pull-request-search.js
 // in main) and how it matches, marks and names what it finds
-// (public/pull-request-search.js).
+// (public/pull-request-search.js), with the People filter's pure parts.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -8,6 +8,7 @@ const pr = require('../pull-requests');
 const search = require('../pull-request-search');
 const {
   prGlobRegExp, prParseSearch, prGlobMatches, prSearchMatch, prTextsStale, prSearchWhereText, prSearchRanges, prMarkHtml, prFileHit,
+  prPeopleChoices, prPeopleLabel, prTogglePerson, prByPeople,
 } = require('../public/pull-request-search');
 
 const DIR = '/code/widgets';
@@ -179,4 +180,25 @@ test('the words are marked in text, escaped, overlapping pieces merged; a patter
   assert.equal(prFileHit('db/001.sql', prParseSearch('*.sql')), true);
   assert.equal(prFileHit('src/login.js', prParseSearch('LOGIN')), true);
   assert.equal(prFileHit('src/app.js', prParseSearch('login')), false);
+});
+
+// --- People ---
+
+test('People lists the authors, the account first, then by how many they wrote; a chosen one stays', () => {
+  const items = [
+    { author: 'bob', authorAvatar: null }, { author: 'carol' }, { author: 'bob', authorAvatar: 'https://a/bob' },
+    { author: 'me', viewerDidAuthor: true }, { author: 'alice' },
+  ];
+  assert.deepEqual(prPeopleChoices(items, ['dave']).map(c => [c.login, c.count, c.you, c.avatar]), [
+    ['me', 1, true, null], ['bob', 2, false, 'https://a/bob'], ['alice', 1, false, null], ['carol', 1, false, null], ['dave', 0, false, null],
+  ]);
+  assert.equal(prPeopleLabel([]), 'Everyone');
+  assert.equal(prPeopleLabel(['bob']), 'bob');
+  assert.equal(prPeopleLabel(['bob', 'alice']), 'bob, alice');
+  assert.equal(prPeopleLabel(['bob', 'alice', 'me']), '3 people');
+  assert.deepEqual(prTogglePerson(['bob'], 'alice'), ['bob', 'alice']);
+  assert.deepEqual(prTogglePerson(['bob', 'alice'], 'bob'), ['alice']);
+  assert.equal(prByPeople({ author: 'bob' }, []), true);
+  assert.equal(prByPeople({ author: 'bob' }, ['alice']), false);
+  assert.equal(prByPeople({ author: 'bob' }, ['alice', 'bob']), true);
 });

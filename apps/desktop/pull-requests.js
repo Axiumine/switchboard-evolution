@@ -266,7 +266,7 @@ async function resolveRepo(dir, remoteName) {
 // --- Listing ---
 
 const PR_FIELDS = `id number title url state isDraft createdAt updatedAt closedAt mergedAt
-        author { login }
+        author { login avatarUrl(size: 40) }
         headRefName headRefOid baseRefName isCrossRepository
         additions deletions changedFiles mergeable reviewDecision viewerDidAuthor
         viewerCanUpdate viewerCanReopen
@@ -327,6 +327,8 @@ function normalizePullRequest(node) {
     closedAt: node.closedAt || null,
     mergedAt: node.mergedAt || null,
     author: (node.author && node.author.login) || 'ghost',
+    // The People filter's menu shows it.
+    authorAvatar: (node.author && node.author.avatarUrl) || null,
     head: node.headRefName || '',
     headOid: node.headRefOid || '',
     base: node.baseRefName || '',

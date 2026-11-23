@@ -6,9 +6,9 @@
 // Convert to draft (or Ready for review) and Close; each of them asks first.
 // Before Merge, icons copy the pull request's address and open its page on
 // GitHub: in a panel, in a window of its own (web-page-view.js), or in the browser.
-// Over the list, before the states filter, a search box (titles,
-// descriptions, comments and the changed files' paths, *.sql as a pattern;
-// pull-request-search.js).
+// Over the list: a search box (titles, descriptions, comments and the changed
+// files' paths, *.sql as a pattern; pull-request-search.js), the states filter
+// and a People filter (the authors, several at once).
 // gh runs in main (pull-requests.js); this file paints and asks.
 
 const projectPullRequestsTabState = new Map();
@@ -42,11 +42,12 @@ const PR_ICONS = {
   closed: prSvg('<circle cx="6" cy="6" r="3"/><path d="M6 9v12"/><path d="m21 3-6 6"/><path d="m21 9-6-6"/><path d="M18 11.5V15"/><circle cx="18" cy="18" r="3"/>'),
   merged: prSvg('<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>'),
   filter: prSvg('<path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/>'),
+  people: prSvg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
 };
 // Pull requests whose texts one request reads, and how many requests at once.
 const PR_TEXTS_BATCH = 20;
 const PR_TEXTS_PARALLEL = 2;
-// With the search on, a page of closed and merged ones holds this many.
+// With the search or People on, a page of closed and merged ones holds this many.
 const PR_NARROWED_PAGE_SIZE = 100;
 
 // One sequence for every request this view makes, so an answer that arrives
@@ -61,7 +62,9 @@ function prTabState(projectId) {
       // The filter's choice, kept while the app runs (not saved): every start
       // shows the open pull requests, drafts included.
       filter: [...PR_DEFAULT_FILTER],
-      // The search box's text: kept while the app runs, as the filter is.
+      // The People filter's authors (none is everyone) and the search box's
+      // text: kept while the app runs, as the filter is.
+      people: [],
       search: '',
       repos: new Map(), // repository path → its pull requests (prRepoData)
       notice: null,
@@ -203,13 +206,14 @@ function prWordList(words) {
   return words.length > 1 ? `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}` : (words[0] || '');
 }
 
-function prEmptyText(filter, { search = '' } = {}) {
+function prEmptyText(filter, { people = [], search = '' } = {}) {
   const states = prWordList(PR_FILTERS.filter(([key]) => (filter || []).includes(key)).map(([, label]) => label.toLowerCase()));
+  const by = (people || []).length ? ` by ${prWordList(people)}` : '';
   const matching = String(search || '').trim() ? ` matching “${String(search).trim()}”` : '';
-  return `No ${states} pull requests${matching}`;
+  return `No ${states} pull requests${by}${matching}`;
 }
 
-// --- Search (pull-request-search.js has the pure parts) ---
+// --- Search and People (pull-request-search.js has the pure parts) ---
 
 let prSearchCache = { raw: null, parsed: { raw: '', terms: [] } };
 
@@ -222,16 +226,18 @@ function prSearchOf(state) {
 }
 
 /**
- * What the list shows for the states filter and the search: { items,
+ * What the list shows for the states filter, People and the search: { items,
  * candidates (what the search looks through), search, where (number → where
  * the words were found), read (how many candidates' texts have come), unread
- * (how many are still to come), narrowed }.
+ * (how many are still to come), people, narrowed }.
  */
 function prShownView(data, state) {
-  const candidates = prMergeLists(data.open?.items, data.page?.items, state?.filter || PR_DEFAULT_FILTER);
+  const byState = prMergeLists(data.open?.items, data.page?.items, state?.filter || PR_DEFAULT_FILTER);
+  const people = state?.people || [];
+  const candidates = people.length && typeof prByPeople === 'function' ? byState.filter(pr => prByPeople(pr, people)) : byState;
   const search = prSearchOf(state);
-  const narrowed = search.terms.length > 0;
-  if (!search.terms.length) return { items: candidates, candidates, search, where: null, read: 0, unread: 0, narrowed };
+  const narrowed = people.length > 0 || search.terms.length > 0;
+  if (!search.terms.length) return { items: candidates, candidates, search, where: null, read: 0, unread: 0, people, narrowed };
   const texts = data.texts || { map: new Map(), failed: new Set() };
   const where = new Map();
   const items = [];
@@ -244,7 +250,7 @@ function prShownView(data, state) {
     const result = prSearchMatch(pr, known, search);
     if (result.match) { items.push(pr); where.set(pr.number, result.where); }
   }
-  return { items, candidates, search, where, read, unread, narrowed };
+  return { items, candidates, search, where, read, unread, people, narrowed };
 }
 
 /** The line over the rows while the search runs: how far it has read, or why it stopped. */
@@ -446,7 +452,7 @@ function prFooterHtml(data, filter, { narrowed = false } = {}) {
   if (!states.length) return '';
   const page = data.page;
   const words = prPagedWords(states);
-  // With the search on, the footer counts what was looked through, not what shows.
+  // With the search or People on, the footer counts what was looked through, not what shows.
   const size = narrowed ? PR_NARROWED_PAGE_SIZE : PR_PAGE_SIZE;
   if (page.error) {
     return `<div class="pr-footer is-error"><span>${escapeHtml(page.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="page-retry">Retry</button></div>`;
@@ -470,8 +476,8 @@ function prTitleEditOf(data, pr) {
 
 /**
  * The list for one repository's data and the filter: the search's line, rows,
- * an empty line, the pages' footer. `view` (prShownView) narrows it by the
- * search; without one every pull request of the filter's states shows.
+ * an empty line, the pages' footer. `view` (prShownView) narrows it by People
+ * and the search; without one every pull request of the filter's states shows.
  */
 function prListHtml(data, filter, now = new Date(), view = null) {
   const items = view ? view.items : prMergeLists(data.open?.items, data.page.items, filter);
@@ -480,7 +486,7 @@ function prListHtml(data, filter, now = new Date(), view = null) {
   const truncated = data.open?.truncated ? '<div class="pr-footer">Only the newest 1000 open pull requests are listed.</div>' : '';
   const waitingForPage = prPageStates(filter).length && !data.page.loaded;
   const waitingForTexts = !!(view && view.unread);
-  const empty = prEmptyText(filter, { search: search ? search.raw : '' });
+  const empty = prEmptyText(filter, { people: view?.people || [], search: search ? search.raw : '' });
   const rows = items.length
     ? `<div class="pr-rows">${items.map(pr => prRowHtml(pr, { expanded: data.expanded.has(pr.number), repo, now, titleEdit: prTitleEditOf(data, pr), search, where: view?.where?.get(pr.number) || null })).join('')}</div>`
     : (waitingForPage || waitingForTexts ? '' : `<div class="git-empty-state"><div class="git-empty-title">${escapeHtml(empty)}</div></div>`);
@@ -745,6 +751,7 @@ function prPaint(project, state, body) {
           <div class="pr-filter-wrap">
             <button type="button" class="ws-btn ws-btn--sm pr-filter-btn${prIsDefaultFilter(state.filter) ? '' : ' is-on'}" id="pr-filter" aria-haspopup="true" aria-expanded="false" title="Which pull requests to show">${PR_ICONS.filter(12)}<span id="pr-filter-label">${escapeHtml(prFilterLabel(state.filter))}</span>${PICONS.chevronDown(10)}</button>
           </div>
+          <button type="button" class="ws-btn ws-btn--sm pr-filter-btn${(state.people || []).length ? ' is-on' : ''}" id="pr-people" aria-haspopup="true" aria-expanded="false" title="Whose pull requests to show, by their author">${PR_ICONS.people(12)}<span id="pr-people-label">${escapeHtml(prPeopleLabel(state.people))}</span>${PICONS.chevronDown(10)}</button>
           <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" id="pr-refresh" title="Refresh">${PICONS.refresh(13)}</button>
         </div>
       </div>
@@ -758,6 +765,7 @@ function prPaint(project, state, body) {
   body.onfocusout = () => setTimeout(() => { if (typeof prFlushPending === 'function') prFlushPending(project, state); }, 200);
   body.querySelector('#pr-refresh').onclick = () => prRefresh(project, state, repo.path, { notice: true });
   body.querySelector('#pr-filter').onclick = (e) => prOpenFilterMenu(project, state, body, e.currentTarget);
+  body.querySelector('#pr-people').onclick = (e) => prOpenPeopleMenu(project, state, body, e.currentTarget);
   prWireSearch(project, state, body);
   prWireRemote(project, state, body, repo.path);
 }
@@ -1167,24 +1175,17 @@ function prCloseFilterMenu() {
   if (open) open._close?.();
 }
 
-function prOpenFilterMenu(project, state, body, button) {
-  if (document.querySelector('.pr-filter-menu')) { prCloseFilterMenu(); return; }
+/**
+ * A menu of checkboxes under `button` (the filter's, People's): `paint(menu)`
+ * fills it, again after each change. A second click on the button, a click
+ * elsewhere or Escape closes it.
+ */
+function prOpenCheckMenu(button, className, paint) {
+  if (document.querySelector('.pr-filter-menu')) { prCloseFilterMenu(); return null; }
   const menu = document.createElement('div');
-  menu.className = 'ctx-menu pr-filter-menu';
+  menu.className = `ctx-menu pr-filter-menu${className ? ` ${className}` : ''}`;
   menu.setAttribute('role', 'menu');
-  const paint = () => {
-    menu.innerHTML = PR_FILTERS.map(([key, label]) => {
-      const on = state.filter.includes(key);
-      const last = on && state.filter.length === 1;
-      return `<label class="pr-filter-option${last ? ' is-last' : ''}" title="${last ? 'At least one stays chosen' : ''}"><input type="checkbox" data-key="${key}"${on ? ' checked' : ''}${last ? ' disabled' : ''}><span class="pr-state pr-state--${key}">${PR_ICONS[key](13)}</span><span>${escapeHtml(label)}</span></label>`;
-    }).join('') + (prIsDefaultFilter(state.filter) ? '' : '<div class="ctx-sep"></div><button type="button" class="pr-filter-reset" data-act="reset">Open and draft only</button>');
-    menu.querySelectorAll('input[data-key]').forEach((input) => {
-      input.onchange = () => { prSetFilter(project, state, body, prToggleFilter(state.filter, input.dataset.key)); paint(); };
-    });
-    const reset = menu.querySelector('[data-act="reset"]');
-    if (reset) reset.onclick = () => { prSetFilter(project, state, body, [...PR_DEFAULT_FILTER]); paint(); };
-  };
-  paint();
+  paint(menu);
   document.body.appendChild(menu);
   const rect = button.getBoundingClientRect();
   menu.style.position = 'fixed';
@@ -1203,6 +1204,59 @@ function prOpenFilterMenu(project, state, body, button) {
   document.addEventListener('pointerdown', onDown, true);
   document.addEventListener('keydown', onKey, true);
   menu.querySelector('input:not([disabled])')?.focus();
+  return menu;
+}
+
+function prOpenFilterMenu(project, state, body, button) {
+  const paint = (menu) => {
+    menu.innerHTML = PR_FILTERS.map(([key, label]) => {
+      const on = state.filter.includes(key);
+      const last = on && state.filter.length === 1;
+      return `<label class="pr-filter-option${last ? ' is-last' : ''}" title="${last ? 'At least one stays chosen' : ''}"><input type="checkbox" data-key="${key}"${on ? ' checked' : ''}${last ? ' disabled' : ''}><span class="pr-state pr-state--${key}">${PR_ICONS[key](13)}</span><span>${escapeHtml(label)}</span></label>`;
+    }).join('') + (prIsDefaultFilter(state.filter) ? '' : '<div class="ctx-sep"></div><button type="button" class="pr-filter-reset" data-act="reset">Open and draft only</button>');
+    menu.querySelectorAll('input[data-key]').forEach((input) => {
+      input.onchange = () => { prSetFilter(project, state, body, prToggleFilter(state.filter, input.dataset.key)); paint(menu); };
+    });
+    const reset = menu.querySelector('[data-act="reset"]');
+    if (reset) reset.onclick = () => { prSetFilter(project, state, body, [...PR_DEFAULT_FILTER]); paint(menu); };
+  };
+  prOpenCheckMenu(button, '', paint);
+}
+
+/**
+ * People: the authors of the pull requests the states filter shows, several
+ * at once, the account's own first, each with how many it wrote. None chosen
+ * is everyone.
+ */
+function prOpenPeopleMenu(project, state, body, button) {
+  const repo = prSelectedRepo(state);
+  const data = repo ? prRepoState(project.id, state, repo.path) : null;
+  const paint = (menu) => {
+    const items = data ? prMergeLists(data.open?.items, data.page?.items, state.filter) : [];
+    const choices = prPeopleChoices(items, state.people);
+    const avatar = (c) => (typeof prdAvatarHtml === 'function' ? prdAvatarHtml(c.login, c.avatar, 16) : '');
+    menu.innerHTML = (choices.length
+      ? choices.map((c) => {
+        const on = (state.people || []).includes(c.login);
+        return `<label class="pr-filter-option pr-person"><input type="checkbox" data-login="${prAttr(c.login)}"${on ? ' checked' : ''}>${avatar(c)}<span class="pr-person-name">${escapeHtml(c.login)}${c.you ? ' <span class="pr-person-you">you</span>' : ''}</span><span class="pr-person-count">${c.count}</span></label>`;
+      }).join('')
+      : '<div class="pr-filter-empty">No pull requests listed yet.</div>')
+      + ((state.people || []).length ? '<div class="ctx-sep"></div><button type="button" class="pr-filter-reset" data-act="everyone">Everyone</button>' : '');
+    menu.querySelectorAll('input[data-login]').forEach((input) => {
+      input.onchange = () => { prSetPeople(project, state, body, prTogglePerson(state.people, input.dataset.login)); paint(menu); };
+    });
+    const everyone = menu.querySelector('[data-act="everyone"]');
+    if (everyone) everyone.onclick = () => { prSetPeople(project, state, body, []); paint(menu); };
+  };
+  prOpenCheckMenu(button, 'pr-people-menu', paint);
+}
+
+function prSetPeople(project, state, body, people) {
+  state.people = people;
+  const label = body.querySelector('#pr-people-label');
+  if (label) label.textContent = prPeopleLabel(people);
+  body.querySelector('#pr-people')?.classList.toggle('is-on', people.length > 0);
+  prPaintList(project, state, body);
 }
 
 function prSetFilter(project, state, body, filter) {
@@ -1301,7 +1355,7 @@ async function prLoadPage(project, state, repoPath, { more = false, refill = 0 }
   page.loading = true;
   page.error = null;
   prRepaint(project, state, repoPath);
-  const narrowed = prSearchOf(state).terms.length > 0;
+  const narrowed = (state.people || []).length > 0 || prSearchOf(state).terms.length > 0;
   const size = narrowed ? PR_NARROWED_PAGE_SIZE : PR_PAGE_SIZE;
   const first = refill ? Math.min(100, Math.max(size, refill)) : size;
   const opts = prRemoteOpts(data, { states, first });
