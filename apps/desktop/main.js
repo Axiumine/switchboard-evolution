@@ -88,6 +88,7 @@ const { manageProjectEntry, trashProjectEntries, revealFile, shareFile, createPr
 const FileSelection = require('./public/file-selection');
 const fileTimeline = require('./file-timeline');
 const projectSearch = require('./project-search');
+const { readPlans, linkPlans, projectResolver } = require('./plans-source');
 const { resolveTerminalFiles } = require('./terminal-file-links');
 const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('./preview-assets');
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
@@ -1124,24 +1125,11 @@ ipcMain.handle('get-projects', (_event, showArchived) => {
 });
 
 // --- IPC: get-plans ---
+// Each plan with the session that wrote it, its folder and project, for the
+// Plans tab's Group, Filter and Sort (plans-source.js, public/plans-list.js).
 ipcMain.handle('get-plans', () => {
   try {
-    if (!fs.existsSync(PLANS_DIR)) return [];
-    const files = fs.readdirSync(PLANS_DIR).filter(f => f.endsWith('.md'));
-    const plans = [];
-    for (const file of files) {
-      const filePath = path.join(PLANS_DIR, file);
-      try {
-        const stat = fs.statSync(filePath);
-        const content = fs.readFileSync(filePath, 'utf8');
-        const firstLine = content.split('\n').find(l => l.trim());
-        const title = firstLine && firstLine.startsWith('# ')
-          ? firstLine.slice(2).trim()
-          : file.replace(/\.md$/, '');
-        plans.push({ filename: file, title, modified: stat.mtime.toISOString() });
-      } catch {}
-    }
-    plans.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+    const plans = readPlans(PLANS_DIR);
 
     // Index plans for FTS
     try {
@@ -1149,11 +1137,19 @@ ipcMain.handle('get-plans', () => {
       upsertSearchEntries(plans.map(p => ({
         id: p.filename, type: 'plan', folder: null,
         title: p.title,
-        body: fs.readFileSync(path.join(PLANS_DIR, p.filename), 'utf8'),
+        body: p.content,
       })));
     } catch {}
 
-    return plans;
+    let slugSessions = [];
+    let projectRows = [];
+    try {
+      slugSessions = dbModule.getSlugSessions();
+      projectRows = dbModule.listProjects();
+    } catch (err) {
+      console.error('Error linking plans to sessions:', err);
+    }
+    return linkPlans(plans, slugSessions, projectResolver(projectRows, projects.projectForCwd));
   } catch (err) {
     console.error('Error reading plans:', err);
     return [];

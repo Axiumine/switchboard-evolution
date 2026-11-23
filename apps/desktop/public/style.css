@@ -9301,6 +9301,64 @@ body.project-window .ws-body:has(> .note-window-body) { padding: 0; overflow: hi
 }
 #files-filters .session-filter-select { flex: 1 1 auto; }
 
+/* ========== PLANS TAB FILTERS (plans-memory-view.js, plans-list.js) ========== */
+/* Group, Filter and Sort in one row under the search field; each shrinks with
+   the sidebar (344px at least) and cuts its text. */
+#plans-filters {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 10px;
+  margin-top: -6px;
+  min-width: 0;
+}
+/* Each control starts with its icon (layers, funnel, arrows), so short labels
+   ("By project", "Last edited") say what they are. */
+#plans-filters .session-filter-select {
+  padding: 0 16px 0 22px;
+  background-repeat: no-repeat, no-repeat;
+  background-position: left 6px center, right 6px center;
+  background-size: 12px 12px, 8px 5px;
+}
+#plans-group-select {
+  flex-grow: 1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a7a90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m12 3 9 5-9 5-9-5z'/%3E%3Cpath d='m3 13 9 5 9-5'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%237a7a90' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+#plans-sort-select {
+  flex-grow: 1.1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a7a90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 16 4 4 4-4'/%3E%3Cpath d='M7 20V4'/%3E%3Cpath d='m21 8-4-4-4 4'/%3E%3Cpath d='M17 4v16'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%237a7a90' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* The Filter button opens a menu, and looks like the combos beside it. */
+#plans-filter-btn {
+  flex-grow: 0.9;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a7a90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h18l-7 8v6l-4-2v-4z'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%237a7a90' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+#plans-filter-btn[aria-expanded="true"] { border-color: rgb(from var(--accent) r g b / 0.5); }
+
+#plans-content .project-group.collapsed .project-sessions { display: none; }
+#plans-content .project-group.collapsed .arrow { transform: rotate(-90deg); }
+#plans-content .project-header .project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plans-empty .plans-clear-filters {
+  display: block;
+  margin: 10px auto 0;
+  padding: 4px 10px;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #c0c0d0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.plans-empty .plans-clear-filters:hover { border-color: rgb(from var(--accent) r g b / 0.5); }
+
 /* An opened file's row: the icon of its type, where agent files have a brain. */
 .memory-file-icon {
   flex-shrink: 0;

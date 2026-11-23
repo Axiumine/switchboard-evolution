@@ -74,6 +74,12 @@
         <option value="opened">Opened files</option>
       </select>
     </div>
+    <!-- The Plans tab's Group, Filter and Sort, under its search field (plans-memory-view.js fills the combos from plans-list.js). -->
+    <div id="plans-filters" style="display:none;">
+      <select id="plans-group-select" class="session-filter-select" title="Group the plans by" aria-label="Group plans by"></select>
+      <button id="plans-filter-btn" class="session-filter-select" type="button" title="Filter the plans" aria-label="Filter plans" aria-haspopup="menu">All plans</button>
+      <select id="plans-sort-select" class="session-filter-select" title="Sort the plans by" aria-label="Sort plans by"></select>
+    </div>
     <div id="search-actions" hidden>
       <span id="search-actions-count"></span>
       <button id="search-restore-btn" type="button" hidden></button>
@@ -225,6 +231,7 @@
   <script src="git-graph-menus.js"></script>
   <script src="git-graph-settings.js"></script>
   <script src="project-git-graph-view.js"></script>
+  <script src="plans-list.js"></script>
   <script src="plans-memory-view.js"></script>
   <script src="files-list.js"></script>
   <script src="files-view.js"></script>

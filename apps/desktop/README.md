@@ -70,7 +70,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 - **Node Knowledge tab** — The project's repositories as code graphs ([codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)): architecture, search, call traces, the impact of a change, Cypher queries, decision records, coverage, the 3D Lens, and the graph's tools in the project's agent sessions.
 - **Project tasks and server logs** — Run `.vscode/tasks.json` commands and keep their logs beside your sessions.
 - **Scheduled tasks** — Start a session with a prompt on a timer, in a project, a track, or any folder.
-- **Plans and memory** (Claude only) — Browse and edit plan files and `CLAUDE.md` in one place.
+- **Plans and memory** (Claude only) — Browse and edit plan files and `CLAUDE.md` in one place. Plans can be grouped by project, folder or date, filtered by project, folder, date or session, and sorted by edit date, creation date or title.
 - **Activity stats** — Heatmap of your coding activity across all projects.
 
 ## Sessions

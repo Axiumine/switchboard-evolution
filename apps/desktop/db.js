@@ -404,6 +404,13 @@ const stmts = {
       headHash = excluded.headHash, indexedBytes = excluded.indexedBytes,
       firstTimestamp = excluded.firstTimestamp, lastTimestamp = excluded.lastTimestamp
   `),
+  // Every Claude session with a slug, for linking plan-mode plans (named
+  // <slug>.md) to their session, folder and project (plans-source.js).
+  cacheGetSlugSessions: db.prepare(`
+    SELECT c.slug, c.sessionId, c.projectPath, c.created, c.modified, m.projectId, m.archived
+    FROM session_cache c LEFT JOIN session_meta m ON m.sessionId = c.sessionId
+    WHERE c.slug IS NOT NULL AND c.slug != ''
+  `),
   cacheGetByFolder: db.prepare('SELECT sessionId, fileMtime FROM session_cache WHERE folder = ?'),
   cacheGetSession: db.prepare('SELECT * FROM session_cache WHERE sessionId = ?'),
   cacheUpdateAiTitle: db.prepare('UPDATE session_cache SET aiTitle = ? WHERE sessionId = ? AND runtime = ?'),
@@ -576,6 +583,11 @@ function upsertCachedSessions(sessions) {
 
 function getCachedByFolder(folder) {
   return stmts.cacheGetByFolder.all(folder);
+}
+
+/** { slug, sessionId, projectPath, created, modified, projectId, archived } for every session with a slug. */
+function getSlugSessions() {
+  return stmts.cacheGetSlugSessions.all().map(r => ({ ...r, archived: !!r.archived }));
 }
 
 function getCachedSession(sessionId) {
@@ -957,7 +969,7 @@ function withImmediateTransaction(fn) {
 module.exports = {
   getMeta, getAllMeta, setName, toggleStar, setArchived,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedSession, upsertCachedSessions,
-  updateCachedAiTitle,
+  updateCachedAiTitle, getSlugSessions,
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,
   upsertSearchEntries, updateSearchTitle, deleteSearchSession, deleteSearchFolder, deleteSearchType,

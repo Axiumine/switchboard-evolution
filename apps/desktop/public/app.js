@@ -27,6 +27,8 @@ const statsContent = document.getElementById('stats-content');
 const memoryContent = document.getElementById('memory-content');
 // The Files tab's filter combo, under the search field (files-view.js).
 const filesFilters = document.getElementById('files-filters');
+// The Plans tab's Group, Filter and Sort row (plans-memory-view.js).
+const plansFilters = document.getElementById('plans-filters');
 const statsViewer = document.getElementById('stats-viewer');
 const statsViewerBody = document.getElementById('stats-viewer-body');
 const memoryViewer = document.getElementById('memory-viewer');
@@ -762,7 +764,7 @@ function clearSearch() {
     resetSearchExclusions();
     refreshSidebar({ resort: true });
   } else if (activeTab === 'plans') {
-    renderPlans(cachedPlans);
+    setPlansSearchMatch(null);
   } else if (activeTab === 'memory') {
     renderFiles();
   }
@@ -808,9 +810,9 @@ searchInput.addEventListener('input', () => {
         }
         refreshSidebar({ resort: true });
       } else if (activeTab === 'plans') {
+        // The plan's Group, Filter and Sort apply to what the search found.
         const results = await window.api.search('plan', query, searchTitlesOnly);
-        const matchIds = new Set(results.map(r => r.id));
-        renderPlans(cachedPlans.filter(p => matchIds.has(p.filename)));
+        setPlansSearchMatch(new Set(results.map(r => r.id)));
       } else if (activeTab === 'memory') {
         // The Files tab: agent files and the files opened in the app.
         const [agentResults, openedResults] = await Promise.all([
@@ -1412,6 +1414,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     statsContent.style.display = 'none';
     memoryContent.style.display = 'none';
     if (filesFilters) filesFilters.style.display = 'none';
+    if (plansFilters) plansFilters.style.display = 'none';
     sessionFilters.style.display = 'none';
     searchBar.style.display = 'none';
     // The grouping combo beside the field belongs to the Projects tab.
@@ -1445,6 +1448,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     } else if (tabName === 'plans') {
       searchBar.style.display = '';
       searchInput.placeholder = 'Search plans...';
+      if (plansFilters) plansFilters.style.display = '';
       plansContent.style.display = '';
       loadPlans();
     } else if (tabName === 'stats') {
