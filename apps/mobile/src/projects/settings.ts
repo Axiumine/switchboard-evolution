@@ -145,6 +145,22 @@ export function trackDoneQuestion(track: Pick<Track, 'id' | 'name'>, schedules: 
   return `${paused} scheduled task${paused === 1 ? '' : 's'} in it will pause until the track is reopened.`;
 }
 
+// A project is removed only once this word is typed (as on the desktop), so it is never one tap away.
+export const REMOVE_PROJECT_WORD = 'delete';
+
+/** Whether what was typed confirms a removal: the word, in any case, spaces around it ignored. */
+export function isRemoveProjectWord(value: string | null | undefined): boolean {
+  return String(value ?? '').trim().toLowerCase() === REMOVE_PROJECT_WORD;
+}
+
+/** What removing a project says: the folder and the sessions stay, its tracks and schedules go. */
+export function removeProjectQuestion(project: Pick<Project, 'name' | 'root'>): { title: string; message: string } {
+  return {
+    title: `Remove ${project.name} from Switchboard Evolution?`,
+    message: `The folder ${project.root} and all its sessions stay on disk. The project's tracks and schedules are removed with it.\n\nType ${REMOVE_PROJECT_WORD} to confirm.`,
+  };
+}
+
 /** What detaching a folder says: a worktree's checkout can go too, its branch stays. */
 export function detachQuestion(project: Pick<Project, 'name'>, folder: ProjectFolder): { title: string; message: string } {
   const isWorktree = folder.mode === 'worktree';

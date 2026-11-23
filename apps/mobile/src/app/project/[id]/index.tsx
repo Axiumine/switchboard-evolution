@@ -17,10 +17,11 @@ import { SettingsTab } from '@/components/project/tabs/SettingsTab';
 import { STATE_COLORS } from '@/components/SessionRow';
 import { useProjectTab } from '@/components/project/useProjectTab';
 import { Sheet, type SheetOption } from '@/components/Sheet';
+import { RemoveProjectPrompt } from '@/components/project/RemoveProjectPrompt';
 import { TextPrompt } from '@/components/TextPrompt';
 import { openNote } from '@/notes/panel';
 import { PROJECT_TABS, planTabMeta, type ProjectTab } from '@/projects/tabs';
-import { removeProject, toggleProjectDone } from '@/projects/flows';
+import { toggleProjectDone } from '@/projects/flows';
 import { ProjectSessionContext } from '@/projects/open-session';
 import { act, useMinute, useProject, useProjectPlan } from '@/projects/queries';
 import { rowState } from '@/sessions/model';
@@ -54,6 +55,7 @@ export default function ProjectScreen() {
   const [sessionActions, setSessionActions] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
   const [rename, setRename] = useState<Rename | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const refresh = useCallback(() => Promise.all([refetch(), plan.refetch()]), [refetch, plan]);
   // Node Knowledge only when the computer offers it (a desktop older than it does not).
@@ -83,7 +85,7 @@ export default function ProjectScreen() {
     // As on the desktop: marking done asks about running work, schedules and worktrees first.
     { label: project.status === 'done' ? 'Reopen' : 'Mark as done', onPress: () => { toggleProjectDone(project); } },
     { label: 'Settings', onPress: () => selectTab('settings') },
-    { label: 'Remove project…', destructive: true, onPress: () => removeProject(project, () => router.back()) },
+    { label: 'Remove project…', destructive: true, onPress: () => setRemoving(true) },
   ];
 
   const bodies: Record<ProjectTab, ReactNode> = {
@@ -148,6 +150,7 @@ export default function ProjectScreen() {
         options={resolveSnoozePresets().map((preset) => ({ label: preset.label, hint: preset.whenLabel, onPress: () => run('update-project', [project.id, { snoozedUntil: preset.snoozedUntil }]) }))}
         onClose={() => setSnoozing(false)}
       />
+      <RemoveProjectPrompt project={project} visible={removing} onClose={() => setRemoving(false)} after={() => router.back()} />
       <TextPrompt
         visible={!!rename}
         title={rename?.kind === 'new-track' ? 'New track' : 'Rename'}

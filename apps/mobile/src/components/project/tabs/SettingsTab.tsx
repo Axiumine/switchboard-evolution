@@ -8,7 +8,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { Field, MONO, SelectRow } from '@/components/form';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
-import { deleteTrack, detachFolder, removeProject, toggleProjectDone, toggleTrackDone, wakeProject } from '@/projects/flows';
+import { deleteTrack, detachFolder, toggleProjectDone, toggleTrackDone, wakeProject } from '@/projects/flows';
 import type { Project, ProjectFolder, Track } from '@/projects/model';
 import { branchHelp, cliChoices, folderDetail, projectCwdChoices, trackColor, trackCwdChoices, type FolderGit } from '@/projects/settings';
 import type { ProjectTab } from '@/projects/tabs';
@@ -18,6 +18,7 @@ import { request, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import { basename } from '@/worktrees/model';
 import type { Run } from '../actions';
+import { RemoveProjectPrompt } from '../RemoveProjectPrompt';
 import { Section } from '../Section';
 import { useTabScroll } from '../useTabScroll';
 
@@ -49,6 +50,7 @@ export function SettingsTab({ project, now, run, onSelectTab }: {
   });
   const [folderMenu, setFolderMenu] = useState<ProjectFolder | 'root' | null>(null);
   const [newTrack, setNewTrack] = useState(false);
+  const [removing, setRemoving] = useState(false);
   // A text field shows what was typed until it is saved. One that is cleared, or
   // whose save fails, is drawn again from the stored value: only that field, so
   // another one being typed in keeps its text and focus.
@@ -228,7 +230,7 @@ export function SettingsTab({ project, now, run, onSelectTab }: {
             <FootButton label="Wake now" hint={`wakes ${snoozeWakeDescription(project.snoozedUntil!)}`} onPress={() => wakeProject(project)} />
           ) : null}
           <FootButton label={project.status === 'done' ? 'Reopen project' : 'Mark as done'} onPress={() => { toggleProjectDone(project); }} />
-          <FootButton label="Remove project…" danger onPress={() => removeProject(project, () => router.back())} />
+          <FootButton label="Remove project…" danger onPress={() => setRemoving(true)} />
           <Text style={styles.note}>Changes save as you make them.</Text>
         </View>
       </ScrollView>
@@ -239,6 +241,7 @@ export function SettingsTab({ project, now, run, onSelectTab }: {
         options={folderMenu ? folderOptions(folderMenu) : []}
         onClose={() => setFolderMenu(null)}
       />
+      <RemoveProjectPrompt project={project} visible={removing} onClose={() => setRemoving(false)} after={() => router.back()} />
       <TextPrompt
         visible={newTrack}
         title="New track"

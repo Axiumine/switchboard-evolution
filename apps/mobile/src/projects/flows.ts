@@ -99,15 +99,12 @@ export function wakeProject(project: Project) {
   return attempt('wake the project', () => act('update-project', [project.id, { snoozedUntil: null }]));
 }
 
-/** Forget the project; its folder and sessions stay. `after` runs once it is gone. */
+/**
+ * Forget the project; its folder and sessions stay. `after` runs once it is
+ * gone. Asked first by RemoveProjectPrompt, where "delete" has to be typed.
+ */
 export function removeProject(project: Project, after?: () => void) {
-  Alert.alert(`Remove ${project.name} from Switchboard Evolution?`, `The folder ${project.root} and all sessions stay on disk.`, [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'Remove', style: 'destructive',
-      onPress: () => { attempt('remove the project', async () => { await act('delete-project', [project.id]); after?.(); }); },
-    },
-  ]);
+  return attempt('remove the project', async () => { await act('delete-project', [project.id]); after?.(); });
 }
 
 /**

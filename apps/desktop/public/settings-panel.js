@@ -102,6 +102,8 @@
     const visCountValue = fieldValue('visibleSessionCount', 10);
     const maxAgeValue = fieldValue('sessionMaxAgeDays', 3);
     const themeValue = fieldValue('terminalTheme', 'switchboard');
+    // Global only: the accent colour of the whole app (accent.js).
+    const accentValue = window.AccentColor ? AccentColor.normalize(current.accentColor) : '#8088ff';
     const mcpEmulationValue = fieldValue('mcpEmulation', true);
     // Global-only: where new projects get their folder (projects.js). Empty
     // means the default, ~/Switchboard.
@@ -273,6 +275,17 @@
             </select>
           </div>
         </div>
+
+        ${window.AccentColor ? `<div class="settings-field settings-field-wide">
+          <div class="settings-field-info">
+            <span class="settings-label">Accent Color</span>
+            <div class="settings-description">The color of buttons, selections, active tabs and highlights across the app, in every window. It changes as you pick it.</div>
+          </div>
+          <div class="settings-field-control sv-accent" role="group" aria-label="Accent color">
+            ${AccentColor.PRESETS.map(p => `<button type="button" class="sv-accent-swatch${accentValue === p.color ? ' on' : ''}" data-accent="${escapeAttr(p.color)}" style="--swatch: ${escapeAttr(p.color)}" title="${escapeAttr(p.label)}" aria-label="${escapeAttr(p.label)}" aria-pressed="${accentValue === p.color}"></button>`).join('')}
+            <label class="sv-accent-custom" title="Any color"><input type="color" id="sv-accent-color" value="${escapeAttr(accentValue)}" aria-label="Custom accent color"><span>Custom</span></label>
+          </div>
+        </div>` : ''}
 
         <div class="settings-field">
           <div class="settings-field-info">
@@ -581,6 +594,27 @@
       checkUpdatesBtn.addEventListener('click', () => {
         window.api.updaterCheck();
       });
+    }
+
+    // Accent colour: shown at once in every window and saved right away, apart from Save.
+    const accentGroup = settingsViewerBody.querySelector('.sv-accent');
+    if (accentGroup && window.AccentColor) {
+      const picker = accentGroup.querySelector('#sv-accent-color');
+      const choose = async (color) => {
+        const c = AccentColor.apply(color);
+        accentGroup.querySelectorAll('.sv-accent-swatch').forEach(b => {
+          const on = b.dataset.accent === c;
+          b.classList.toggle('on', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
+        if (picker.value !== c) picker.value = c;
+        const existing = (await window.api.getSetting('global')) || {};
+        if (existing.accentColor === c || (!existing.accentColor && c === AccentColor.DEFAULT)) return;
+        await window.api.setSetting('global', { ...existing, accentColor: c === AccentColor.DEFAULT ? null : c });
+      };
+      accentGroup.querySelectorAll('.sv-accent-swatch').forEach(b => { b.onclick = () => choose(b.dataset.accent); });
+      picker.addEventListener('input', () => { AccentColor.apply(picker.value); });
+      picker.addEventListener('change', () => choose(picker.value));
     }
 
     // Remove project button

@@ -51,7 +51,7 @@
 .web-page-btn:disabled { opacity: 0.35; cursor: default; background: transparent; }
 .web-page-btn.is-done { color: #59d46d; }
 .web-page-btn:focus-visible,
-.web-page-address:focus-visible { outline: 2px solid rgba(128,136,255,0.6); outline-offset: 1px; }
+.web-page-address:focus-visible { outline: 2px solid rgb(from var(--accent) r g b / 0.6); outline-offset: 1px; }
 
 .web-page-address {
   flex: 1 1 auto;
@@ -82,7 +82,7 @@
   top: 0;
   bottom: 0;
   width: 30%;
-  background: rgba(128,136,255,0.85);
+  background: rgb(from var(--accent) r g b / 0.85);
   animation: web-page-loading 1.1s ease-in-out infinite;
 }
 @keyframes web-page-loading {

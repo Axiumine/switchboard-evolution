@@ -3,8 +3,13 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, Tex
 
 import { colors, spacing } from '@/theme';
 
-/** A small dialog with one text field. Resolves through onSubmit with the trimmed text. `message` is a line under the title. */
-export function TextPrompt({ visible, title, message, placeholder, initialValue = '', confirm = 'Save', onSubmit, onClose }: {
+/**
+ * A small dialog with one text field. Resolves through onSubmit with the
+ * trimmed text. `message` is a line under the title. With `canSubmit` the
+ * confirm button waits until the text passes it (a word to type, say), and
+ * `destructive` paints it as a removal.
+ */
+export function TextPrompt({ visible, title, message, placeholder, initialValue = '', confirm = 'Save', onSubmit, onClose, canSubmit, destructive, autoCapitalize }: {
   visible: boolean;
   title: string;
   message?: string;
@@ -13,9 +18,13 @@ export function TextPrompt({ visible, title, message, placeholder, initialValue 
   confirm?: string;
   onSubmit: (value: string) => void;
   onClose: () => void;
+  canSubmit?: (value: string) => boolean;
+  destructive?: boolean;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }) {
   const [value, setValue] = useState(initialValue);
-  const submit = () => { onClose(); onSubmit(value.trim()); };
+  const ready = !canSubmit || canSubmit(value);
+  const submit = () => { if (!ready) return; onClose(); onSubmit(value.trim()); };
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => setValue(initialValue)}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
@@ -30,6 +39,8 @@ export function TextPrompt({ visible, title, message, placeholder, initialValue 
             onSubmitEditing={submit}
             returnKeyType="done"
             placeholder={placeholder}
+            autoCapitalize={autoCapitalize}
+            autoCorrect={autoCapitalize === 'none' ? false : undefined}
             style={styles.input}
             placeholderTextColor={colors.textFaint}
           />
@@ -37,8 +48,8 @@ export function TextPrompt({ visible, title, message, placeholder, initialValue 
             <Pressable onPress={onClose} style={styles.button} accessibilityRole="button">
               <Text style={[styles.buttonText, { color: colors.textDim }]}>Cancel</Text>
             </Pressable>
-            <Pressable onPress={submit} style={styles.button} accessibilityRole="button">
-              <Text style={styles.buttonText}>{confirm}</Text>
+            <Pressable onPress={submit} disabled={!ready} style={[styles.button, !ready && styles.buttonOff]} accessibilityRole="button" accessibilityState={{ disabled: !ready }}>
+              <Text style={[styles.buttonText, destructive && { color: colors.danger }]}>{confirm}</Text>
             </Pressable>
           </View>
         </View>
@@ -64,5 +75,6 @@ const styles = StyleSheet.create({
   },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
   button: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  buttonOff: { opacity: 0.4 },
   buttonText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
 });

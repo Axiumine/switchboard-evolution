@@ -174,10 +174,10 @@
   justify-content: space-between;
   gap: 10px;
   padding: 7px 11px;
-  border: 1px solid rgba(122,132,255,0.28);
+  border: 1px solid rgb(from var(--accent) r g b / 0.28);
   border-radius: 8px;
-  background: rgba(122,132,255,0.09);
-  color: #aab0ee;
+  background: rgb(from var(--accent) r g b / 0.09);
+  color: color-mix(in srgb, var(--accent) 53%, rgb(220 220 220));
   font-size: 11.5px;
 }
 
@@ -264,14 +264,14 @@
 
 .gg-row:hover { background: rgba(255,255,255,0.03); }
 .gg-row.gg-row-selected,
-.gg-row.gg-row-compare-selected { background: rgba(122,132,255,0.11); }
+.gg-row.gg-row-compare-selected { background: rgb(from var(--accent) r g b / 0.11); }
 .gg-row.gg-muted .gg-subject,
 .gg-row.gg-muted .gg-cell-author,
 .gg-row.gg-muted .gg-cell-date { color: #6e6e6e; }
 .gg-row.gg-find-match { outline: 1px solid rgba(224,170,99,0.4); outline-offset: -1px; }
 .gg-row.gg-find-current { background: rgba(224,170,99,0.14); }
 .gg-row.gg-flash { animation: gg-flash 0.9s ease; }
-@keyframes gg-flash { 0%, 100% { background: transparent; } 40% { background: rgba(122,132,255,0.22); } }
+@keyframes gg-flash { 0%, 100% { background: transparent; } 40% { background: rgb(from var(--accent) r g b / 0.22); } }
 
 .gg-cell {
   padding: 5px 10px;
@@ -286,14 +286,14 @@
 
 .gg-cell-graph { width: var(--gg-graph-width, 60px); flex: 0 0 auto; padding: 0; position: relative; }
 .gg-cell-select { width: var(--gg-select-width, 22px); flex: 0 0 auto; padding: 0; justify-content: center; cursor: default; }
-.gg-select-box { margin: 0; width: 12px; height: 12px; cursor: pointer; accent-color: #7a84ff; opacity: 0.45; }
+.gg-select-box { margin: 0; width: 12px; height: 12px; cursor: pointer; accent-color: var(--accent); opacity: 0.45; }
 .gg-row:hover .gg-select-box, .gg-select-box:checked { opacity: 1; }
-.gg-row.gg-row-checked { box-shadow: inset 2px 0 0 #7a84ff; }
+.gg-row.gg-row-checked { box-shadow: inset 2px 0 0 var(--accent); }
 /* Selection off (the default): no first column until Enable Selection in the toolbar's "•••". */
 .gg-table-wrap.gg-no-select { --gg-select-width: 0px; }
 .gg-table-wrap.gg-no-select .gg-cell-select,
 .gg-table-wrap.gg-no-select .gg-th[data-col="select"] { display: none; }
-.gg-selected-count { font-size: 11px; color: #a6abff; white-space: nowrap; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.gg-selected-count { font-size: 11px; color: color-mix(in srgb, var(--accent) 70%, white); white-space: nowrap; font-variant-numeric: tabular-nums; margin-right: 4px; }
 .gg-cell-description { flex: 1 1 auto; min-width: 200px; gap: 6px; }
 .gg-cell-date { width: 140px; flex: 0 0 auto; color: #8989a0; }
 .gg-cell-author { width: 130px; flex: 0 0 auto; color: #8989a0; }
@@ -471,7 +471,7 @@
 }
 
 .gg-file-row:hover { background: rgba(255,255,255,0.04); }
-.gg-file-row.gg-file-row-open { background: rgba(122,132,255,0.13); }
+.gg-file-row.gg-file-row-open { background: rgb(from var(--accent) r g b / 0.13); }
 
 .gg-file-status {
   width: 15px;
@@ -681,8 +681,8 @@
 /* --- Compare of 2 to 4 commits (git-graph-compare.js) --- */
 .gg-compare-slot { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; }
 .gg-compare-slot:empty { display: none; }
-.gg-compare-btn { color: #d8d8f0; background: rgba(122,132,255,0.16); border-color: rgba(122,132,255,0.35); }
-.gg-compare-btn:hover:not(:disabled) { background: rgba(122,132,255,0.26); }
+.gg-compare-btn { color: #d8d8f0; background: rgb(from var(--accent) r g b / 0.16); border-color: rgb(from var(--accent) r g b / 0.35); }
+.gg-compare-btn:hover:not(:disabled) { background: rgb(from var(--accent) r g b / 0.26); }
 .gg-compare-btn:disabled, #gg-compare-window-btn:disabled, #gg-select-none-btn:disabled { opacity: 0.4; cursor: default; }
 
 .gg-cmp-overlay {
@@ -713,7 +713,7 @@
 .gg-cmp-file-head { text-transform: uppercase; letter-spacing: 0.05em; width: 45%; }
 .gg-cmp-row { cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.035); }
 .gg-cmp-row:hover { background: rgba(255,255,255,0.03); }
-.gg-cmp-row.gg-cmp-row-selected { background: rgba(122,132,255,0.13); }
+.gg-cmp-row.gg-cmp-row-selected { background: rgb(from var(--accent) r g b / 0.13); }
 .gg-cmp-file { padding: 4px 10px; color: #d0d0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
 .gg-cmp-dir { color: #77778c; }
 .gg-cmp-cell { padding: 4px 10px; white-space: nowrap; }

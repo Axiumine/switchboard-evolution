@@ -1555,6 +1555,8 @@ setTimeout(() => {
 // --- Init: restore settings ---
 (async () => {
   const global = await window.api.getSetting('global');
+  // The saved accent colour wins over the copy accent.js painted with.
+  window.AccentColor?.sync(global || {});
   if (global) {
     if (global.sidebarWidth) {
       document.getElementById('sidebar').style.width = global.sidebarWidth + 'px';

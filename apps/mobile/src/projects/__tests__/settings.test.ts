@@ -2,8 +2,8 @@ import { expect, test } from '@jest/globals';
 
 import type { Project, Schedule, Track } from '../model';
 import {
-  branchHelp, busyNote, cliChoices, detachQuestion, folderDetail, listLines, markDoneQuestion, projectBranchName, projectCwdChoices, projectHue,
-  runningWorkLines, trackColor, trackCwdChoices, trackDoneQuestion, type RunningWork,
+  branchHelp, busyNote, cliChoices, detachQuestion, folderDetail, isRemoveProjectWord, listLines, markDoneQuestion, projectBranchName, projectCwdChoices, projectHue,
+  REMOVE_PROJECT_WORD, removeProjectQuestion, runningWorkLines, trackColor, trackCwdChoices, trackDoneQuestion, type RunningWork,
 } from '../settings';
 
 const track = (id: string, extra: Partial<Track> = {}): Track => ({ id, name: id, status: 'active', cwd: null, cli: null, sessions: [], ...extra });
@@ -123,4 +123,17 @@ test('a track can name any of three CLIs, in the desktop\'s order', () => {
   expect(cliChoices(harnesses, null)).toEqual([
     { key: '', label: 'Ask each time' }, { key: 'claude', label: 'Claude' }, { key: 'codex', label: 'Codex' }, { key: 'opencode', label: 'OpenCode' },
   ]);
+});
+
+test('a project is removed only once the word is typed, in any case and with spaces around it', () => {
+  expect(REMOVE_PROJECT_WORD).toBe('delete');
+  for (const ok of ['delete', 'DELETE', ' Delete ']) expect(isRemoveProjectWord(ok)).toBe(true);
+  for (const no of ['', 'delet', 'deleted', 'remove', 'yes', 'de lete', null, undefined]) expect(isRemoveProjectWord(no)).toBe(false);
+});
+
+test('removing a project says what stays and what to type', () => {
+  const q = removeProjectQuestion(project());
+  expect(q.title).toBe('Remove Web from Switchboard Evolution?');
+  expect(q.message).toContain('/Users/alex/Switchboard/web');
+  expect(q.message).toContain('Type delete to confirm.');
 });

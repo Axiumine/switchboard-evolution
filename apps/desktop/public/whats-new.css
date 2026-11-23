@@ -14,7 +14,7 @@
   width: min(1080px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
   overflow: auto;
-  border: 1px solid rgba(145, 151, 255, 0.28);
+  border: 1px solid color-mix(in srgb, color-mix(in srgb, var(--accent) 87%, white) 28%, transparent);
   border-radius: 16px;
   background: #17171f;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
@@ -26,7 +26,7 @@
 
 .whats-new-kicker {
   margin-bottom: 5px;
-  color: #9298ff;
+  color: color-mix(in srgb, var(--accent) 86%, white);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.13em;
@@ -166,16 +166,16 @@
 
 .whats-new-dot.active {
   width: 20px;
-  background: #8088ff;
+  background: var(--accent);
 }
 
 .whats-new-dismiss {
   flex: none;
   min-width: 92px;
-  border: 1px solid rgba(128, 136, 255, 0.45);
+  border: 1px solid rgb(from var(--accent) r g b / 0.45);
   border-radius: 8px;
   padding: 8px 16px;
-  background: rgba(128, 136, 255, 0.18);
+  background: rgb(from var(--accent) r g b / 0.18);
   color: #d8d8f0;
   font: inherit;
   font-size: 13px;
@@ -185,15 +185,15 @@
 
 .whats-new-dismiss:hover,
 .whats-new-dismiss:focus-visible {
-  background: rgba(128, 136, 255, 0.28);
-  border-color: rgba(128, 136, 255, 0.7);
+  background: rgb(from var(--accent) r g b / 0.28);
+  border-color: rgb(from var(--accent) r g b / 0.7);
 }
 
 .whats-new-close:focus-visible,
 .whats-new-arrow:focus-visible,
 .whats-new-dot:focus-visible,
 .whats-new-dismiss:focus-visible {
-  outline: 2px solid #9298ff;
+  outline: 2px solid color-mix(in srgb, var(--accent) 86%, white);
   outline-offset: 2px;
 }
 

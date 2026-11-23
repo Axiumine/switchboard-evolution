@@ -4081,8 +4081,43 @@ window.addEventListener('focus', () => {
   if ((currentProjectTree()?.projects || []).some(p => p.snoozedUntil)) renderProjectList();
 });
 
+// A project is removed only once "delete" is typed, so it is never one click away.
+const REMOVE_PROJECT_WORD = 'delete';
+
+/** Whether what was typed confirms a removal: the word, in any case, spaces around it ignored. */
+function isRemoveProjectWord(value) {
+  return String(value || '').trim().toLowerCase() === REMOVE_PROJECT_WORD;
+}
+
+/** Ask before a project is removed; resolves true once the user typed the word and confirmed. */
+function confirmRemoveProject(project) {
+  return new Promise(resolve => {
+    let input = null;
+    const handle = gitGraphOpenDialog({
+      title: `Remove ${project.name} from Switchboard Evolution?`,
+      bodyHtml: `<p class="ws-remove-text">The folder <span class="mono">${escapeHtml(project.root || '')}</span> and all its sessions stay on disk. The project's tracks and schedules are removed with it.</p>
+        <label class="new-project-label" for="ws-remove-word">Type <strong>${REMOVE_PROJECT_WORD}</strong> to confirm</label>
+        <div class="folder-input-row"><input type="text" id="ws-remove-word" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${REMOVE_PROJECT_WORD}" aria-label="Type ${REMOVE_PROJECT_WORD} to confirm"></div>`,
+      primaryLabel: 'Remove project',
+      primaryDanger: true,
+      focusSelector: '#ws-remove-word',
+      onSubmit: async () => {
+        if (!isRemoveProjectWord(input && input.value)) throw new Error(`Type ${REMOVE_PROJECT_WORD} to remove the project.`);
+        handle.close();
+        resolve(true);
+      },
+      onCancel: () => resolve(false),
+    });
+    input = handle.dialog.querySelector('#ws-remove-word');
+    const primary = handle.dialog.querySelector('.gg-dialog-primary');
+    const sync = () => { primary.disabled = !isRemoveProjectWord(input.value); };
+    input.addEventListener('input', sync);
+    sync();
+  });
+}
+
 async function removeProjectFlow(project) {
-  if (!confirm(`Remove ${project.name} from Switchboard?\n\nThe folder ${project.root} and all sessions stay on disk.`)) return;
+  if (!(await confirmRemoveProject(project))) return;
   const result = await window.api.deleteProject(project.id);
   if (result?.error) { alert(result.error); return; }
   projectsUi.navigationByProject.delete(project.id);

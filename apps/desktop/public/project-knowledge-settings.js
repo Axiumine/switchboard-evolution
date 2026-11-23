@@ -59,7 +59,7 @@ async function knRenderGlobalSettings(el) {
       if (!(field.key in keys)) continue;
       html += knSettingsField(field.label, escapeHtml(field.help), knConfigControl(field, values[field.key], keys));
     }
-    html += knSettingsField('CBM Lens', 'codebase-memory-mcp\'s own web view of the graph, shown in the Node Knowledge tab. <span class="kn-error-text">No login</span>: any program on this computer can open it and, through it, read every index or start and delete one. It listens on 127.0.0.1 only; never publish its port through a tunnel.',
+    html += knSettingsField('Lens', 'codebase-memory-mcp\'s own web view of the graph, shown in the Node Knowledge tab. <span class="kn-error-text">No login</span>: any program on this computer can open it and, through it, read every index or start and delete one. It listens on 127.0.0.1 only; never publish its port through a tunnel.',
       `${knConfigControl({ key: 'ui_enabled' }, values.ui_enabled, keys)}<input type="text" class="settings-input settings-input-compact kn-config-input" data-kn-key="ui_port" value="${escapeAttr(values.ui_port || '9749')}" aria-label="Port" title="Port">`);
   }
   html += '<div class="settings-description kn-settings-saved" data-kn-saved></div>';
