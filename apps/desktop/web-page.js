@@ -5,8 +5,14 @@
 // from one start to the next, apart from the app's own pages), no preload and
 // no Node, a sandbox, and no permissions but the clipboard and full screen.
 // A link that asks for a new window goes to the system browser.
+//
+// The Node Knowledge tab's Lens (codebase-memory-mcp's own web UI, which a
+// frame cannot show: it sends frame-ancestors 'none') is the other page a
+// <webview> may hold: http on 127.0.0.1 only, in a session of its own.
 
 const WEB_PARTITION = 'persist:github-web';
+const LENS_PARTITION = 'persist:cbm-lens';
+const LENS_HOSTS = new Set(['127.0.0.1', 'localhost']);
 const WEB_URL_MAX = 2048;
 // GitHub's "Copy" buttons write the clipboard; a video may go full screen.
 const WEB_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen']);
@@ -19,6 +25,25 @@ function isWebPageUrl(url) {
   } catch {
     return false;
   }
+}
+
+/** The Lens on this computer: http to 127.0.0.1 or localhost, on a port of its own. */
+function isLensUrl(url) {
+  if (typeof url !== 'string' || !url || url.length > WEB_URL_MAX) return false;
+  try {
+    const u = new URL(url);
+    const port = Number(u.port);
+    return u.protocol === 'http:' && LENS_HOSTS.has(u.hostname) && Number.isInteger(port) && port >= 1024 && port <= 65535 && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a page of this partition may load `url`. */
+function allowedIn(partition, url) {
+  if (partition === WEB_PARTITION) return isWebPageUrl(url);
+  if (partition === LENS_PARTITION) return isLensUrl(url);
+  return false;
 }
 
 /**
@@ -37,7 +62,7 @@ function guardWebviewAttach(webPreferences, params) {
     webPreferences.webSecurity = true;
     webPreferences.allowRunningInsecureContent = false;
   }
-  return !!params && params.partition === WEB_PARTITION && isWebPageUrl(params.src);
+  return !!params && allowedIn(params.partition, params.src);
 }
 
 function webPagePermission(permission) {
@@ -82,9 +107,10 @@ function setupWebPages({ app, session, shell, clipboard, Menu, log }) {
       openExternal(url);
       return { action: 'deny' };
     });
-    // http and other schemes never load inside; an http link goes to the browser.
+    // A GitHub page stays on https and the Lens on this computer; any other
+    // address goes to the browser.
     contents.on('will-navigate', (event, url) => {
-      if (isWebPageUrl(url)) return;
+      if (contents.session === lensSession ? isLensUrl(url) : isWebPageUrl(url)) return;
       event.preventDefault();
       openExternal(url);
     });
@@ -96,6 +122,16 @@ function setupWebPages({ app, session, shell, clipboard, Menu, log }) {
   const ses = session.fromPartition(WEB_PARTITION);
   ses.setPermissionRequestHandler((_contents, permission, callback) => callback(webPagePermission(permission)));
   ses.setPermissionCheckHandler((_contents, permission) => webPagePermission(permission));
+  lensSession = session.fromPartition(LENS_PARTITION);
+  lensSession.setPermissionRequestHandler((_contents, permission, callback) => callback(lensPermission(permission)));
+  lensSession.setPermissionCheckHandler((_contents, permission) => lensPermission(permission));
 }
 
-module.exports = { WEB_PARTITION, WEB_URL_MAX, isWebPageUrl, guardWebviewAttach, webPagePermission, webPageMenuItems, setupWebPages };
+let lensSession = null;
+
+/** The Lens may copy to the clipboard; nothing else (no camera, location, notifications). */
+function lensPermission(permission) {
+  return permission === 'clipboard-sanitized-write';
+}
+
+module.exports = { WEB_PARTITION, LENS_PARTITION, WEB_URL_MAX, isWebPageUrl, isLensUrl, guardWebviewAttach, webPagePermission, lensPermission, webPageMenuItems, setupWebPages };

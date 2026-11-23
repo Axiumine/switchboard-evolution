@@ -799,6 +799,11 @@ async function downloadBinary() {
   }
 }
 
+/** The program and the session, for the app's settings (no project needed). */
+function binary() {
+  return { ok: true, binary: binaryStatus(), client: client.status(), settings: globalSettings() };
+}
+
 /** Try the session again (after repeated crashes, or a binary fixed by hand). */
 function restart() {
   client.reset();
@@ -840,5 +845,6 @@ module.exports = {
   parseConfigList,
   lens,
   downloadBinary,
+  binary,
   restart,
 };

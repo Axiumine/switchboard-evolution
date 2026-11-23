@@ -9519,3 +9519,14 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .kn-adr-foot { display: flex; align-items: center; gap: 8px; }
 .kn-gap-details summary { padding: 4px 14px; }
 .kn-impact-files .kn-result-name { font-weight: 500; color: #c8c8dc; }
+/* Node Knowledge: the Lens (project-knowledge-lens.js) and its settings (project-knowledge-settings.js) */
+.kn-lens { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.kn-body .kn-view:has(.kn-lens) { overflow: hidden; }
+.kn-lens-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 28px; border-bottom: 1px solid rgba(255,255,255,0.055); }
+.kn-lens-slot { flex: 1 1 auto; min-height: 0; background: #0d0f0e; }
+.kn-lens-host { position: fixed; z-index: 5; background: #0d0f0e; }
+.kn-lens-host[hidden] { display: block !important; visibility: hidden; pointer-events: none; left: -10000px !important; top: 0 !important; width: 10px !important; height: 10px !important; }
+.kn-lens-webview { width: 100%; height: 100%; display: flex; border: 0; }
+.kn-settings-note { margin: 4px 0 8px; }
+.kn-settings-saved { min-height: 16px; margin-top: 4px; }
+.kn-config-input { width: 96px; }

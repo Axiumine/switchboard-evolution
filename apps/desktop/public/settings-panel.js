@@ -353,6 +353,8 @@
         </div>
       </div>` : ''}
 
+      ${!isProject ? '<div class="settings-section" id="sv-knowledge"></div>' : ''}
+
       ${!isProject ? `<div class="settings-section">
         <div class="settings-section-title">Updates</div>
         <div class="settings-field">
@@ -548,6 +550,9 @@
 
     const githubBtn = settingsViewerBody.querySelector('#sv-github-btn');
     if (githubBtn) githubBtn.addEventListener('click', () => window.api.openExternal(SWITCHBOARD_REPOSITORY_URL));
+    // Node Knowledge: codebase-memory-mcp's program and its own settings (project-knowledge-settings.js).
+    const knowledgeSection = settingsViewerBody.querySelector('#sv-knowledge');
+    if (knowledgeSection && typeof knRenderGlobalSettings === 'function') knRenderGlobalSettings(knowledgeSection);
 
     // The donation box of the Projects tab, always here and without its X (donate-box.js).
     const donateSlot = settingsViewerBody.querySelector('#sv-donate');

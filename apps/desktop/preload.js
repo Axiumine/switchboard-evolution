@@ -187,6 +187,7 @@ contextBridge.exposeInMainWorld('api', {
   knowledgeLens: (id, folder, workspace) => ipcRenderer.invoke('knowledge-lens', id, folder, workspace),
   knowledgeDownloadBinary: () => ipcRenderer.invoke('knowledge-download-binary'),
   knowledgeRestart: () => ipcRenderer.invoke('knowledge-restart'),
+  getKnowledgeBinary: () => ipcRenderer.invoke('get-knowledge-binary'),
   onKnowledgeChanged: (callback) => {
     const handler = (_event, payload) => callback(payload || {});
     ipcRenderer.on('knowledge-changed', handler);

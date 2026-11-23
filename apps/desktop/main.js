@@ -867,6 +867,7 @@ ipcMain.handle('knowledge-pick-binary', knowledgeGuarded(async () => {
 ipcMain.handle('knowledge-lens', knowledgeGuarded((id, folder, workspace) => knowledge.lens(id, knPath(folder), String(workspace || ''))));
 ipcMain.handle('knowledge-download-binary', knowledgeGuarded(() => knowledge.downloadBinary()));
 ipcMain.handle('knowledge-restart', knowledgeGuarded(() => knowledge.restart()));
+ipcMain.handle('get-knowledge-binary', knowledgeGuarded(() => knowledge.binary()));
 
 // --- IPC: get-projects ---
 ipcMain.handle('open-external', (_event, url) => {
