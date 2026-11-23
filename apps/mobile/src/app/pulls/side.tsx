@@ -40,13 +40,15 @@ export default function SidebarScreen() {
   const online = useConnection((s) => s.status.state === 'online');
 
   const options = useMemo((): Option[] => {
-    const found = (candidates.data?.items || []).map((item): Option => (side === 'labels'
+    // GitHub ignores a review asked of the pull request's own author: not offered.
+    const offered = (candidates.data?.items || []).filter((item) => side !== 'reviewers' || (item as Person).login !== head?.author);
+    const found = offered.map((item): Option => (side === 'labels'
       ? { key: (item as Label).id, label: (item as Label).name, color: (item as Label).color }
       : { key: side === 'reviewers' ? (item as Person).login : (item as Person).id, label: (item as Person).login, sub: (item as Person).name || '' }));
     // What is ticked stays listed even when the search does not find it.
     const missing = current.filter((c) => picked.has(c.key) && !found.some((f) => f.key === c.key));
     return [...missing, ...found];
-  }, [candidates.data, current, picked, side]);
+  }, [candidates.data, current, picked, side, head?.author]);
 
   const flip = (key: string) => {
     const next = new Set(picked);

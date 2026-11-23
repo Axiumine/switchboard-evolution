@@ -1153,7 +1153,8 @@ function prdOpenSidePicker(ctx, side, button) {
     const result = await prApi('getPullRequestCandidates', ctx.project.id, ctx.repoPath, prRemoteOpts(ctx.data, { kind, query: query || null }));
     if (mine !== request || !menu.isConnected) return;
     if (!result?.ok) { options.innerHTML = `<div class="pr-muted is-error">${escapeHtml(result?.error || 'Could not be read.')}</div>`; return; }
-    items = result.items || [];
+    // GitHub ignores a review asked of the pull request's own author: not offered.
+    items = (result.items || []).filter(item => side !== 'reviewers' || item.login !== head.author);
     paint();
   };
   let timer = null;
