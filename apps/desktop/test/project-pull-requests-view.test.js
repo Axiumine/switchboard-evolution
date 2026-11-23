@@ -10,6 +10,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../public/project-pull-requests-view.js'), 'utf8');
+// The files' tree is the Changes tab's (buildGitChangeTree, gitTreeRows), loaded before, as in index.html.
+const gitViewSource = fs.readFileSync(path.join(__dirname, '../public/project-git-view.js'), 'utf8');
 
 function loadContext(api = {}, extra = {}) {
   const icon = name => () => `<svg data-icon="${name}"></svg>`;
@@ -22,6 +24,7 @@ function loadContext(api = {}, extra = {}) {
     localStorage: { getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => stored.set(k, String(v)) },
     ...extra,
   });
+  vm.runInContext(gitViewSource, context);
   vm.runInContext(source, context);
   return context;
 }
@@ -117,6 +120,20 @@ test('Merge is on only for an open pull request that may be merged, and says why
   }
 });
 
+test('the button before Merge opens the pull request in the browser, closed and merged ones too', () => {
+  const ctx = loadContext();
+  const url = 'https://github.com/acme/widgets/pull/4';
+  const open = ctx.prRowHtml(pr(4, { url }), { repo: REPO });
+  assert.match(open, new RegExp(`data-act="browser" title="Open in the browser: ${url.replace(/[./]/g, '\\$&')}" aria-label="Open #4 in the browser"><svg data-icon="open">`));
+  const acts = [...open.matchAll(/data-act="(browser|merge|more)"/g)].map(m => m[1]);
+  assert.deepEqual(acts, ['browser', 'merge', 'more']);
+  assert.match(ctx.prRowHtml(pr(4, { url, state: 'MERGED' }), { repo: REPO }), /data-act="browser"/);
+  // No web address from gh, or not a web one: no button.
+  assert.doesNotMatch(ctx.prRowHtml(pr(4), { repo: REPO }), /data-act="browser"/);
+  assert.equal(ctx.prWebUrl({ url: 'javascript:alert(1)' }), null);
+  assert.equal(ctx.prWebUrl({ url }), url);
+});
+
 test('a row\'s badges: conflicts, the review and the checks', () => {
   const ctx = loadContext();
   const html = ctx.prBadgesHtml(pr(1, { mergeable: 'CONFLICTING', reviewDecision: 'APPROVED', checks: 'FAILURE' }));
@@ -173,45 +190,84 @@ test('the list: rows, an empty line, and "Load 10 more" while closed or merged o
 
 // --- Files and diffs ---
 
-test('the files opened at first stay within the line budget, in order', () => {
-  const ctx = loadContext();
-  const patch = n => Array.from({ length: n }, () => '+x').join('\n');
-  const files = [
-    { path: 'a', patch: patch(900) },
-    { path: 'bin.png', patch: null },
-    { path: 'b', patch: patch(500) },
-    { path: 'c', patch: patch(200) },
-    { path: 'd', patch: patch(10) },
-  ];
-  assert.deepEqual([...ctx.prFileBudget(files)], ['a', 'b']);
-  assert.deepEqual([...ctx.prFileBudget(files, 100)], []);
-});
+const FILES = {
+  truncated: false,
+  files: [
+    { path: 'src/app.js', oldPath: null, status: 'modified', insertions: 2, deletions: 1, patch: '@@ -1 +1,2 @@\n-a\n+b' },
+    { path: 'src/new.js', oldPath: 'src/old.js', status: 'renamed', insertions: 0, deletions: 0, patch: null },
+    { path: 'logo.png', oldPath: null, status: 'added', insertions: 0, deletions: 0, patch: null },
+    { path: 'big.json', oldPath: null, status: 'modified', insertions: 9, deletions: 9, patch: null, tooLarge: true },
+  ],
+};
 
-test('a pull request\'s files: each with its diff, or why there is none', () => {
+test('a pull request\'s files open as a tree, every diff closed', () => {
   const ctx = loadContext();
-  const entry = {
-    truncated: false,
-    files: [
-      { path: 'src/app.js', oldPath: null, status: 'modified', insertions: 2, deletions: 1, patch: '@@ -1 +1,2 @@\n-a\n+b' },
-      { path: 'src/new.js', oldPath: 'src/old.js', status: 'renamed', insertions: 0, deletions: 0, patch: null },
-      { path: 'logo.png', oldPath: null, status: 'added', insertions: 0, deletions: 0, patch: null },
-      { path: 'big.json', oldPath: null, status: 'modified', insertions: 9, deletions: 9, patch: null, tooLarge: true },
-    ],
-  };
-  const html = ctx.prFilesHtml(entry, new Set(['src/app.js']));
+  assert.equal(ctx.prFileView(), 'tree');
+  const html = ctx.prFilesHtml(FILES);
   assert.match(html, /4 files changed/);
   assert.match(html, /\+11<\/span> <span class="pr-del">−10/);
-  assert.match(html, /data-file="0" aria-expanded="true"/);
-  assert.match(html, /<div class="pr-file-diff" data-diff="0"><pre class="git-diff">@@ -1 \+1,2 @@/);
-  assert.match(html, /<div class="pr-file-diff" data-diff="1" hidden><\/div>/);
+  assert.match(html, /<div class="pr-files is-tree">/);
+  // Folders first, with how many files they hold, then the files at the top.
+  const order = [...html.matchAll(/data-folder="([^"]+)"|data-file="(\d)"/g)].map(m => m[1] ? `dir:${m[1]}` : FILES.files[Number(m[2])].path);
+  assert.deepEqual(order, ['dir:src', 'src/app.js', 'src/new.js', 'big.json', 'logo.png']);
+  assert.match(html, /class="pr-folder" data-folder="src" aria-expanded="true" style="--depth:0"/);
+  assert.match(html, /<span class="pr-folder-count">2<\/span>/);
+  assert.match(html, /class="pr-file tree" data-file="0" aria-expanded="false" style="--depth:1"/);
+  assert.equal((html.match(/aria-expanded="true"/g) || []).length, 1, 'only the folder is open');
+  assert.equal((html.match(/<div class="pr-file-diff" data-diff="\d" hidden><\/div>/g) || []).length, 4);
+  // In the tree the folder says where a file is; a rename still says where from.
+  assert.doesNotMatch(html, /<span class="pr-file-dir">src</);
   assert.match(html, /from src\/old\.js/);
+});
+
+test('the files\' tools are four icons, named in their tooltips: Expand all, Collapse all, Tree and List', () => {
+  const ctx = loadContext();
+  const tools = ctx.prFilesToolsHtml('tree');
+  const buttons = [...tools.matchAll(/<button[^>]*data-act="([\w-]+)"(?: data-view="(\w+)")?[^>]*title="([^"]+)" aria-label="([^"]+)"[^>]*>(.*?)<\/button>/g)]
+    .map(m => ({ act: m[1], view: m[2] || null, title: m[3], label: m[4], icon: /data-icon="(\w+)"/.exec(m[5])?.[1], text: m[5].replace(/<svg[^>]*><\/svg>/g, '').trim() }));
+  assert.deepEqual(plain(buttons), [
+    { act: 'files-expand-all', view: null, title: 'Expand all', label: 'Expand all', icon: 'expandAll', text: '' },
+    { act: 'files-collapse-all', view: null, title: 'Collapse all', label: 'Collapse all', icon: 'collapseAll', text: '' },
+    { act: 'files-view', view: 'tree', title: 'View as tree', label: 'View as tree', icon: 'tree', text: '' },
+    { act: 'files-view', view: 'list', title: 'View as list', label: 'View as list', icon: 'list', text: '' },
+  ]);
+  assert.match(tools, /class="git-view-btn on" data-act="files-view" data-view="tree"[^>]*aria-pressed="true"/);
+  assert.match(ctx.prFilesToolsHtml('list'), /class="git-view-btn on" data-act="files-view" data-view="list"/);
+  assert.doesNotMatch(tools, /Open all|Close all/);
+});
+
+test('as a list, each file says its folder; an open file shows its diff, or why there is none', () => {
+  const ctx = loadContext();
+  const html = ctx.prFilesHtml(FILES, { view: 'list', open: new Set(['src/app.js']) });
+  assert.doesNotMatch(html, /pr-folder|is-tree|pr-file tree/);
+  assert.match(html, /<span class="pr-file-dir">src <span class="pr-file-from">from src\/old\.js/);
+  assert.match(html, /data-file="0" aria-expanded="true"/);
+  assert.match(html, /<div class="pr-file-diff" data-diff="0"><pre class="git-diff"><span class="git-diff-line hunk">@@ -1 \+1,2 @@/);
+  assert.match(html, /<div class="pr-file-diff" data-diff="1" hidden><\/div>/);
   assert.match(html, /git-file-code renamed">R</);
-  assert.match(ctx.prPatchHtml(entry.files[1]), /Renamed, nothing else changed/);
-  assert.match(ctx.prPatchHtml(entry.files[2]), /binary file/);
-  assert.match(ctx.prPatchHtml(entry.files[3]), /too large/);
+  assert.match(ctx.prPatchHtml(FILES.files[1]), /Renamed, nothing else changed/);
+  assert.match(ctx.prPatchHtml(FILES.files[2]), /binary file/);
+  assert.match(ctx.prPatchHtml(FILES.files[3]), /too large/);
   assert.match(ctx.prFilesHtml({ loading: true }), /Reading the changed files/);
   assert.match(ctx.prFilesHtml({ error: 'HTTP 502' }), /HTTP 502.*data-act="files-retry"/s);
   assert.match(ctx.prFilesHtml({ files: [] }), /No files changed/);
+});
+
+test('a closed folder keeps only its own row, and a chain of single folders shares one', () => {
+  const ctx = loadContext();
+  const files = [{ path: 'apps/web/src/a.js' }, { path: 'apps/web/src/b.js' }, { path: 'README.md' }];
+  const rows = (closed) => plain(ctx.prFileRows(files, 'tree', new Set(closed))).map(r => (r.kind === 'folder' ? `${'  '.repeat(r.depth)}${r.name}/ (${r.count})${r.collapsed ? ' closed' : ''}` : `${'  '.repeat(r.depth)}${r.file.path}#${r.file.index}`));
+  assert.deepEqual(rows([]), ['apps/web/src/ (2)', '  apps/web/src/a.js#0', '  apps/web/src/b.js#1', 'README.md#2']);
+  assert.deepEqual(rows(['apps/web/src']), ['apps/web/src/ (2) closed', 'README.md#2']);
+  assert.deepEqual(plain(ctx.prFileRows(files, 'list')).map(r => r.file.path), ['apps/web/src/a.js', 'apps/web/src/b.js', 'README.md']);
+});
+
+test('the files\' view is remembered for every pull request', () => {
+  const ctx = loadContext();
+  ctx.localStorage.setItem('pullRequests.fileView', 'list');
+  assert.equal(ctx.prFileView(), 'list');
+  ctx.localStorage.setItem('pullRequests.fileView', 'something');
+  assert.equal(ctx.prFileView(), 'tree');
 });
 
 // --- Dialogs ---
@@ -342,7 +398,7 @@ test('a chosen remote is remembered per project and repository', () => {
   assert.equal(ctx.prRepoState('p1', ctx.prTabState('p1'), '/r').remote, 'upstream');
 });
 
-test('files are kept per head commit and open within the budget', async () => {
+test('files are kept per head commit, and none opens its diff by itself', async () => {
   const { api, calls } = fakeApi({
     getPullRequestFiles: { ok: true, files: [{ path: 'a.js', status: 'modified', insertions: 1, deletions: 0, patch: '@@ -0,0 +1 @@\n+a' }], truncated: false },
   });
@@ -352,6 +408,6 @@ test('files are kept per head commit and open within the budget', async () => {
   data.remote = 'origin';
   await ctx.prLoadFiles({ id: 'p1' }, state, '/r', pr(4));
   assert.deepEqual(calls, [['getPullRequestFiles', 'p1', '/r', { remote: 'origin', number: 4 }]]);
-  assert.deepEqual([...data.openFiles.get(`4@${HEAD}`)], ['a.js']);
+  assert.equal(data.openFiles.has(`4@${HEAD}`), false);
   assert.equal(data.files.get(`4@${HEAD}`).files.length, 1);
 });

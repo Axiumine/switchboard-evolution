@@ -3,6 +3,8 @@
 // answers (apps/desktop/pull-requests.js, through gh) and the rules of the
 // list, its filter and its actions. Keep the two in step.
 
+import { treeRows, type TreeRow } from '@/git/model';
+
 export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
 export type PullRequestAction = 'merge' | 'draft' | 'ready' | 'close';
@@ -281,19 +283,31 @@ export function noPatchText(file: PullRequestFile): string {
   return 'A binary file, or a diff GitHub does not show.';
 }
 
+/** The pull request's page on GitHub, for the browser button before Merge; null when gh gave no web address. */
+export function webUrl(pr: Pick<PullRequest, 'url'>): string | null {
+  return typeof pr.url === 'string' && /^https?:\/\//i.test(pr.url) ? pr.url : null;
+}
+
+// --- An open pull request's files ---
+
+/** How the files are laid out; a tree at first, as on the desktop. Every diff starts closed. */
+export type FileView = 'tree' | 'list';
+export const DEFAULT_FILE_VIEW: FileView = 'tree';
+
+/** The four tools over the files, icons whose names these are (shown on a long press). */
+export const FILE_TOOLS = {
+  expandAll: 'Expand all',
+  collapseAll: 'Collapse all',
+  tree: 'View as tree',
+  list: 'View as list',
+} as const;
+
 /**
- * The files opened at first: in order, while their diffs together stay within
- * `budget` lines (fewer than on the desktop: a phone draws every line).
+ * The files as rows: a tree as the Git tab draws one (folders first, a chain of
+ * single folders on one row, a collapsed folder keeping only its own row), or
+ * the list in GitHub's order.
  */
-export function fileBudget(files: readonly PullRequestFile[], budget = 400): Set<string> {
-  const open = new Set<string>();
-  let lines = 0;
-  for (const file of files) {
-    if (!file.patch) continue;
-    const count = file.patch.split('\n').length;
-    if (lines + count > budget) break;
-    lines += count;
-    open.add(file.path);
-  }
-  return open;
+export function fileRows(files: readonly PullRequestFile[], view: FileView, collapsed: ReadonlySet<string> = new Set()): TreeRow<PullRequestFile>[] {
+  if (view === 'tree') return treeRows([...files], { collapsed, compact: true });
+  return files.map((file) => ({ kind: 'file', key: file.path, depth: 0, name: file.path.split('/').pop() || file.path, item: file }));
 }

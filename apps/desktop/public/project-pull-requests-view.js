@@ -17,9 +17,9 @@ const PR_FILTERS = [
 ];
 const PR_DEFAULT_FILTER = ['open', 'draft'];
 const PR_PAGE_SIZE = 10;
-// Diff lines shown open at once when a pull request is opened; the files after
-// that start closed, one click away.
-const PR_DIFF_LINE_BUDGET = 1500;
+// How a pull request's files are laid out, 'tree' or 'list': one choice for
+// every project, kept as the Changes tab keeps its own. Tree at first.
+const PR_FILE_VIEW_KEY = 'pullRequests.fileView';
 // Showing the view again, or the window getting the focus back, reads the list
 // again once it is older than this.
 const PR_STALE_MS = 60_000;
@@ -76,7 +76,8 @@ function prRepoData(remote = null) {
     page: prEmptyPage(),
     expanded: new Set(),  // pull request numbers shown open
     files: new Map(),     // `${number}@${headOid}` → { loading } | { files, truncated } | { error }
-    openFiles: new Map(), // the same key → Set of file paths shown open
+    openFiles: new Map(), // the same key → Set of file paths whose diff is shown; none at first
+    closedFolders: new Map(), // the same key → Set of tree folders closed
   };
 }
 
@@ -219,18 +220,30 @@ function prRowMenuItems(pr, repo, actions = {}) {
   return items;
 }
 
-/** The files opened at first: in order, while their diffs together stay within the budget. */
-function prFileBudget(files, budget = PR_DIFF_LINE_BUDGET) {
-  const open = new Set();
-  let lines = 0;
-  for (const file of files || []) {
-    if (!file.patch) continue;
-    const count = file.patch.split('\n').length;
-    if (lines + count > budget) break;
-    lines += count;
-    open.add(file.path);
+function prFileView() {
+  let stored = null;
+  try { stored = localStorage.getItem(PR_FILE_VIEW_KEY); } catch {}
+  return stored === 'list' ? 'list' : 'tree';
+}
+
+function setPrFileView(view) {
+  try { localStorage.setItem(PR_FILE_VIEW_KEY, view === 'list' ? 'list' : 'tree'); } catch {}
+}
+
+/**
+ * A pull request's files as rows: a tree, as the Changes tab draws one
+ * (buildGitChangeTree and gitTreeRows in project-git-view.js: folders first, a
+ * chain of single folders on one row, a closed folder keeping only its own
+ * row), or a list. Each file row carries the file's index in `files`.
+ */
+function prFileRows(files, view = 'tree', closedFolders = new Set()) {
+  const indexed = (files || []).map((file, index) => ({ ...file, index }));
+  if (view !== 'tree' || typeof buildGitChangeTree !== 'function' || typeof gitTreeRows !== 'function') {
+    return indexed.map(file => ({ kind: 'file', depth: 0, file }));
   }
-  return open;
+  return gitTreeRows(buildGitChangeTree(indexed), closedFolders, '').map(row => (row.kind === 'folder'
+    ? { kind: 'folder', depth: row.depth, name: row.name, key: row.key, count: row.count, collapsed: row.collapsed }
+    : { kind: 'file', depth: row.depth, file: row.change }));
 }
 
 function prFilesKey(pr) {
@@ -267,14 +280,22 @@ function prBadgesHtml(pr) {
   return badges.map(([kind, text]) => `<span class="pr-badge pr-badge--${kind}">${escapeHtml(text)}</span>`).join('');
 }
 
+/** The pull request's page on GitHub, or null when gh gave no web address. */
+function prWebUrl(pr) {
+  return pr && typeof pr.url === 'string' && /^https?:\/\//i.test(pr.url) ? pr.url : null;
+}
+
 function prRowHtml(pr, { expanded = false, repo = null, now = new Date() } = {}) {
   const status = prStatus(pr);
   const block = prMergeBlock(pr, repo);
   const branches = `${pr.head} → ${pr.base}`;
+  // Every pull request opens on GitHub from the button before Merge, closed and merged ones too.
+  const link = prWebUrl(pr) ? `
+          <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="browser" title="${prAttr(`Open in the browser: ${pr.url}`)}" aria-label="Open #${pr.number} in the browser">${PICONS.open(13)}</button>` : '';
   // A disabled button shows no tooltip of its own: the reason sits on its wrapper.
-  const actions = pr.state === 'OPEN' ? `
+  const actions = link + (pr.state === 'OPEN' ? `
           <span class="pr-merge-wrap"${block ? ` title="${prAttr(block)}"` : ''}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-merge-btn" data-act="merge"${block ? ' disabled' : ''}>${PR_ICONS.merged(12)}<span>Merge</span></button></span>
-          <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="more" title="More actions" aria-label="More actions for #${pr.number}">${PICONS.dots(13)}</button>` : '';
+          <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="more" title="More actions" aria-label="More actions for #${pr.number}">${PICONS.dots(13)}</button>` : '');
   return `
     <div class="pr-item${expanded ? ' open' : ''}" data-pr="${pr.number}">
       <div class="pr-row" data-act="toggle" role="button" tabindex="0" aria-expanded="${expanded}">
@@ -335,7 +356,28 @@ function prPatchHtml(file) {
   return `<div class="pr-file-note">${escapeHtml(text)}</div>`;
 }
 
-function prFilesHtml(entry, openPaths = new Set()) {
+/** The tools over the files: Expand all and Collapse all, then Tree and List; icons, named in their tooltips. */
+function prFilesToolsHtml(view) {
+  const tool = (act, label, icon) => `<button type="button" class="git-view-btn" data-act="${act}" title="${label}" aria-label="${label}">${icon}</button>`;
+  const mode = (name, label, icon) => `<button type="button" class="git-view-btn${view === name ? ' on' : ''}" data-act="files-view" data-view="${name}" title="${label}" aria-label="${label}" aria-pressed="${view === name}">${icon}</button>`;
+  return `
+      <span class="pr-files-tools">
+        <span class="git-view-toggle" role="group" aria-label="Diffs">
+          ${tool('files-expand-all', 'Expand all', PICONS.expandAll(13))}
+          ${tool('files-collapse-all', 'Collapse all', PICONS.collapseAll(13))}
+        </span>
+        <span class="git-view-toggle" role="group" aria-label="Files view">
+          ${mode('tree', 'View as tree', PICONS.tree(13))}
+          ${mode('list', 'View as list', PICONS.list(13))}
+        </span>
+      </span>`;
+}
+
+/**
+ * An open pull request's changed files, as a tree or a list. Every diff starts
+ * closed: a file opens its own, Expand all opens them all.
+ */
+function prFilesHtml(entry, { open = new Set(), view = 'tree', closedFolders = new Set() } = {}) {
   if (!entry || entry.loading) return '<div class="pr-files-empty"><span class="git-loading-dot"></span>Reading the changed files…</div>';
   if (entry.error) {
     return `<div class="pr-files-empty is-error"><span>${escapeHtml(entry.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="files-retry">Retry</button></div>`;
@@ -344,35 +386,46 @@ function prFilesHtml(entry, openPaths = new Set()) {
   if (!files.length) return '<div class="pr-files-empty">No files changed.</div>';
   const insertions = files.reduce((n, f) => n + (f.insertions || 0), 0);
   const deletions = files.reduce((n, f) => n + (f.deletions || 0), 0);
-  const rows = files.map((file, index) => {
-    const open = openPaths.has(file.path);
+  const tree = view === 'tree';
+  const rows = prFileRows(files, view, closedFolders).map((row) => {
+    if (row.kind === 'folder') {
+      return `
+      <button type="button" class="pr-folder" data-folder="${prAttr(row.key)}" aria-expanded="${!row.collapsed}" style="--depth:${row.depth}" title="${prAttr(row.key)}">
+        <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
+        <span class="pr-folder-icon">${PICONS.folder(12)}</span>
+        <span class="pr-folder-name mono">${escapeHtml(row.name)}</span>
+        <span class="pr-folder-count">${row.count}</span>
+      </button>`;
+    }
+    const file = row.file;
+    const isOpen = open.has(file.path);
     const name = pathBasename(file.path) || file.path;
     const slash = file.path.lastIndexOf('/');
     const dir = slash > 0 ? file.path.slice(0, slash) : '';
     const icon = typeof fileIconHtml === 'function' ? fileIconHtml(name) : '';
     const title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
+    // In the tree the folders say where a file is; the list says it after the name.
+    const where = tree ? '' : escapeHtml(dir);
+    const from = file.oldPath ? ` <span class="pr-file-from">from ${escapeHtml(file.oldPath)}</span>` : '';
     return `
-      <button type="button" class="pr-file${open ? ' open' : ''}" data-file="${index}" aria-expanded="${open}" title="${prAttr(title)}">
+      <button type="button" class="pr-file${tree ? ' tree' : ''}${isOpen ? ' open' : ''}" data-file="${file.index}" aria-expanded="${isOpen}" style="--depth:${row.depth}" title="${prAttr(title)}">
         <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
         <span class="git-file-code ${prAttr(file.status)}">${PR_STATUS_LETTERS[file.status] || 'M'}</span>
         ${icon}
         <span class="pr-file-name mono">${escapeHtml(name)}</span>
-        <span class="pr-file-dir">${escapeHtml(dir)}${file.oldPath ? ` <span class="pr-file-from">from ${escapeHtml(file.oldPath)}</span>` : ''}</span>
+        <span class="pr-file-dir">${where}${from}</span>
         <span class="pr-stats mono"><span class="pr-add">+${file.insertions || 0}</span> <span class="pr-del">−${file.deletions || 0}</span></span>
       </button>
-      <div class="pr-file-diff" data-diff="${index}"${open ? '' : ' hidden'}>${open ? prPatchHtml(file) : ''}</div>`;
+      <div class="pr-file-diff" data-diff="${file.index}"${isOpen ? '' : ' hidden'}>${isOpen ? prPatchHtml(file) : ''}</div>`;
   }).join('');
   return `
     <div class="pr-files-head">
       <span>${prPlural(files.length, 'file')} changed</span>
       <span class="pr-stats mono"><span class="pr-add">+${insertions}</span> <span class="pr-del">−${deletions}</span></span>
       ${entry.truncated ? '<span class="pr-files-note">GitHub lists the first 3000 files.</span>' : ''}
-      <span class="pr-files-tools">
-        <button type="button" class="ws-ghost ws-ghost--sm" data-act="files-open-all">Open all</button>
-        <button type="button" class="ws-ghost ws-ghost--sm" data-act="files-close-all">Close all</button>
-      </span>
+      ${prFilesToolsHtml(view)}
     </div>
-    <div class="pr-files">${rows}</div>`;
+    <div class="pr-files${tree ? ' is-tree' : ''}">${rows}</div>`;
 }
 
 // --- Dialogs' bodies ---
@@ -629,7 +682,7 @@ function prWireItem(project, state, repoPath, item, pr) {
   const row = item.querySelector('.pr-row');
   const toggle = () => prToggle(project, state, repoPath, item, pr);
   row.onclick = (e) => {
-    if (e.target.closest('[data-act="merge"], [data-act="more"], .pr-merge-wrap')) return;
+    if (e.target.closest('[data-act="merge"], [data-act="more"], [data-act="browser"], .pr-merge-wrap')) return;
     toggle();
   };
   row.onkeydown = (e) => {
@@ -637,6 +690,8 @@ function prWireItem(project, state, repoPath, item, pr) {
     e.preventDefault();
     toggle();
   };
+  const browser = item.querySelector('[data-act="browser"]');
+  if (browser) browser.onclick = (e) => { e.stopPropagation(); if (prWebUrl(pr)) window.api?.openExternal?.(pr.url); };
   const merge = item.querySelector('[data-act="merge"]');
   if (merge) merge.onclick = (e) => { e.stopPropagation(); prMergeDialog(project, state, repoPath, pr); };
   const more = item.querySelector('[data-act="more"]');
@@ -675,11 +730,15 @@ function prPaintDetail(project, state, repoPath, item, pr) {
     detail.innerHTML = prFilesHtml({ loading: true });
     return;
   }
-  const openPaths = data.openFiles.get(key) || new Set();
-  detail.innerHTML = prFilesHtml(entry, openPaths);
+  if (!data.openFiles.has(key)) data.openFiles.set(key, new Set());
+  if (!data.closedFolders.has(key)) data.closedFolders.set(key, new Set());
+  const openPaths = data.openFiles.get(key);
+  const closedFolders = data.closedFolders.get(key);
+  const repaint = () => prPaintDetail(project, state, repoPath, item, pr);
+  detail.innerHTML = prFilesHtml(entry, { open: openPaths, view: prFileView(), closedFolders });
   detail.querySelector('[data-act="files-retry"]')?.addEventListener('click', () => {
     data.files.delete(key);
-    prPaintDetail(project, state, repoPath, item, pr);
+    repaint();
   });
   const files = entry.files || [];
   const setOpen = (button, open) => {
@@ -693,14 +752,37 @@ function prPaintDetail(project, state, repoPath, item, pr) {
     slot.hidden = !open;
     if (open && !slot.innerHTML) slot.innerHTML = prPatchHtml(file);
   };
-  data.openFiles.set(key, openPaths);
   detail.querySelectorAll('.pr-file').forEach((button) => {
     button.onclick = () => setOpen(button, button.getAttribute('aria-expanded') !== 'true');
   });
-  const openAll = detail.querySelector('[data-act="files-open-all"]');
-  if (openAll) openAll.onclick = () => detail.querySelectorAll('.pr-file').forEach(button => setOpen(button, true));
-  const closeAll = detail.querySelector('[data-act="files-close-all"]');
-  if (closeAll) closeAll.onclick = () => detail.querySelectorAll('.pr-file').forEach(button => setOpen(button, false));
+  detail.querySelectorAll('.pr-folder').forEach((button) => {
+    button.onclick = () => {
+      const folder = button.dataset.folder;
+      if (closedFolders.has(folder)) closedFolders.delete(folder); else closedFolders.add(folder);
+      repaint();
+    };
+  });
+  // Expand all opens every folder and every diff; Collapse all closes the
+  // diffs and leaves the folders as they are, so the files stay in sight.
+  const expandAll = detail.querySelector('[data-act="files-expand-all"]');
+  if (expandAll) expandAll.onclick = () => {
+    closedFolders.clear();
+    for (const file of files) openPaths.add(file.path);
+    repaint();
+  };
+  const collapseAll = detail.querySelector('[data-act="files-collapse-all"]');
+  if (collapseAll) collapseAll.onclick = () => {
+    openPaths.clear();
+    repaint();
+  };
+  detail.querySelectorAll('[data-act="files-view"]').forEach((button) => {
+    button.onclick = () => {
+      if (button.dataset.view === prFileView()) return;
+      setPrFileView(button.dataset.view);
+      // One choice for every pull request: the other open ones change too.
+      prRepaint(project, state, repoPath);
+    };
+  });
 }
 
 /** The repaint of one open row's files, if it is still on screen and open. */
@@ -882,7 +964,6 @@ async function prLoadFiles(project, state, repoPath, pr) {
   if (state.repos.get(repoPath) !== data || data.files.get(key) !== entry) return;
   if (result?.ok) {
     data.files.set(key, { files: result.files || [], truncated: !!result.truncated });
-    if (!data.openFiles.has(key)) data.openFiles.set(key, prFileBudget(result.files || []));
   } else {
     data.files.set(key, { error: result?.error || 'The changed files could not be read.' });
   }
@@ -1042,7 +1123,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     PR_FILTERS, PR_DEFAULT_FILTER, PR_PAGE_SIZE,
     prStatus, prVisible, prPageStates, prMergeLists, prFilterLabel, prIsDefaultFilter, prToggleFilter, prEmptyText,
-    prCanEdit, prMergeBlock, prRowMenuItems, prFileBudget, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
+    prCanEdit, prMergeBlock, prRowMenuItems, prWebUrl, prFileRows, prFileView, prFilesToolsHtml, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
     prPatchHtml, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,
   };
 }

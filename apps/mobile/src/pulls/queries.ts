@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { queryClient } from '@/remote/query';
 import { useConnection } from '@/store/connection';
 import { ask } from '@/worktrees/queries';
-import { PAGE_SIZE, type ActionAnswer, type FilesAnswer, type MergeMethod, type OpenListing, type PageListing, type PageState, type PullRequestAction } from './model';
+import { DEFAULT_FILE_VIEW, PAGE_SIZE, type ActionAnswer, type FileView, type FilesAnswer, type MergeMethod, type OpenListing, type PageListing, type PageState, type PullRequestAction } from './model';
 
 // Every open pull request can take a few requests to GitHub, one per 100.
 const LIST_TIMEOUT_MS = 120_000;
@@ -63,6 +63,14 @@ export function reloadPullRequests(projectId: string, folder: string): Promise<u
     queryClient.invalidateQueries({ queryKey: ['pull-requests', projectId, folder] }),
     queryClient.invalidateQueries({ queryKey: ['pull-requests-page', projectId, folder] }),
   ]);
+}
+
+// --- How every pull request's files are laid out, while the app runs ---
+
+export const usePullFileView = create<{ view: FileView }>(() => ({ view: DEFAULT_FILE_VIEW }));
+
+export function setPullFileView(view: FileView) {
+  usePullFileView.setState({ view });
 }
 
 // --- What happened: the line over the list ---

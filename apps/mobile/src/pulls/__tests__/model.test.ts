@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  ACTION_COPY, badges, canEdit, DEFAULT_FILTER, emptyText, errorTitle, fileBudget, filterLabel, isDefaultFilter, menuActions, mergeBlock,
-  mergeLists, mergeWarnings, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, whenText,
+  ACTION_COPY, badges, canEdit, DEFAULT_FILE_VIEW, DEFAULT_FILTER, emptyText, errorTitle, FILE_TOOLS, fileRows, filterLabel, isDefaultFilter, menuActions, mergeBlock,
+  mergeLists, mergeWarnings, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, webUrl, whenText,
   type PullRequest, type PullRequestFile, type PullRequestRepo,
 } from '../model';
 
@@ -89,6 +89,12 @@ describe('rows', () => {
     expect(badges(pr(1, { state: 'MERGED', checks: 'FAILURE' }))).toEqual([]);
   });
 
+  it('opens on GitHub only from a web address', () => {
+    expect(webUrl(pr(4, { url: 'https://github.com/acme/widgets/pull/4' }))).toBe('https://github.com/acme/widgets/pull/4');
+    expect(webUrl(pr(4))).toBeNull();
+    expect(webUrl(pr(4, { url: 'javascript:alert(1)' }))).toBeNull();
+  });
+
   it('says when it was opened, merged or closed', () => {
     const when = (iso: string | null) => `at ${iso?.slice(0, 10)}`;
     expect(whenText(pr(4), when)).toBe('opened at 2026-03-04');
@@ -111,10 +117,25 @@ describe('files', () => {
     patch: lines === null ? null : Array.from({ length: lines }, () => '+x').join('\n'), ...extra,
   });
 
-  it('opens the first files while their diffs stay within the budget', () => {
-    const files = [file('a', 300), file('bin.png', null), file('b', 90), file('c', 50)];
-    expect([...fileBudget(files)]).toEqual(['a', 'b']);
-    expect([...fileBudget(files, 100)]).toEqual([]);
+  it('shows them as a tree at first, folders first and a chain of single folders on one row', () => {
+    expect(DEFAULT_FILE_VIEW).toBe('tree');
+    const files = [file('README.md', 1), file('apps/web/src/b.js', 1), file('apps/web/src/a.js', 1), file('apps/api/x.js', 1)];
+    const show = (rows: ReturnType<typeof fileRows>) => rows.map((row) => (row.kind === 'folder'
+      ? `${'  '.repeat(row.depth)}${row.name}/ (${row.count})${row.collapsed ? ' closed' : ''}`
+      : `${'  '.repeat(row.depth)}${row.item.path}`));
+    expect(show(fileRows(files, 'tree'))).toEqual([
+      'apps/ (3)', '  api/ (1)', '    apps/api/x.js', '  web / src/ (2)', '    apps/web/src/a.js', '    apps/web/src/b.js', 'README.md',
+    ]);
+    expect(show(fileRows(files, 'tree', new Set(['apps/web/src'])))).toEqual(['apps/ (3)', '  api/ (1)', '    apps/api/x.js', '  web / src/ (2) closed', 'README.md']);
+  });
+
+  it('as a list, keeps GitHub\'s order, every file at the top level', () => {
+    const files = [file('b/two.js', 1), file('a/one.js', 1)];
+    expect(fileRows(files, 'list').map((row) => [row.kind, row.depth, row.name])).toEqual([['file', 0, 'two.js'], ['file', 0, 'one.js']]);
+  });
+
+  it('names its four tools for their long press', () => {
+    expect(Object.values(FILE_TOOLS)).toEqual(['Expand all', 'Collapse all', 'View as tree', 'View as list']);
   });
 
   it('says why a file has no diff', () => {
