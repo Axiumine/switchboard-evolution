@@ -3488,7 +3488,13 @@ function trackMenuItems(project, track) {
 }
 
 /** The "Move to…" section of a session menu: tracks of its project, other projects, or no project. */
-function sessionMoveItems(session) {
+/**
+ * Where a session can be moved. `inMenu`: the items sit among a session's
+ * other actions (its right-click menu), so the projects go behind one "Move
+ * to project" row, wherever the session is filed. Without it they are the
+ * Sessions tab's Move to project… popover.
+ */
+function sessionMoveItems(session, { inMenu = false } = {}) {
   const info = projectForSession(session);
   const project = info?.project || null;
   const move = async (projectId, trackId) => {
@@ -3500,6 +3506,8 @@ function sessionMoveItems(session) {
     loadProjects();
   };
   const moveItems = [];
+  // A group of items, after a separator unless it opens the menu.
+  const addGroup = (...items) => moveItems.push(...(moveItems.length ? [{ sep: true }] : []), ...items);
   if (project) {
     moveItems.push({ head: `Move within ${project.name}` });
     for (const t of (project.tracks || []).filter(t => t.status !== 'done')) {
@@ -3524,12 +3532,12 @@ function sessionMoveItems(session) {
         ? { label: p.name, submenu: [{ label: 'General', onClick: () => move(p.id, null) }, ...tracks.map(t => ({ label: t.name, onClick: () => move(p.id, t.id) }))] }
         : { label: p.name, onClick: () => move(p.id, null) };
     });
-    // Inside a project the other projects sit behind one row, so the menu
-    // reads as an action. From the Sessions tab they are the whole menu.
-    if (project) moveItems.push({ sep: true }, { label: 'Move to another project', icon: PICONS.folder(14), submenu: projectRows });
-    else moveItems.push({ sep: true }, { head: 'Move to project' }, ...projectRows);
+    // Behind one row, so the menu reads as an action. In the Sessions tab's
+    // popover, for a session outside every project, they are the whole menu.
+    if (project || inMenu) addGroup({ label: 'Move to project', icon: PICONS.folder(14), submenu: projectRows });
+    else addGroup({ head: 'Move to project' }, ...projectRows);
   }
-  if (session.projectId) moveItems.push({ sep: true }, {
+  if (session.projectId) addGroup({
     label: `Remove from ${project ? project.name : 'project'}…`,
     icon: PICONS.x(13), hint: 'stays in the Sessions tab',
     onClick: () => {
@@ -3538,7 +3546,7 @@ function sessionMoveItems(session) {
       move(null, null);
     },
   });
-  else if (info?.byCwd) moveItems.push({ sep: true }, { label: 'Filed by its folder', disabled: true });
+  else if (info?.byCwd) addGroup({ label: 'Filed by its folder', disabled: true });
   return moveItems;
 }
 
@@ -3555,7 +3563,7 @@ function forkSessionInPlace(session) {
 }
 
 function sessionMenuItems(session) {
-  const moveItems = sessionMoveItems(session);
+  const moveItems = sessionMoveItems(session, { inMenu: true });
   const running = isSessionRunning(session.sessionId);
   const unread = typeof responseReadySessions !== 'undefined' && responseReadySessions.has(session.sessionId);
   const sessionActions = [
