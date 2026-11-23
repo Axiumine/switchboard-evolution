@@ -1133,11 +1133,16 @@ function paintGitRepository(project, state, body) {
         ${gitRepoHeaderHtml(repositories, repo, { readOnly: !gitCanStage() })}
         ${gitOverviewHtml(repo)}
         <section class="git-section">
-          <div class="git-section-heading"><span>Changes</span><span class="git-heading-right">${changed ? gitViewToggleHtml(gitChangesViewMode()) : ''}<span class="git-section-meta">${changed ? `${changed} file${changed === 1 ? '' : 's'}` : 'Working tree clean'}</span></span></div>
+          <div class="git-section-heading"><span>Changes</span><span class="git-heading-right">${changed && typeof knImpactButtonHtml === 'function' && knIsAttached(project, repo.path) ? knImpactButtonHtml() : ''}${changed ? gitViewToggleHtml(gitChangesViewMode()) : ''}<span class="git-section-meta">${changed ? `${changed} file${changed === 1 ? '' : 's'}` : 'Working tree clean'}</span></span></div>
           ${changed ? '<div class="git-changes"><div class="git-file-list" id="git-file-list" role="tree" aria-label="Changed files"></div><div class="git-diff-pane" id="git-diff-pane"></div></div>' : '<div class="git-empty-row">There are no staged, unstaged, or untracked files.</div>'}
         </section>
       </div>`;
     if (changed) paintGitChanges(project, state, repo, body);
+    // Impact (Node Knowledge), drawn only for an attached folder with changes.
+    if (changed && typeof knOpenImpact === 'function' && knIsAttached(project, repo.path)) {
+      const impact = body.querySelector('[data-kn-act="git-impact"]');
+      if (impact) impact.onclick = () => knOpenImpact(project, repo.path, 'uncommitted');
+    }
   }
 
   body.querySelectorAll('.git-repo-option').forEach(button => {

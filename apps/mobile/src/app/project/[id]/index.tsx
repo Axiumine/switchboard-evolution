@@ -8,6 +8,8 @@ import { ProjectTabBar } from '@/components/project/ProjectTabBar';
 import { SwipeTabs } from '@/components/project/SwipeTabs';
 import { FilesTab } from '@/components/project/tabs/FilesTab';
 import { GitTab } from '@/components/project/tabs/GitTab';
+import { KnowledgeTab } from '@/components/project/tabs/KnowledgeTab';
+import { useKnowledgeSupported } from '@/knowledge/queries';
 import { OverviewTab } from '@/components/project/tabs/OverviewTab';
 import { PlanTab } from '@/components/project/tabs/PlanTab';
 import { SessionTab } from '@/components/project/tabs/SessionTab';
@@ -54,7 +56,9 @@ export default function ProjectScreen() {
   const [rename, setRename] = useState<Rename | null>(null);
 
   const refresh = useCallback(() => Promise.all([refetch(), plan.refetch()]), [refetch, plan]);
-  const tabs = useMemo(() => PROJECT_TABS.filter(({ key }) => key !== 'session' || !!sessionId), [sessionId]);
+  // Node Knowledge only when the computer offers it (a desktop older than it does not).
+  const knowledge = useKnowledgeSupported();
+  const tabs = useMemo(() => PROJECT_TABS.filter(({ key }) => (key !== 'session' || !!sessionId) && (key !== 'knowledge' || knowledge)), [sessionId, knowledge]);
   const run = async (method: string, params: unknown[], after?: () => void) => {
     try { await act(method, params); after?.(); } catch (err: any) { Alert.alert('That did not work', err.message); }
     refresh();
@@ -88,6 +92,7 @@ export default function ProjectScreen() {
     todos: <PlanTab project={project} part="todos" plan={plan.data} loading={plan.isLoading} onChanged={() => plan.refetch()} onRefresh={refresh} />,
     files: <FilesTab project={project} />,
     git: <GitTab project={project} active={tab === 'git'} />,
+    knowledge: <KnowledgeTab project={project} active={tab === 'knowledge'} />,
     settings: <SettingsTab project={project} now={now} run={run} onSelectTab={selectTab} />,
     session: sessionId ? (
       <SessionTab

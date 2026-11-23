@@ -57,13 +57,17 @@ test('every webview is checked as it attaches, and the page\'s new windows go to
   const app = new EventEmitter();
   const opened = [];
   const handlers = {};
+  const sessions = {};
   const session = {
     fromPartition(name) {
-      assert.equal(name, webPage.WEB_PARTITION);
-      return {
-        setPermissionRequestHandler(fn) { handlers.request = fn; },
-        setPermissionCheckHandler(fn) { handlers.check = fn; },
-      };
+      assert.ok([webPage.WEB_PARTITION, webPage.LENS_PARTITION].includes(name), name);
+      if (!sessions[name]) {
+        sessions[name] = {
+          setPermissionRequestHandler(fn) { if (name === webPage.WEB_PARTITION) handlers.request = fn; else handlers.lensRequest = fn; },
+          setPermissionCheckHandler(fn) { if (name === webPage.WEB_PARTITION) handlers.check = fn; else handlers.lensCheck = fn; },
+        };
+      }
+      return sessions[name];
     },
   };
   const shell = { openExternal: url => { opened.push(url); return Promise.resolve(); } };
@@ -98,4 +102,52 @@ test('every webview is checked as it attaches, and the page\'s new windows go to
   handlers.request(null, 'media', (value) => { granted = value; });
   assert.equal(granted, false);
   assert.equal(handlers.check(null, 'clipboard-sanitized-write'), true);
+
+  // The Lens: it navigates on this computer only, and gets no permission but the clipboard.
+  const lens = new EventEmitter();
+  lens.getType = () => 'webview';
+  lens.session = sessions[webPage.LENS_PARTITION];
+  lens.setWindowOpenHandler = () => {};
+  app.emit('web-contents-created', {}, lens);
+  stopped = false;
+  lens.emit('will-navigate', { preventDefault: () => { stopped = true; } }, 'http://127.0.0.1:9749/?project=api&workspace=adr');
+  assert.equal(stopped, false);
+  lens.emit('will-navigate', { preventDefault: () => { stopped = true; } }, 'https://github.com/acme/widgets');
+  assert.equal(stopped, true, 'a web page leaves the Lens for the browser');
+  assert.equal(handlers.lensCheck(null, 'clipboard-sanitized-write'), true);
+  assert.equal(handlers.lensCheck(null, 'media'), false);
+  // And a GitHub page cannot go to the Lens.
+  stopped = false;
+  guest.session = sessions[webPage.WEB_PARTITION];
+  guest.emit('will-navigate', { preventDefault: () => { stopped = true; } }, 'http://127.0.0.1:9749/');
+  assert.equal(stopped, true);
+});
+
+test('the Lens shows inside the app only from this computer, over http, in its own session', () => {
+  assert.equal(webPage.isLensUrl('http://127.0.0.1:9749/?project=api&workspace=galaxy'), true);
+  assert.equal(webPage.isLensUrl('http://localhost:9800/'), true);
+  for (const url of ['https://127.0.0.1:9749/', 'http://127.0.0.1/', 'http://127.0.0.1:80/', 'http://192.168.1.5:9749/', 'http://example.com:9749/', 'http://user:pw@127.0.0.1:9749/', 'file:///etc/hosts', '', null]) {
+    assert.equal(webPage.isLensUrl(url), false, String(url));
+  }
+  assert.equal(webPage.guardWebviewAttach({}, { partition: webPage.LENS_PARTITION, src: 'http://127.0.0.1:9749/' }), true);
+  assert.equal(webPage.guardWebviewAttach({}, { partition: webPage.LENS_PARTITION, src: 'https://github.com/' }), false, 'the Lens session holds nothing else');
+  assert.equal(webPage.guardWebviewAttach({}, { partition: webPage.WEB_PARTITION, src: 'http://127.0.0.1:9749/' }), false, 'nor GitHub\'s session the Lens');
+  assert.equal(webPage.lensPermission('geolocation'), false);
+});
+
+test('a redirect off the Lens or off https is stopped', () => {
+  const app = new EventEmitter();
+  const sessions = {};
+  const session = { fromPartition: (name) => (sessions[name] ||= { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) };
+  webPage.setupWebPages({ app, session, shell: { openExternal: () => Promise.resolve() }, clipboard: { writeText() {} }, Menu: { buildFromTemplate: () => ({ popup() {} }) }, log: { warn() {} } });
+  const lens = new EventEmitter();
+  lens.getType = () => 'webview';
+  lens.session = sessions[webPage.LENS_PARTITION];
+  lens.setWindowOpenHandler = () => {};
+  app.emit('web-contents-created', {}, lens);
+  let stopped = false;
+  lens.emit('will-redirect', { preventDefault: () => { stopped = true; } }, 'http://127.0.0.1:9749/api/x');
+  assert.equal(stopped, false);
+  lens.emit('will-redirect', { preventDefault: () => { stopped = true; } }, 'http://evil.example.com/');
+  assert.equal(stopped, true);
 });

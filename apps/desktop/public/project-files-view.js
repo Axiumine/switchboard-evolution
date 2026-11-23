@@ -823,7 +823,12 @@ function explorerMenuItems(project, root, entry) {
   }
   if (entry) {
     items.push(...chatMenuItems(project, root, entry), { sep: true });
-    items.push({ label: 'Open Timeline', icon: PICONS.clock(14), onClick: () => openTimeline(project, root, entry) }, { sep: true });
+    items.push({ label: 'Open Timeline', icon: PICONS.clock(14), onClick: () => openTimeline(project, root, entry) });
+    // The file's functions, classes and routes in the code graph (project-knowledge-links.js).
+    if (!isDir && typeof knOpenFileSymbols === 'function' && knIsAttached(project, root)) {
+      items.push({ label: 'Symbols in Node Knowledge', icon: PICONS.search(14), onClick: () => knOpenFileSymbols(project, root, rel) });
+    }
+    items.push({ sep: true });
     items.push(
       { label: 'Cut', icon: FICONS.cut(14), hint: filesKeyHint('⌘X', 'Ctrl+X'), onClick: () => explorerClip(project, root, entry, 'cut') },
       { label: 'Copy', icon: FICONS.copy(14), hint: filesKeyHint('⌘C', 'Ctrl+C'), onClick: () => explorerClip(project, root, entry, 'copy') },

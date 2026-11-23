@@ -1633,3 +1633,11 @@ test('runProjectGitGraphAction dispatches through git-graph-service to a stubbed
     t.cleanup();
   }
 });
+
+test('other modules add sections to the managed block, inside its markers', () => {
+  const withSection = projects.managedBlock('Shop', '/work/shop', ['/work/api'], '## Code graph (codebase-memory-mcp)\nA table.');
+  const end = withSection.indexOf('<!-- /switchboard:managed -->');
+  assert.ok(withSection.indexOf('## Code graph') > withSection.indexOf('## Attached folders'));
+  assert.ok(withSection.indexOf('A table.\n') < end);
+  assert.equal(projects.managedBlock('Shop', '/work/shop', ['/work/api']), projects.managedBlock('Shop', '/work/shop', ['/work/api'], ''), 'no section, no change');
+});

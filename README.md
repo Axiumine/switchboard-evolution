@@ -19,7 +19,7 @@ Switchboard Evolution is a desktop app (macOS, Windows, Linux) and a phone app (
 
 ## What it adds to Switchboard
 
-Switchboard Evolution has all of upstream Switchboard, plus about 120 changes of its own: phone access and the mobile app, herdr-core sessions, the Git Graph with actions, staging, commit compare, worktrees, the Files explorer with search and replace, the Task Manager, and project tabs in windows of their own. The full list is in [docs/evolution-vs-switchboard.md](docs/evolution-vs-switchboard.md).
+Switchboard Evolution has all of upstream Switchboard, plus about 120 changes of its own: phone access and the mobile app, herdr-core sessions, the Git Graph with actions, staging, commit compare, worktrees, the Files explorer with search and replace, the Task Manager, project tabs in windows of their own, and the Node Knowledge tab (the project's repositories as code graphs, with codebase-memory-mcp). The full list is in [docs/evolution-vs-switchboard.md](docs/evolution-vs-switchboard.md).
 
 Several of these were offered upstream as pull requests, and some are merged there (see [Upstream](#upstream)).
 

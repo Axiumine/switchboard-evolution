@@ -230,6 +230,7 @@ function gitGraphBuildCommitMenu(ctx) {
   items.push(
     { id: 'resetCurrentBranchToCommit', label: 'Reset current branch to this Commit…', icon: gitGraphMenuIcon('reset'), onClick: () => gitGraphShowResetToCommitDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, currentBranch: ctx.head && ctx.head.branch, commitHash: commit.hash, commitShortHash: commit.shortHash, defaults: ctx.dialogDefaults && ctx.dialogDefaults.resetCurrentBranchToCommit }) },
     { sep: true },
+    ...(typeof knGitMenuItems === 'function' ? knGitMenuItems(ctx, 'commit', commit) : []),
     { id: 'copyHash', label: 'Copy Commit Hash to Clipboard', onClick: () => gitGraphCopyText(commit.hash) },
     { id: 'copySubject', label: 'Copy Commit Subject to Clipboard', onClick: () => gitGraphCopyText(commit.subject) },
   );
@@ -245,7 +246,7 @@ function gitGraphBuildUncommittedMenu(ctx) {
     { id: 'reset', label: 'Reset uncommitted changes…', danger: true, onClick: () => gitGraphShowResetUncommittedDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, defaults: ctx.dialogDefaults && ctx.dialogDefaults.resetUncommittedChanges }) },
   ];
   if (ctx.hasUntrackedFiles) items.push({ id: 'clean', label: 'Clean untracked files…', danger: true, onClick: () => gitGraphShowCleanUntrackedDialog({ projectId: ctx.projectId, folderPath: ctx.folderPath, refresh: ctx.refresh, defaults: ctx.dialogDefaults && ctx.dialogDefaults.cleanUntracked }) });
-  items.push({ sep: true }, { id: 'openSourceControlView', label: 'Open Source Control View', onClick: () => ctx.onOpenSourceControlView && ctx.onOpenSourceControlView() });
+  items.push({ sep: true }, ...(typeof knGitMenuItems === 'function' ? knGitMenuItems(ctx, 'uncommitted') : []), { id: 'openSourceControlView', label: 'Open Source Control View', onClick: () => ctx.onOpenSourceControlView && ctx.onOpenSourceControlView() });
   return gitGraphApplyMenuVisibility(items, ctx, 'uncommittedChanges');
 }
 

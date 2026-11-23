@@ -24,7 +24,7 @@ function load(code) {
 
 test('Plan and Todos are two tabs of the project page, Todos right after Plan', () => {
   const nav = load(`${between(source, 'const PROJECT_WORKSPACE_TABS', '\nfunction projectTab(')}\nthis.tabs = PROJECT_WORKSPACE_TABS; this.planTabs = PLAN_TABS;`);
-  assert.deepEqual([...nav.tabs], ['overview', 'session', 'plan', 'todos', 'files', 'git', 'settings']);
+  assert.deepEqual([...nav.tabs], ['overview', 'session', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings']);
   assert.deepEqual([...nav.planTabs], ['plan', 'todos']);
 
   const strip = between(source, '<div class="ws-tabs">', '</div>`;');
@@ -34,7 +34,7 @@ test('Plan and Todos are two tabs of the project page, Todos right after Plan', 
 
 test('each tab opens in a window of its own, Todos as well', () => {
   const windows = load(`${between(source, 'const PROJECT_WINDOW_TAB_LABELS', '\n/**')}\nthis.labels = PROJECT_WINDOW_TAB_LABELS; this.order = PROJECT_WINDOW_TAB_ORDER;`);
-  assert.deepEqual([...windows.order], ['overview', 'plan', 'todos', 'files', 'git', 'settings']);
+  assert.deepEqual([...windows.order], ['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings']);
   assert.equal(windows.labels.plan, 'Plan');
   assert.equal(windows.labels.todos, 'Todos');
 

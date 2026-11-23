@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
 
-import type { GitView, ProjectTab, ScrollKey, SessionView } from './tabs';
+import type { GitView, KnowledgeView, ProjectTab, ScrollKey, SessionView } from './tabs';
 
 /**
  * What a project page remembers while the app runs: the tab it was on and
@@ -14,6 +14,9 @@ export type ProjectUi = {
   gitView?: GitView;
   /** The repository (folder path) Changes, History and Pull Requests show; they share it, as on the desktop. */
   gitRepo?: string;
+  /** Node Knowledge: the view and the attached folder it shows. */
+  knowledgeView?: KnowledgeView;
+  knowledgeFolder?: string;
   /** Pull Requests: the GitHub remote chosen per repository (folder path), when there are several. */
   pullRemotes?: Record<string, string>;
   /** The session the Session tab shows; it outlives a switch to another tab, as on the desktop. */

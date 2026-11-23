@@ -67,6 +67,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 - **IDE emulation** (Claude only) — Review and edit Claude's proposed diffs in a side panel before they land.
 - **Projects** — Group work by what it is, not where it lives: a folder on disk, a brief the agent reads, a plan, a todo list, and the sessions filed under it.
 - **Worktrees tab** — Every git worktree of a project's repositories in one list: create, open, lock, move, prune, and remove them, and start a session in any of them.
+- **Node Knowledge tab** — The project's repositories as code graphs ([codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)): architecture, search, call traces, the impact of a change, Cypher queries, decision records, coverage, the 3D Lens, and the graph's tools in the project's agent sessions.
 - **Project tasks and server logs** — Run `.vscode/tasks.json` commands and keep their logs beside your sessions.
 - **Scheduled tasks** — Start a session with a prompt on a timer, in a project, a track, or any folder.
 - **Plans and memory** (Claude only) — Browse and edit plan files and `CLAUDE.md` in one place.
@@ -225,6 +226,23 @@ The project's **Worktrees** tab lists every worktree of the project's repositori
 - **Remove** — Asks before discarding uncommitted changes, unlocks a locked worktree if you say so, and can delete the branch too. A branch that is not merged is only deleted after a second confirmation.
 - **Maintenance** — Lock (with a reason) and unlock, move (the project's folder, default folder and track folders follow), repair one worktree or a whole repository, repair a folder moved by hand, prune the records of worktrees whose folder is gone, and remove the worktrees whose branch is already merged.
 - **Worktree settings** — The folder template (`$BASE_PATH`, `$BASE_ROOT`, `$BASE_NAME`, `$REF_NAME`, `$INDEX`, `$PROJECT_ROOT`), patterns of files to copy into a new worktree, and commands to run after creating one (such as `npm install`) and before removing one. The commands run in your login shell, in the worktree, and come only from these settings, never from a file in a repository. If the command before removing fails, the worktree stays.
+
+### Node Knowledge
+
+The **Node Knowledge** tab shows each attached folder as a code graph, built and kept by [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (CBM, MIT) on this computer; the graph stays there (the app only asks GitHub which CBM release is the latest). Switchboard uses the CBM your coding agents already use (registered in `~/.claude.json`, or found in `~/.local/bin`, Homebrew or `PATH`; `SWITCHBOARD_CBM` names another); CBM wants one build and one cache for every process, so the app never brings its own copy. When there is none, the tab downloads the pinned release (`CBM_VERSION` in `cbm-locator.js`), checks it against the release's checksums, and lets it install itself into CBM's usual folder without touching any agent's configuration.
+
+- **Overview** — Each folder's graph (nodes, links, when it was indexed, cross-repo links, files left out) and the architecture of the one picked: languages, packages, entry points, hotspots, routes, layers, boundaries, clusters and call cycles. A symbol opens in the Files tab at its line.
+- **Search** — Symbols by name, words or meaning, with kind and file filters, or text in the source; a symbol opens beside the results with its code, its callers and callees, and the outline of its file.
+- **Trace** — Who calls a function and what it calls, with the risk of a change to each: a graph that opens one step at a time, or a list by hop, in CBM's modes (calls, data flow, across services, topology, deploy, run). Runtime call paths can be imported from a JSON file.
+- **Impact** — What uncommitted work, a branch against its base, or the commits since a ref touch, and everything that depends on them, step by step, with the call each was reached by. Also from the Git tab (Changes, a commit in History) and from a worktree.
+- **Query** — Read-only Cypher over the graph or over its coverage gaps, with examples and saved queries.
+- **ADR** — The folder's architecture decision record, kept by CBM beside the graph (8,000 bytes).
+- **Coverage** — Files read in part (with their lines), skipped, or left out on purpose, and a check of given paths. Edit `.cbmignore` from Settings.
+- **Compare** — Two indexed folders of the project side by side.
+- **Lens** — CBM's own web view (the 3D Galaxy, Architecture, ADR, Coverage, System), shown in the tab. It has no login and listens on 127.0.0.1 only; it is never offered to a phone.
+- **Settings** — **Use the code graph** keeps the project's indexes fresh as its repositories change (a commit, a checkout, saved files), writes a *Code graph* section into the managed block of `CLAUDE.md` and `AGENTS.md`, and gives the project's Claude and Codex sessions CBM's MCP server on their command line when the agent has none of its own (with all tools, the analysis ones, or the scout ones). Also how much to read, cross-repo linking, sharing a folder's graph with the team (`.codebase-memory/graph.db.zst`), re-index and delete.
+
+**Ask an agent** starts a session on CBM's graph-first exploration or change-review prompt. Settings › Node Knowledge shows the program in use and CBM's own settings (watchers, automatic indexing, limits, the Lens and its port), and can run CBM's installer for every agent after showing what it would change. A paired phone has the same tab, but the Lens and these global settings.
 
 ## Project Tasks and Server Logs
 

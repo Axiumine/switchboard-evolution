@@ -33,7 +33,7 @@ describe('a window spec', () => {
   });
 
   it('offers the tabs the desktop pops out: not the Session tab, whose terminal stays in the main window', () => {
-    expect(WINDOW_TABS).toEqual(['overview', 'plan', 'todos', 'files', 'git', 'settings']);
+    expect(WINDOW_TABS).toEqual(['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings']);
   });
 
   it('is titled as the desktop titles its windows', () => {

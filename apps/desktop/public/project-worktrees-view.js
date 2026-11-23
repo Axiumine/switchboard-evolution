@@ -667,6 +667,13 @@ function wtRowMenuItems(project, repo, wt, live = []) {
       hint: folder ? '' : 'attach it first', onClick: () => wtOpenInGitGraph(project, folder),
     });
   }
+  // What this worktree's branch changes against its base, in the code graph (project-knowledge-links.js).
+  if (typeof knOpenImpact === 'function' && !wt.isMain) {
+    items.push({
+      label: 'Impact in Node Knowledge', icon: PICONS.search(13), disabled: !folder,
+      hint: folder ? 'the branch against its base' : 'attach it first', onClick: () => knOpenImpact(project, folder.path, 'branch', ''),
+    });
+  }
   items.push(wt.attached
     ? { label: 'Detach from project', icon: WT_ICONS.unlink(13), hint: 'keeps the folder', onClick: () => wtDetach(project, repo, wt) }
     : { label: 'Attach to project', icon: WT_ICONS.link(13), disabled: !wt.exists, onClick: () => wtAttach(project, wt) });

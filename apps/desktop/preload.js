@@ -165,6 +165,35 @@ contextBridge.exposeInMainWorld('api', {
   editPlanItem: (id, kind, line, text) => ipcRenderer.invoke('edit-plan-item', id, kind, line, text),
   adoptPlan: (id, filename, opts) => ipcRenderer.invoke('adopt-plan', id, filename, opts),
   listTemplates: () => ipcRenderer.invoke('list-templates'),
+  // Node Knowledge tab (knowledge.js, codebase-memory-mcp)
+  getKnowledgeStatus: (id) => ipcRenderer.invoke('get-knowledge-status', id),
+  getKnowledgeSettings: (id) => ipcRenderer.invoke('get-knowledge-settings', id),
+  setKnowledgeSettings: (id, patch) => ipcRenderer.invoke('set-knowledge-settings', id, patch),
+  knowledgeQuery: (id, folder, tool, args) => ipcRenderer.invoke('knowledge-query', id, folder, tool, args),
+  knowledgeCompare: (id, base, target, opts) => ipcRenderer.invoke('knowledge-compare', id, base, target, opts),
+  knowledgePrompt: (id, folder, name, args) => ipcRenderer.invoke('knowledge-prompt', id, folder, name, args),
+  knowledgeIndex: (id, folder, opts) => ipcRenderer.invoke('knowledge-index', id, folder, opts),
+  knowledgeIndexAll: (id, opts) => ipcRenderer.invoke('knowledge-index-all', id, opts),
+  knowledgeLinkCrossRepo: (id) => ipcRenderer.invoke('knowledge-link-cross-repo', id),
+  knowledgeDeleteIndex: (id, folder) => ipcRenderer.invoke('knowledge-delete-index', id, folder),
+  knowledgeAdr: (id, folder, opts) => ipcRenderer.invoke('knowledge-adr', id, folder, opts),
+  knowledgeIngestTraces: (id, folder, opts) => ipcRenderer.invoke('knowledge-ingest-traces', id, folder, opts),
+  knowledgeImportTracesFile: (id, folder, label) => ipcRenderer.invoke('knowledge-import-traces-file', id, folder, label),
+  getKnowledgeConfig: () => ipcRenderer.invoke('get-knowledge-config'),
+  setKnowledgeConfig: (key, value) => ipcRenderer.invoke('set-knowledge-config', key, value),
+  getKnowledgeGlobal: () => ipcRenderer.invoke('get-knowledge-global'),
+  setKnowledgeGlobal: (patch) => ipcRenderer.invoke('set-knowledge-global', patch),
+  knowledgePickBinary: () => ipcRenderer.invoke('knowledge-pick-binary'),
+  knowledgeLens: (id, folder, workspace) => ipcRenderer.invoke('knowledge-lens', id, folder, workspace),
+  knowledgeDownloadBinary: () => ipcRenderer.invoke('knowledge-download-binary'),
+  knowledgeRestart: () => ipcRenderer.invoke('knowledge-restart'),
+  getKnowledgeBinary: () => ipcRenderer.invoke('get-knowledge-binary'),
+  knowledgeInstallAgents: (opts) => ipcRenderer.invoke('knowledge-install-agents', opts),
+  onKnowledgeChanged: (callback) => {
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('knowledge-changed', handler);
+    return () => ipcRenderer.removeListener('knowledge-changed', handler);
+  },
   // Worktrees tab (worktrees.js)
   getProjectWorktrees: (id) => ipcRenderer.invoke('get-project-worktrees', id),
   getWorktreeSettings: (id) => ipcRenderer.invoke('get-worktree-settings', id),

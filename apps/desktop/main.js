@@ -417,6 +417,7 @@ const gitGraphAvatars = require('./git-graph-avatars');
 require('./remote-git-graph');
 // What of the Worktrees tab a paired phone may use.
 require('./remote-worktrees');
+require('./remote-knowledge');
 // What of the Pull Requests tab a paired phone may use.
 require('./remote-pull-requests');
 // What of the Task Manager a paired phone may use.
@@ -800,6 +801,82 @@ ipcMain.handle('worktree-attach', guarded(trustingNewFolders((id, worktreePath) 
 ipcMain.handle('worktree-detach', guarded((id, worktreePath) => worktrees.detachFromProject(id, wtPath(worktreePath))));
 ipcMain.handle('worktree-changes', guarded((id, worktreePath) => worktrees.worktreeChanges(id, wtPath(worktreePath))));
 ipcMain.handle('worktree-file-diff', guarded((id, worktreePath, filePath) => worktrees.worktreeFileDiff(id, wtPath(worktreePath), String(filePath || ''))));
+
+// --- IPC: Node Knowledge tab (codebase-memory-mcp) ---
+// knowledge.js checks every folder against the project and fills in the CBM
+// project name itself; cbm-client.js is the app's one MCP session with CBM.
+const cbmLocator = require('./cbm-locator');
+const { createCbmClient } = require('./cbm-client');
+const knowledge = require('./knowledge');
+const cbmClient = createCbmClient({
+  locate: () => cbmLocator.locateCbm({ configured: knowledge.globalSettings().binaryPath }),
+  env: () => buildPtyEnv(process.env),
+  cwd: () => {
+    const dir = path.join(app.getPath('userData'), 'cbm');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    return dir;
+  },
+  log,
+  clientInfo: { name: 'switchboard-evolution', version: app.getVersion() },
+});
+knowledge.init({
+  db: dbModule, log, projects, client: cbmClient, emit,
+  watchRepo: (dir) => gitGraphService.ensureRepoWatch(dir),
+  syncBrief: (id) => projects.syncProjectBrief(id),
+  cbmDir: () => path.join(app.getPath('userData'), 'cbm'),
+});
+// Projects with the code graph on get a "Code graph" section in their managed block.
+projects.addBriefSection((id) => knowledge.briefSection(id));
+addSink((channel, args) => {
+  if (channel === 'git-graph-repo-changed' && typeof args[0] === 'string') knowledge.scheduleRefresh(args[0]);
+});
+// Like guarded(), and the error's code too ('not-indexed', 'cbm-missing', …) for the tab's states.
+function knowledgeGuarded(fn) {
+  return async (_event, ...args) => {
+    try { return await fn(...args); } catch (err) {
+      if (!err.code) log.error('[knowledge]', err);
+      return { error: err.message, code: err.code || null };
+    }
+  };
+}
+const knPath = (value) => String(value || '');
+const knObject = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+ipcMain.handle('get-knowledge-status', knowledgeGuarded((id) => knowledge.status(id)));
+ipcMain.handle('get-knowledge-settings', knowledgeGuarded((id) => knowledge.getSettings(id)));
+ipcMain.handle('set-knowledge-settings', knowledgeGuarded((id, patch) => knowledge.setSettings(id, knObject(patch))));
+ipcMain.handle('knowledge-query', knowledgeGuarded((id, folder, tool, args) => knowledge.query(id, knPath(folder), String(tool || ''), args)));
+ipcMain.handle('knowledge-compare', knowledgeGuarded((id, base, target, opts) => knowledge.compare(id, knPath(base), knPath(target), knObject(opts))));
+ipcMain.handle('knowledge-prompt', knowledgeGuarded((id, folder, name, args) => knowledge.prompt(id, knPath(folder), String(name || ''), knObject(args))));
+ipcMain.handle('knowledge-index', knowledgeGuarded((id, folder, opts) => knowledge.index(id, knPath(folder), { mode: knObject(opts).mode })));
+ipcMain.handle('knowledge-index-all', knowledgeGuarded((id, opts) => knowledge.indexAll(id, { mode: knObject(opts).mode })));
+ipcMain.handle('knowledge-link-cross-repo', knowledgeGuarded((id) => knowledge.linkCrossRepo(id)));
+ipcMain.handle('knowledge-delete-index', knowledgeGuarded((id, folder) => knowledge.deleteIndex(id, knPath(folder))));
+ipcMain.handle('knowledge-adr', knowledgeGuarded((id, folder, opts) => knowledge.adr(id, knPath(folder), knObject(opts))));
+ipcMain.handle('knowledge-ingest-traces', knowledgeGuarded((id, folder, opts) => knowledge.ingestTraces(id, knPath(folder), knObject(opts))));
+// The traces file comes from this dialog, never as a path from the renderer.
+ipcMain.handle('knowledge-import-traces-file', knowledgeGuarded(async (id, folder, label) => {
+  const picked = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import runtime traces',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true };
+  return knowledge.ingestTracesFile(id, knPath(folder), picked.filePaths[0], label == null ? null : String(label));
+}));
+ipcMain.handle('get-knowledge-config', knowledgeGuarded(() => knowledge.getConfig()));
+ipcMain.handle('set-knowledge-config', knowledgeGuarded((key, value) => knowledge.setConfig(String(key || ''), value == null ? '' : String(value))));
+ipcMain.handle('get-knowledge-global', knowledgeGuarded(() => ({ ok: true, settings: knowledge.globalSettings() })));
+ipcMain.handle('set-knowledge-global', knowledgeGuarded((patch) => knowledge.setGlobalSettings(knObject(patch))));
+ipcMain.handle('knowledge-pick-binary', knowledgeGuarded(async () => {
+  const picked = await dialog.showOpenDialog(mainWindow, { title: 'Choose codebase-memory-mcp', properties: ['openFile', 'showHiddenFiles'] });
+  if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true };
+  return knowledge.setGlobalSettings({ binaryPath: picked.filePaths[0] });
+}));
+ipcMain.handle('knowledge-lens', knowledgeGuarded((id, folder, workspace) => knowledge.lens(id, knPath(folder), String(workspace || ''))));
+ipcMain.handle('knowledge-download-binary', knowledgeGuarded(() => knowledge.downloadBinary()));
+ipcMain.handle('knowledge-restart', knowledgeGuarded(() => knowledge.restart()));
+ipcMain.handle('get-knowledge-binary', knowledgeGuarded(() => knowledge.binary()));
+ipcMain.handle('knowledge-install-agents', knowledgeGuarded((opts) => knowledge.installAgents({ dryRun: knObject(opts).dryRun !== false })));
 
 // --- IPC: get-projects ---
 ipcMain.handle('open-external', (_event, url) => {
@@ -1831,7 +1908,7 @@ function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inacti
 // and whether it stays on top. They close with the main window. A tab's
 // window can move to another tab (switch-project-window-tab). 'note' is the
 // project's note.md (public/note-panel.js), in a smaller window.
-const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'todos', 'files', 'git', 'settings', 'note']);
+const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings', 'note']);
 // webview: the Git tab's Pull Requests can open a pull request's page in a panel.
 const PROJECT_WINDOW_SPEC = { title: 'Switchboard', width: 1000, height: 760, minWidth: 520, minHeight: 360, onTop: false, webview: true };
 const NOTE_WINDOW_SPEC = { title: 'Note', width: 560, height: 640, minWidth: 340, minHeight: 260, onTop: false };
@@ -1842,6 +1919,7 @@ const PROJECT_WINDOW_RUN = new Set(['openSession', 'showSession', 'launchNewSess
 const PROJECT_WINDOW_EVENTS = new Set([
   'projects-changed', 'project-plan-changed', 'git-graph-repo-changed', 'git-graph-action-progress',
   'task-state-changed', 'project-tasks-changed', 'harnesses-changed', 'file-changed',
+  'knowledge-changed',
 ]);
 const projectWindows = new Map(); // `${projectId}\n${tab}` → BrowserWindow
 
@@ -3034,6 +3112,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     } else {
       // Argv is built by the harness and quoted here, so a value can never be
       // spliced into the command line as shell syntax.
+      // A project with the code graph on: its sessions get CBM's MCP server
+      // when the agent has none of its own (knowledge.js sessionLaunch).
+      try {
+        const graph = knowledge.sessionLaunch(sessionOptions?.projectId || getMeta(sessionId)?.projectId || null, harness.id);
+        if (graph.mcpConfig || graph.mcpServers) sessionOptions = { ...(sessionOptions || {}), ...graph };
+      } catch (err) {
+        log.warn('[knowledge] session launch', err.message);
+      }
       const cliArgs = harness.buildLaunchArgs({
         sessionId: launchId, isNew: startFresh, options: sessionOptions,
       });
@@ -3735,6 +3821,8 @@ function startScheduleTicker() {
       if (imported) log.info(`[schedule] Imported ${imported} schedule file(s) as folder schedules`);
     } catch (err) { log.error('[schedule] legacy import failed', err); }
     startScheduleTicker();
+    // Projects with the code graph on refresh it when their repositories move.
+    knowledge.startWatching();
     // The remote-access switch stays where it was left.
     if (remoteAccessSettings().enabled) startRemoteAccess();
 
@@ -3768,6 +3856,8 @@ app.on('before-quit', () => {
   freezeOpenWindows();
   remoteTunnels.stop();
   remoteServer.stop();
+  knowledge.stopWatching();
+  cbmClient.stop();
   // Shut down all MCP servers
   shutdownAllMcp();
   taskManager.shutdown();

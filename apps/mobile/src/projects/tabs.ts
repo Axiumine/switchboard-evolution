@@ -1,4 +1,4 @@
-export type ProjectTab = 'overview' | 'session' | 'plan' | 'todos' | 'files' | 'git' | 'settings';
+export type ProjectTab = 'overview' | 'session' | 'plan' | 'todos' | 'files' | 'git' | 'knowledge' | 'settings';
 
 /**
  * The project page's tabs, in the desktop's order. Session shows the session
@@ -11,6 +11,8 @@ export const PROJECT_TABS: readonly { key: ProjectTab; label: string }[] = [
   { key: 'todos', label: 'Todos' },
   { key: 'files', label: 'Files' },
   { key: 'git', label: 'Git' },
+  // The code graph of the attached folders (codebase-memory-mcp), when the computer offers it.
+  { key: 'knowledge', label: 'Node Knowledge' },
   { key: 'settings', label: 'Settings' },
 ];
 
@@ -86,6 +88,28 @@ export type SessionView = 'chat' | 'terminal';
 
 export function parseSessionView(value: unknown): SessionView | undefined {
   return value === 'chat' || value === 'terminal' ? value : undefined;
+}
+
+/**
+ * The Node Knowledge tab's views, as on the desktop but the Lens: CBM's own
+ * web page stays on the computer (it has no login).
+ */
+export type KnowledgeView = 'overview' | 'search' | 'trace' | 'impact' | 'query' | 'adr' | 'coverage' | 'compare' | 'settings';
+
+export const KNOWLEDGE_VIEWS: readonly { key: KnowledgeView; label: string }[] = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'search', label: 'Search' },
+  { key: 'trace', label: 'Trace' },
+  { key: 'impact', label: 'Impact' },
+  { key: 'query', label: 'Query' },
+  { key: 'adr', label: 'ADR' },
+  { key: 'coverage', label: 'Coverage' },
+  { key: 'compare', label: 'Compare' },
+  { key: 'settings', label: 'Settings' },
+];
+
+export function parseKnowledgeView(value: unknown): KnowledgeView {
+  return KNOWLEDGE_VIEWS.find((view) => view.key === value)?.key ?? 'overview';
 }
 
 /** Each tab and Git view keeps its own scroll offset. */

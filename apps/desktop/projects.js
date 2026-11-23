@@ -128,16 +128,40 @@ function foldersSection(folderPaths) {
 // note.md is the user's own notes pad (the Note button), made when first opened.
 const PROJECT_FILES = ['plan.md', 'plan-tracker.md', 'todos.md', 'memory.md', 'note.md'];
 
-/** The one block Switchboard owns: title, folder, rules, attached folders. */
-function managedBlock(name, root, folderPaths = []) {
+/**
+ * The one block Switchboard owns: title, folder, rules, attached folders, and
+ * the sections other modules add for the project (`extra`, e.g. the code graph
+ * of knowledge.js).
+ */
+function managedBlock(name, root, folderPaths = [], extra = '') {
   return `${MANAGED_START}
 ${MANAGED_NOTE}
 # ${name}
 Project folder: ${root}
 
 ${briefRules(root)}
-${foldersSection(folderPaths)}${MANAGED_END}
+${foldersSection(folderPaths)}${extra ? `\n${extra.endsWith('\n') ? extra : `${extra}\n`}` : ''}${MANAGED_END}
 `;
+}
+
+// Sections other modules add to a project's managed block: fn(projectId) → Markdown or ''.
+const briefSections = [];
+
+function addBriefSection(fn) {
+  if (typeof fn === 'function') briefSections.push(fn);
+}
+
+function extraBriefSections(projectId) {
+  const parts = [];
+  for (const fn of briefSections) {
+    try {
+      const text = fn(projectId);
+      if (typeof text === 'string' && text.trim()) parts.push(text.trimEnd());
+    } catch (err) {
+      log.error?.('[projects] a brief section failed', err);
+    }
+  }
+  return parts.join('\n\n');
 }
 
 /**
@@ -508,7 +532,7 @@ async function syncProjectBrief(projectId) {
   const project = db.getProject(projectId);
   if (!project) return;
   const folders = db.listProjectFolders(projectId);
-  const block = managedBlock(project.name, project.root, folders.map(f => f.path));
+  const block = managedBlock(project.name, project.root, folders.map(f => f.path), extraBriefSections(projectId));
   for (const file of BRIEF_FILES) {
     try { syncBriefFile(path.join(project.root, file), block); } catch (err) {
       log.error?.(`[projects] could not update ${file} in ${project.root}`, err);
@@ -2101,8 +2125,8 @@ async function editProjectPullRequest(projectId, folderPath, params) {
 
 module.exports = {
   init,
-  projectsRoot, slugify, uniqueSlug, defaultBrief,
-  createProject, updateProject, deleteProject, attachFolder, detachFolder,
+  projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection,
+  createProject, updateProject, deleteProject, attachFolder, detachFolder, requireAttachedFolder,
   folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths, readProjectGitEditFile, saveProjectGitEditFile,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
   projectGitGraphFileAtRevision, projectGitGraphFileDiffBetween,

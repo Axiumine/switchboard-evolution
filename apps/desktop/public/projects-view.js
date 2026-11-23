@@ -190,7 +190,7 @@ function saveProjectsUi() {
   if (projectsUi.otherOpen) sessionStorage.setItem('projects.otherOpen', '1'); else sessionStorage.removeItem('projects.otherOpen');
 }
 
-const PROJECT_WORKSPACE_TABS = new Set(['overview', 'session', 'plan', 'todos', 'files', 'git', 'settings']);
+const PROJECT_WORKSPACE_TABS = new Set(['overview', 'session', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings']);
 // The two tabs drawn from the project's plan data (get-project-plan): the phases and the todos.
 const PLAN_TABS = new Set(['plan', 'todos']);
 
@@ -1780,6 +1780,7 @@ function renderOverview() {
         ${tabWithWindow('todos', `<button type="button" class="ws-tab ${tabName === 'todos' ? 'active' : ''}" data-tab="todos" title="The todos from todos.md, with the sessions that worked on them">Todos <span class="ws-tab-meta" id="ws-tab-todos-meta"></span></button>`)}
         ${tabWithWindow('files', `<button type="button" class="ws-tab ${tabName === 'files' ? 'active' : ''}" data-tab="files" title="The project folder: brief, plan, todos and anything else the project keeps">Files</button>`)}
         ${tabWithWindow('git', `<button type="button" class="ws-tab ${tabName === 'git' ? 'active' : ''}" data-tab="git" title="Working changes, the commit graph with its actions (branch, merge, rebase, stash and more) and the worktrees">Git</button>`)}
+        ${tabWithWindow('knowledge', `<button type="button" class="ws-tab ${tabName === 'knowledge' ? 'active' : ''}" data-tab="knowledge" title="The attached folders as code graphs (codebase-memory-mcp): architecture, search, call traces, the impact of a change, Cypher queries and more">Node Knowledge</button>`)}
         ${tabWithWindow('settings', `<button type="button" class="ws-tab ${tabName === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>`)}
       </div>
     </div>`;
@@ -1796,6 +1797,7 @@ function renderOverview() {
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.compare) renderGitCompareWindow(project, body);
   else if (tabName === 'git' && PROJECT_WINDOW && PROJECT_WINDOW.file) renderGitFileWindow(project, body);
   else if (tabName === 'git') renderProjectGitWorkspace(project, body);
+  else if (tabName === 'knowledge') renderKnowledgeTab(project, body);
   else renderOverviewBody(project, body);
 
   if (PROJECT_WINDOW) {
@@ -1823,8 +1825,8 @@ function renderOverview() {
 
 // --- A tab of the project in a window of its own (project-window.js) ---
 // Every tab but Session, whose terminal stays in the main window.
-const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', todos: 'Todos', files: 'Files', git: 'Git', settings: 'Settings' };
-const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'todos', 'files', 'git', 'settings'];
+const PROJECT_WINDOW_TAB_LABELS = { overview: 'Overview', plan: 'Plan', todos: 'Todos', files: 'Files', git: 'Git', knowledge: 'Node Knowledge', settings: 'Settings' };
+const PROJECT_WINDOW_TAB_ORDER = ['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings'];
 
 /**
  * A tab chosen in a tab's window: the window moves to it (main.js keeps it
@@ -2763,6 +2765,7 @@ function renderSideCards(project, side) {
           <button type="button" class="ws-ghost ws-ghost--sm ws-frow-x" title="Detach from the project" aria-label="${escapeHtml(`Detach ${pathBasename(f.path)}`)}">${PICONS.x(12)}</button>
         </div>`).join('') : '<div class="ws-card-text muted">No folders attached. Sessions run in the project folder.</div>'}
     </div>
+    <div class="ws-card kn-side-card" id="ws-kn-card" hidden></div>
     <div class="ws-card ws-added-files-card">
       <div class="ws-card-h"><span class="ws-card-title">Added Files</span><span class="ws-card-meta">${addedFiles.length ? `${addedFiles.length} file${addedFiles.length === 1 ? '' : 's'}` : ''}</span><span class="ws-flex"></span>${addedFiles.length ? '<button type="button" class="ws-ghost ws-ghost--sm" id="ws-added-files-open">Open</button>' : ''}</div>
       <div class="ws-added-drop" id="ws-added-files-drop">
@@ -2787,6 +2790,8 @@ function renderSideCards(project, side) {
   });
   bindAddedFilesCard(project, side);
   bindRecentFilesCard(project, side);
+  // The Code graph card, for projects with the graph on (project-knowledge-links.js).
+  if (typeof knRenderSideCard === 'function') knRenderSideCard(project, side.querySelector('#ws-kn-card')).catch(() => {});
   side.querySelectorAll('.ws-todo input').forEach(box => {
     box.onchange = async () => {
       box.disabled = true;

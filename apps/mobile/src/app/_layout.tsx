@@ -62,6 +62,7 @@ export default function RootLayout() {
             <Stack.Screen name="git" options={{ title: 'Git' }} />
             <Stack.Screen name="diff" options={{ title: 'Diff' }} />
             <Stack.Screen name="graph" options={{ title: 'Git Graph' }} />
+            <Stack.Screen name="knowledge/symbol" options={{ title: 'Symbol' }} />
             <Stack.Screen name="compare" options={{ title: 'Compare' }} />
             {/* On a Duo the diff is the other screen of the pair: it must be there at once, not slide in over the table. */}
             <Stack.Screen name="compare-diff" options={{ title: 'Compare', ...(isDuoModel() ? { animation: 'none' as const } : {}) }} />

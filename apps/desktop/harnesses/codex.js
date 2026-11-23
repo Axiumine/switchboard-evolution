@@ -634,6 +634,15 @@ function buildLaunchArgs({ sessionId, isNew, options }) {
     if (REASONING_EFFORTS.has(options.codexEffort)) {
       args.push('-c', `model_reasoning_effort="${options.codexEffort}"`);
     }
+    // MCP servers for this session only (the project's code graph, when codex
+    // has none of its own: knowledge.js sessionLaunch). JSON strings and
+    // arrays of strings are valid TOML values.
+    for (const server of Array.isArray(options.mcpServers) ? options.mcpServers : []) {
+      if (!server || !/^[A-Za-z0-9_-]{1,64}$/.test(String(server.name)) || typeof server.command !== 'string' || !server.command) continue;
+      const serverArgs = Array.isArray(server.args) ? server.args.map(String) : [];
+      args.push('-c', `mcp_servers.${server.name}.command=${JSON.stringify(server.command)}`);
+      args.push('-c', `mcp_servers.${server.name}.args=${JSON.stringify(serverArgs)}`);
+    }
     // --add-dir names extra writable roots, and codex refuses to start when
     // the sandbox cannot grant them ("effective permissions do not allow
     // additional writable roots"). Read-only, the default, can already read
