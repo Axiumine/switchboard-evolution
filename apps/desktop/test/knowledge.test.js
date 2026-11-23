@@ -139,7 +139,9 @@ test('query drops the arguments the module owns', async () => {
   });
   await knowledge.nameFor('p1', '/work/api');
   const r = await knowledge.query('p1', '/work/api', 'search_graph', { query: 'login', project: 'someone-else', repo_path: '/etc', format: 'tree', limit: 5 });
-  assert.deepEqual(r.echo, { query: 'login', limit: 5, project: 'api' });
+  assert.deepEqual(r.echo, { max_output_tokens: 120000, query: 'login', limit: 5, project: 'api' });
+  const own = await knowledge.query('p1', '/work/api', 'search_graph', { max_output_tokens: 500 });
+  assert.equal(own.echo.max_output_tokens, 500, 'a budget the caller sets is kept');
   await assert.rejects(knowledge.query('p1', '/work/api', 'index_repository', {}), /Unknown tool/);
   await assert.rejects(knowledge.query('p1', '/work/api', 'delete_project', {}), /Unknown tool/);
   await assert.rejects(knowledge.query('p1', '/not/attached', 'search_graph', {}), /not attached/);

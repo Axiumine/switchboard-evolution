@@ -25,6 +25,7 @@ import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { diff } from '@codemirror/legacy-modes/mode/diff';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
+import { cypher } from '@codemirror/legacy-modes/mode/cypher';
 
 const markdownExtras = HighlightStyle.define([
   { tag: tags.monospace, color: '#8BE9FD' },
@@ -589,6 +590,8 @@ const CODE_LANGUAGES = [
   { name: 'Diff', alias: ['patch'], extensions: ['diff', 'patch'], support: legacy(diff) },
   { name: 'TOML', extensions: ['toml'], support: legacy(toml) },
   { name: 'Dockerfile', alias: ['docker'], filename: /^Dockerfile$/, support: legacy(dockerFile) },
+  // The Node Knowledge tab's Query view (codebase-memory-mcp's query_graph).
+  { name: 'Cypher', alias: ['cql'], extensions: ['cypher', 'cyp'], support: legacy(cypher) },
   { name: 'Markdown', alias: ['md'], extensions: ['md', 'mdx', 'markdown'], support: () => markdownSupport() },
 ];
 

@@ -23,7 +23,7 @@ function languages() {
     javascript: (o = {}) => new LanguageSupport({ name: o.typescript ? (o.jsx ? 'tsx' : 'typescript') : (o.jsx ? 'jsx' : 'javascript') }),
     python: support('python'), json: support('json'), html: support('html'), css: support('css'), rust: support('rust'),
     go: support('go'), java: support('java'), xml: support('xml'), yaml: support('yaml'), sql: support('sql'), cpp: support('cpp'),
-    shell: 'shell', diff: 'diff', toml: 'toml', dockerFile: 'dockerfile',
+    shell: 'shell', diff: 'diff', toml: 'toml', dockerFile: 'dockerfile', cypher: 'cypher',
     markdown: ({ codeLanguages }) => Object.assign(new LanguageSupport({ name: 'markdown' }), { codeLanguages }),
     markdownLanguage: {},
   });
@@ -45,6 +45,7 @@ test('a file gets its language by extension, in any case', () => {
   assert.equal(lang('deploy.sh'), 'shell');
   assert.equal(lang('fix.patch'), 'diff');
   assert.equal(lang('Cargo.toml'), 'toml');
+  assert.equal(lang('calls.cypher'), 'cypher');
 });
 
 test('a Dockerfile is known by its name, wherever it is', () => {
@@ -67,7 +68,7 @@ test('a Markdown code block finds its language by name or alias', () => {
   const cases = {
     ts: 'TypeScript', typescript: 'TypeScript', tsx: 'TSX', js: 'JavaScript', py: 'Python', json: 'JSON',
     jsonc: 'JSON', bash: 'Shell', sh: 'Shell', zsh: 'Shell', console: 'Shell', diff: 'Diff', yml: 'YAML',
-    toml: 'TOML', dockerfile: 'Dockerfile', rust: 'Rust', golang: 'Go', 'c++': 'C++', c: 'C++', sql: 'SQL', md: 'Markdown',
+    toml: 'TOML', dockerfile: 'Dockerfile', rust: 'Rust', golang: 'Go', 'c++': 'C++', c: 'C++', sql: 'SQL', md: 'Markdown', cypher: 'Cypher',
   };
   for (const [info, name] of Object.entries(cases)) {
     assert.equal(LanguageDescription.matchLanguageName(CODE_BLOCK_LANGUAGES, info, true)?.name, name, info);

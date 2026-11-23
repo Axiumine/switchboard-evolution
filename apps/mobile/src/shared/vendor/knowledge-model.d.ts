@@ -150,6 +150,17 @@ export type IndexSummary = {
   docs: { mentions: number } | null;
 };
 
+export type IndexGaps = {
+  partial: { path: string; ranges: string | null }[];
+  unusable: { path: string; reason: string | null }[];
+  skipped: { path: string; reason: string | null }[];
+  notIndexed: { path: string; reason: string | null }[];
+  notIndexedDirs: string[];
+  truncated: boolean;
+  counts: { partial: number; unusable: number; skipped: number; notIndexed: number; notIndexedDirs: number };
+  note: string | null;
+};
+
 export type Coverage = {
   signal: string | null;
   indexedAt: string | null;
@@ -203,6 +214,7 @@ export function testImpactModel(result: unknown): TestImpact;
 export function architectureModel(result: unknown): Architecture;
 export function schemaModel(result: unknown): Schema;
 export function indexSummary(status: unknown): IndexSummary;
+export function indexGaps(status: unknown): IndexGaps;
 export function coverageModel(result: unknown): Coverage;
 export function queryTable(result: unknown): QueryTable;
 export function cellText(value: unknown): string;

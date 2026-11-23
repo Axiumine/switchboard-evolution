@@ -438,6 +438,35 @@
     };
   }
 
+  /**
+   * index_status with verbose: the files the graph holds in part (with the
+   * lines it could not read), could not read, skipped, and leaves out on
+   * purpose (ignore rules, binary files), with why.
+   */
+  function indexGaps(status) {
+    const s = status || {};
+    const entry = (f) => (typeof f === 'string' ? { path: f } : f || {});
+    const files = (block, fn) => (block && Array.isArray(block.files) ? block.files.map(f => fn(entry(f))) : []);
+    const blocks = [s.parse_partial, s.parse_unusable, s.skipped, s.not_indexed];
+    return {
+      partial: files(s.parse_partial, f => ({ path: String(f.path || ''), ranges: f.error_ranges ? String(f.error_ranges) : null })),
+      unusable: files(s.parse_unusable, f => ({ path: String(f.path || ''), reason: f.reason || f.error || null })),
+      skipped: files(s.skipped, f => ({ path: String(f.path || ''), reason: f.reason || null })),
+      notIndexed: files(s.not_indexed, f => ({ path: String(f.path || ''), reason: f.reason || null })),
+      notIndexedDirs: Array.isArray(s.not_indexed?.dirs) ? s.not_indexed.dirs.map(String) : [],
+      truncated: blocks.some(b => b && b.truncated),
+      // The lists can be cut short; the counts are whole.
+      counts: {
+        partial: countOf(s.parse_partial),
+        unusable: countOf(s.parse_unusable),
+        skipped: countOf(s.skipped),
+        notIndexed: countOf(s.not_indexed, 'files_count'),
+        notIndexedDirs: countOf(s.not_indexed, 'dirs_count'),
+      },
+      note: s.coverage_note || null,
+    };
+  }
+
   /** check_index_coverage: each path asked about, and what to do with it. */
   function coverageModel(result) {
     const r = result || {};
@@ -609,6 +638,7 @@
     architectureModel,
     schemaModel,
     indexSummary,
+    indexGaps,
     coverageModel,
     queryTable,
     cellText,

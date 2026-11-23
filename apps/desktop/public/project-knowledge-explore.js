@@ -386,8 +386,10 @@ function renderKnowledgeTrace(project, view, folder, body) {
       </div>
       ${d.show === 'list' ? `<label class="ws-check">Steps <input type="number" class="ws-input kn-num" min="1" max="10" data-kn-field="depth" value="${Number(d.depth) || 3}"></label>` : ''}
       <label class="ws-check"><input type="checkbox" data-kn-field="tests"${d.tests ? ' checked' : ''}>Include tests</label>
+      <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="import-traces" title="Record call paths seen while the program ran (JSON: [{ path: [caller, …, callee], count }] or [{ caller, callee }]), so the Lens can mark the hops that ran">${PICONS.plus(11)}<span>Import runtime traces…</span></button>
       <span class="kn-legend">${KnowledgeModel.RISKS.map(r => `<span class="kn-risk" style="--kn-risk:${KnowledgeModel.riskColor(r)}">${r.toLowerCase()}</span>`).join('')}</span>
     </div>
+    ${d.notice ? `<div class="ws-help kn-trace-notice">${escapeHtml(d.notice)}</div>` : ''}
     <div class="kn-trace-body">${content}</div>
   </div>`;
 
@@ -409,6 +411,13 @@ function renderKnowledgeTrace(project, view, folder, body) {
     if (view.isConnected) renderKnowledgeTrace(project, view, folder, body);
   };
   view.querySelector('[data-kn-form]').onsubmit = (e) => { e.preventDefault(); run(); };
+  view.querySelector('[data-kn-act="import-traces"]').onclick = async () => {
+    const r = await window.api.knowledgeImportTracesFile(project.id, folder, null);
+    if (r?.canceled) return;
+    if (knToastError(r)) return;
+    d.notice = `Recorded ${knNumber(r.sent)} call path${r.sent === 1 ? '' : 's'} as "${r.label}"${r.skipped ? ` (${knNumber(r.skipped)} left out: not two names, or not a path)` : ''}. Names codebase-memory-mcp could not find in the graph are dropped.`;
+    renderKnowledgeTrace(project, view, folder, body);
+  };
   view.querySelectorAll('[data-kn-show]').forEach(btn => {
     btn.onclick = () => { if (d.show === btn.dataset.knShow) return; d.show = btn.dataset.knShow; if (d.name.trim()) run(); else renderKnowledgeTrace(project, view, folder, body); };
   });

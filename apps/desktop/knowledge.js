@@ -40,6 +40,9 @@ const LENS_WORKSPACES = new Set(['explore', 'galaxy', 'architecture', 'adr', 'co
 const JOB_DONE = new Set(['succeeded', 'failed', 'cancelled']);
 
 const ARGS_MAX_BYTES = 64 * 1024;
+// CBM trims answers to 3,200 tokens by default, a budget for a model's context.
+// The app shows lists, not prompts: it asks for room unless the caller sets one.
+const OUTPUT_TOKENS = 120000;
 const ADR_MAX_BYTES = 8000;
 const TRACES_FILE_MAX_BYTES = 20 * 1024 * 1024;
 const TRACES_MAX = 10000;
@@ -370,7 +373,7 @@ async function query(projectId, folderPath, tool, args) {
   requireFolder(projectId, folderPath);
   if (!READ_TOOLS.has(tool)) throw new Error(`Unknown tool: ${String(tool).slice(0, 60)}`);
   const name = knownName(projectId, folderPath);
-  return client.call(tool, { ...cleanArgs(args), project: name });
+  return client.call(tool, { max_output_tokens: OUTPUT_TOKENS, ...cleanArgs(args), project: name });
 }
 
 /** compare_graphs between two folders of the project (a worktree and its main checkout, two branches). */

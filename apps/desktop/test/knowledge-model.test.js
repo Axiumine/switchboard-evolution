@@ -177,6 +177,21 @@ test('schema, index status and coverage', () => {
   assert.equal(c.paths[0].details[0].detail, 'gitignore');
 });
 
+test('index gaps: files read in part with their lines, left out with why', () => {
+  const g = KM.indexGaps({
+    parse_partial: { files: [{ path: 'web/style.css', error_ranges: '40-40' }], count: 1, truncated: false },
+    not_indexed: { dirs: ['.cache'], dirs_count: 3, files_count: 40, files: [{ path: 'web/logo.png', reason: 'ignored-suffix' }, 'gen/out.js'], truncated: true },
+    coverage_note: 'Best-effort signal',
+  });
+  assert.deepEqual(g.partial, [{ path: 'web/style.css', ranges: '40-40' }]);
+  assert.deepEqual(g.notIndexed, [{ path: 'web/logo.png', reason: 'ignored-suffix' }, { path: 'gen/out.js', reason: null }]);
+  assert.deepEqual(g.notIndexedDirs, ['.cache']);
+  assert.equal(g.truncated, true);
+  assert.equal(g.note, 'Best-effort signal');
+  assert.deepEqual(g.counts, { partial: 1, unusable: 0, skipped: 0, notIndexed: 40, notIndexedDirs: 3 }, 'whole counts beside lists cut short');
+  assert.deepEqual(KM.indexGaps(null).partial, []);
+});
+
 test('query tables and cells', () => {
   const q = KM.queryTable({ columns: ['f.name', 'n'], rows: [['main', 3], ['x', { a: 1 }]], total: 2, has_more: false });
   assert.deepEqual(q.columns, ['f.name', 'n']);
