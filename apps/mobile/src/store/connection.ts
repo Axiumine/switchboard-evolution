@@ -142,6 +142,14 @@ export const useConnection = create<ConnectionStore>((set, get) => {
           queryClient.invalidateQueries({ queryKey: ['project-plan', args[0]] });
           return;
         }
+        if (event === 'knowledge-changed') {
+          // An index job moved, settings or an ADR changed (remote-knowledge.js).
+          const projectId = args[0] && typeof args[0] === 'object' ? (args[0] as { projectId?: string | null }).projectId : null;
+          // Only the queries on screen are read again; a finished job changes their answers.
+          queryClient.invalidateQueries({ queryKey: projectId ? ['knowledge', projectId] : ['knowledge'] });
+          queryClient.invalidateQueries({ queryKey: projectId ? ['knowledge-data', projectId] : ['knowledge-data'] });
+          return;
+        }
         if (event === 'process-exited' || event === 'session-detected' || event === 'session-forked') {
           queryClient.invalidateQueries({ queryKey: ['projects'] });
         }
