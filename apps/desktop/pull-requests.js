@@ -112,9 +112,10 @@ function missingError() {
 
 /**
  * Run gh with `args`, `input` on stdin; resolves to { stdout, stderr, code, gh }
- * whatever the exit code, `gh` being which one ran (locateGh).
+ * whatever the exit code, `gh` being which one ran (locateGh). With `binary`
+ * stdout stays a Buffer (a log archive, a zip).
  */
-function defaultRunGh(args, { input = null, timeoutMs = READ_TIMEOUT_MS } = {}) {
+function defaultRunGh(args, { input = null, timeoutMs = READ_TIMEOUT_MS, binary = false } = {}) {
   const gh = locateGh();
   if (!gh) return Promise.reject(missingError());
   return new Promise((resolve, reject) => {
@@ -144,7 +145,8 @@ function defaultRunGh(args, { input = null, timeoutMs = READ_TIMEOUT_MS } = {}) 
     child.on('close', (code) => {
       clearTimeout(timer);
       if (failure) { reject(failure); return; }
-      resolve({ stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(errOut).toString('utf8'), code, gh });
+      const stdout = Buffer.concat(out);
+      resolve({ stdout: binary ? stdout : stdout.toString('utf8'), stderr: Buffer.concat(errOut).toString('utf8'), code, gh });
     });
     child.stdin.on('error', () => {});
     child.stdin.end(input == null ? '' : input);
@@ -562,7 +564,7 @@ async function runAction(dir, params = {}) {
   }
 }
 
-// --- For the sibling modules (pull-request-detail.js, pull-request-edits.js) ---
+// --- For the sibling modules (pull-request-detail.js, pull-request-edits.js, actions.js) ---
 
 /** Run gh through the runner init() set, so a test's fake gh answers for every module. */
 function run(args, opts) {
@@ -587,10 +589,10 @@ function info(...args) {
 module.exports = {
   init,
   listOpen, listPage, files, runAction,
-  // for pull-request-detail.js and pull-request-edits.js
-  run, graphql, targetFor, ghFailure, thrownFailure, validNumber, validCursor, parseFileLines, claim, release, info,
+  // for pull-request-detail.js, pull-request-edits.js and actions.js
+  run, graphql, targetFor, targetSummary, repositoryInfo, repoArg, ghFailure, thrownFailure, validNumber, validCursor, parseFileLines, claim, release, info,
   READ_TIMEOUT_MS, FILES_TIMEOUT_MS, ACTION_TIMEOUT_MS,
   // exported for tests
-  parseGitHubRemote, isGitHubHost, resolveRepo, repoArg, actionArgs, cleanGhText, ghEnv, locateGh,
-  normalizePullRequest, repositoryInfo, LIST_QUERY, MERGE_METHODS, ACTIONS,
+  parseGitHubRemote, isGitHubHost, resolveRepo, actionArgs, cleanGhText, ghEnv, locateGh,
+  normalizePullRequest, LIST_QUERY, MERGE_METHODS, ACTIONS,
 };

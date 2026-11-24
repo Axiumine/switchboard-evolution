@@ -421,6 +421,8 @@ require('./remote-worktrees');
 require('./remote-knowledge');
 // What of the Pull Requests tab a paired phone may use.
 require('./remote-pull-requests');
+// What of the Actions view a paired phone may use (not the downloads).
+require('./remote-actions');
 // What of the Task Manager a paired phone may use.
 const { isOwner: isProcessOwner } = require('./remote-process-usage');
 // Mirrors db.js's own DATA_DIR resolution (SWITCHBOARD_DATA_DIR override,
@@ -597,6 +599,16 @@ function guarded(fn) {
     }
   };
 }
+
+/** guarded, for a handler that needs the window that asked (a dialog's parent). */
+function guardedEvent(fn) {
+  return async (event, ...args) => {
+    try { return await fn(event, ...args); } catch (err) {
+      log.error('[projects]', err);
+      return { error: err.message };
+    }
+  };
+}
 ipcMain.handle('get-project-tree', guarded((showArchived) => {
   // Mirrors get-projects: until the cache is populated there is nothing to
   // file, and the renderer is told via projects-changed once there is.
@@ -759,6 +771,52 @@ ipcMain.handle('render-pull-request-markdown', guarded((id, folderPath, opts) =>
 ipcMain.handle('get-pull-request-texts', guarded((id, folderPath, opts) => projects.projectPullRequestTexts(id, String(folderPath || ''), opts || {})));
 // Every other change to a pull request (pull-request-edits.js).
 ipcMain.handle('edit-pull-request', guarded((id, folderPath, params) => projects.editProjectPullRequest(id, String(folderPath || ''), params || {})));
+// --- IPC: Actions tab (actions.js, through the GitHub CLI) ---
+ipcMain.handle('get-actions-workflows', guarded((id, folderPath, opts) => projects.projectActionsWorkflows(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-runs', guarded((id, folderPath, opts) => projects.projectActionsRuns(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-run', guarded((id, folderPath, opts) => projects.projectActionsRun(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-job', guarded((id, folderPath, opts) => projects.projectActionsJob(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-step-log', guarded((id, folderPath, opts) => projects.projectActionsStepLog(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-job-log', guarded((id, folderPath, opts) => projects.projectActionsJobLog(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-workflow-file', guarded((id, folderPath, opts) => projects.projectActionsWorkflowFile(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-dispatch-form', guarded((id, folderPath, opts) => projects.projectActionsDispatchForm(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-refs', guarded((id, folderPath, opts) => projects.projectActionsRefs(id, String(folderPath || ''), opts || {})));
+// Management: caches, the repository's self-hosted runners, deployments.
+ipcMain.handle('get-actions-caches', guarded((id, folderPath, opts) => projects.projectActionsCaches(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-runners', guarded((id, folderPath, opts) => projects.projectActionsRunners(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-actions-deployments', guarded((id, folderPath, opts) => projects.projectActionsDeployments(id, String(folderPath || ''), opts || {})));
+// Every change to GitHub Actions (actions-edits.js).
+ipcMain.handle('edit-actions', guarded((id, folderPath, params) => projects.editProjectActions(id, String(folderPath || ''), params || {})));
+// The downloads: like Create Archive, the destination comes only from the
+// system's own dialog shown here, never from the renderer.
+ipcMain.handle('save-actions-artifact', guardedEvent(async (event, id, folderPath, opts = {}) => {
+  const picked = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender) || mainWindow, {
+    title: `Download ${String(opts.name || 'artifact')}`,
+    buttonLabel: 'Download here',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (picked.canceled || !picked.filePaths || !picked.filePaths[0]) return { cancelled: true };
+  const result = await projects.downloadProjectActionsArtifact(id, String(folderPath || ''), {
+    remote: opts.remote, runId: opts.runId, name: opts.name, destDir: picked.filePaths[0],
+  });
+  if (result && result.ok) shell.showItemInFolder(result.path);
+  return result;
+}));
+ipcMain.handle('save-actions-log', guardedEvent(async (event, id, folderPath, opts = {}) => {
+  const job = opts.jobId != null;
+  const suggested = String(opts.suggestedName || (job ? 'job-log' : 'logs')).replace(/[\\/:*?"<>|]/g, '-');
+  const picked = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender) || mainWindow, {
+    title: job ? 'Download log' : 'Download log archive',
+    defaultPath: `${suggested}.${job ? 'txt' : 'zip'}`,
+    filters: job ? [{ name: 'Text', extensions: ['txt', 'log'] }] : [{ name: 'Zip Archive', extensions: ['zip'] }],
+  });
+  if (picked.canceled || !picked.filePath) return { cancelled: true };
+  const result = await projects.saveProjectActionsLog(id, String(folderPath || ''), {
+    remote: opts.remote, jobId: job ? opts.jobId : null, runId: job ? null : opts.runId, attempt: opts.attempt == null ? null : opts.attempt, filePath: picked.filePath,
+  });
+  if (result && result.ok) shell.showItemInFolder(result.path);
+  return result;
+}));
 // The .env files a folder has, and the ones the dialog ticks by default,
 // so a new worktree can be offered its repository's local environment.
 ipcMain.handle('list-env-files', guarded((folderPath) => ({
@@ -2064,7 +2122,7 @@ ipcMain.handle('open-file-window', (_event, filePath) => openFileWindow(filePath
 // opens a new one, a little lower and to the right. Not opened again at the
 // next start; they close with the main window.
 const webWindows = new Map(); // BrowserWindow → the address it opened on
-const WEB_WINDOW_SPEC = { title: 'Pull request', width: 1200, height: 860, minWidth: 520, minHeight: 360, onTop: false, webview: true };
+const WEB_WINDOW_SPEC = { title: 'GitHub', width: 1200, height: 860, minWidth: 520, minHeight: 360, onTop: false, webview: true };
 
 function openWebWindow(url, title) {
   if (!webPage.isWebPageUrl(url)) return false;

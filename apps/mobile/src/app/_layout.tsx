@@ -81,6 +81,15 @@ export default function RootLayout() {
             {/* A pull request's page on GitHub: over the tab (Open here), or on a screen of its own. */}
             <Stack.Screen name="pulls/web" options={{ title: 'Pull request', presentation: 'modal' }} />
             <Stack.Screen name="pulls/web-full" options={{ title: 'Pull request' }} />
+            {/* GitHub Actions: a run, a job, Run workflow, a review, Management, a workflow file. */}
+            <Stack.Screen name="actions/run/[id]" options={{ title: 'Workflow run' }} />
+            <Stack.Screen name="actions/job/[id]" options={{ title: 'Job' }} />
+            <Stack.Screen name="actions/dispatch" options={{ title: 'Run workflow' }} />
+            <Stack.Screen name="actions/review" options={{ title: 'Review deployments' }} />
+            <Stack.Screen name="actions/caches" options={{ title: 'Caches' }} />
+            <Stack.Screen name="actions/runners" options={{ title: 'Runners' }} />
+            <Stack.Screen name="actions/deployments" options={{ title: 'Deployments' }} />
+            <Stack.Screen name="actions/file" options={{ title: 'Workflow file' }} />
           </Stack>
           <SidebarDivider />
         </WithDownloadBar>

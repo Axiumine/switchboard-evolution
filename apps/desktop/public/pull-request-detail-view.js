@@ -589,6 +589,7 @@ function prdChecksHtml(entry, { d }) {
           <span class="pr-check-tools">
             ${canLog ? `<button type="button" class="ws-ghost ws-ghost--sm" data-act="check-log" data-job="${prAttr(check.id)}" aria-expanded="${!!logOpen}">${logOpen ? 'Hide log' : 'Log'}</button>` : ''}
             ${check.actions && done && check.id ? `<button type="button" class="ws-ghost ws-ghost--sm" data-act="rerun-job" data-job="${prAttr(check.id)}">Re-run</button>` : ''}
+            ${check.actions && check.runId && typeof openActionsRun === 'function' ? `<button type="button" class="ws-ghost ws-ghost--sm" data-act="check-actions" data-run="${prAttr(check.runId)}" data-job="${prAttr(check.id || '')}" title="Open this job in the Git tab's Actions view">Open in Actions</button>` : ''}
             ${/^https?:\/\//i.test(check.url || '') ? `<button type="button" class="ws-ghost ws-ghost--sm" data-act="check-details" data-url="${prAttr(check.url)}">Details</button>` : ''}
           </span>
           ${logOpen ? `<div class="pr-check-log">${logHtml}</div>` : ''}
@@ -1255,6 +1256,10 @@ function prdPaintChecks(ctx, slot) {
   slot.querySelector('[data-act="tab-retry"]')?.addEventListener('click', () => prdLoad(ctx, 'checks'));
   slot.querySelectorAll('[data-act="check-details"]').forEach((button) => {
     button.onclick = () => window.api?.openExternal?.(button.dataset.url);
+  });
+  // A GitHub Actions job opens in the Actions view, on its run's page (project-actions-view.js).
+  slot.querySelectorAll('[data-act="check-actions"]').forEach((button) => {
+    button.onclick = () => openActionsRun(ctx.project, { repoPath: ctx.repoPath, runId: Number(button.dataset.run), jobId: Number(button.dataset.job) || null });
   });
   slot.querySelectorAll('[data-act="check-log"]').forEach((button) => {
     button.onclick = () => {

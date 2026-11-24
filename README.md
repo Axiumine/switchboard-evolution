@@ -10,7 +10,7 @@ Switchboard Evolution is a desktop app (macOS, Windows, Linux) and a phone app (
 
 - **Projects** with their plans, todos, tracks and sessions in one place.
 - **Sessions that survive a restart**: terminals run in herdr-core, so quitting the app leaves them running and the next start picks them up again.
-- **Git built in**: a full Git Graph with its actions, staging of hunks and lines, comparing 2–4 commits step by step, and worktrees.
+- **Git built in**: a full Git Graph with its actions, staging of hunks and lines, comparing 2–4 commits step by step, worktrees, pull requests and GitHub Actions.
 - **Files**: an explorer for the project and its attached folders, project-wide search and replace, and an editor.
 - **A Task Manager** with the RAM each session uses, and disk space by project.
 - **Your phone as a second seat**: see which session needs you, answer it, start new ones, review diffs, stage and commit. The phone talks to your computer over your local network or Tailscale, encrypted end to end, with no cloud relay. Cloudflare or ngrok tunnels are optional.
@@ -73,7 +73,7 @@ npx expo start
 npm run build:apk        # an Android APK built on your computer, signed with your own key
 ```
 
-The Mac and Linux builds carry herdr-core (`apps/desktop/scripts/after-pack-herdr.js`), which keeps sessions running when the app quits and lets a new version pick them up; a build that cannot fetch it stops rather than ship without it. Every build, Windows too, also carries the GitHub CLI (`apps/desktop/scripts/after-pack-gh.js`) for the Git tab's Pull Requests view: a `gh` installed on the computer comes first, and the one in the app is used when there is none. A Mac build makes a dmg for Apple silicon (`-arm64`) and one for Intel (`-x64`): on an Apple silicon Mac install the arm64 one, as the Intel one runs under Rosetta, slower.
+The Mac and Linux builds carry herdr-core (`apps/desktop/scripts/after-pack-herdr.js`), which keeps sessions running when the app quits and lets a new version pick them up; a build that cannot fetch it stops rather than ship without it. Every build, Windows too, also carries the GitHub CLI (`apps/desktop/scripts/after-pack-gh.js`) for the Git tab's Pull Requests and Actions views: a `gh` installed on the computer comes first, and the one in the app is used when there is none. A Mac build makes a dmg for Apple silicon (`-arm64`) and one for Intel (`-x64`): on an Apple silicon Mac install the arm64 one, as the Intel one runs under Rosetta, slower.
 
 Turn on **Mobile app access** in the desktop app, choose **Add a device** and scan the QR code with the phone app to pair.
 

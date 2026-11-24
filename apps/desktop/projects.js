@@ -26,6 +26,8 @@ const pullRequests = require('./pull-requests');
 const pullRequestDetail = require('./pull-request-detail');
 const pullRequestSearch = require('./pull-request-search');
 const pullRequestEdits = require('./pull-request-edits');
+const actions = require('./actions');
+const actionsEdits = require('./actions-edits');
 const planParser = require('./public/plan-parser');
 const sessionConfig = require('./public/session-config');
 
@@ -2178,6 +2180,59 @@ async function editProjectPullRequest(projectId, folderPath, params) {
   return pullRequestEdits.edit(requireAttachedFolder(projectId, folderPath).path, params || {});
 }
 
+// --- Actions tab: the same attached-folder boundary, then actions.js ---
+
+// What GitHub's Actions tab shows (actions.js): the workflows, runs, a run, a job and its logs, workflow files.
+async function projectActionsWorkflows(projectId, folderPath, opts) {
+  return actions.workflows(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsRuns(projectId, folderPath, opts) {
+  return actions.runs(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsRun(projectId, folderPath, opts) {
+  return actions.run(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsJob(projectId, folderPath, opts) {
+  return actions.job(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsStepLog(projectId, folderPath, opts) {
+  return actions.stepLog(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsJobLog(projectId, folderPath, opts) {
+  return actions.jobLog(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsWorkflowFile(projectId, folderPath, opts) {
+  return actions.workflowFile(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsDispatchForm(projectId, folderPath, opts) {
+  return actions.dispatchForm(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsRefs(projectId, folderPath, opts) {
+  return actions.refs(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsCaches(projectId, folderPath, opts) {
+  return actions.caches(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsRunners(projectId, folderPath, opts) {
+  return actions.runners(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+async function projectActionsDeployments(projectId, folderPath, opts) {
+  return actions.deployments(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+
+/** Run, re-run, cancel, delete, enable…: actions-edits.js allows only its own kinds. */
+async function editProjectActions(projectId, folderPath, params) {
+  return actionsEdits.edit(requireAttachedFolder(projectId, folderPath).path, params || {});
+}
+/** An artifact into a folder main.js asked the user for. */
+async function downloadProjectActionsArtifact(projectId, folderPath, opts) {
+  return actionsEdits.downloadArtifact(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+/** A job's log or a run's log archive into a file main.js asked the user for. */
+async function saveProjectActionsLog(projectId, folderPath, opts) {
+  return actionsEdits.saveLog(requireAttachedFolder(projectId, folderPath).path, opts || {});
+}
+
 module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection, onFolderChange, onProjectCreated,
@@ -2191,6 +2246,10 @@ module.exports = {
   projectGitGraphRemotes, projectGitGraphTagDetails, projectGitGraphAvatarUrl,
   runProjectGitGraphAction, cancelProjectGitGraphAction,
   projectPullRequests, projectPullRequestsPage, projectPullRequestFiles, runProjectPullRequestAction,
+  projectActionsWorkflows, projectActionsRuns, projectActionsRun, projectActionsJob, projectActionsStepLog, projectActionsJobLog,
+  projectActionsWorkflowFile, projectActionsDispatchForm, projectActionsRefs,
+  projectActionsCaches, projectActionsRunners, projectActionsDeployments,
+  editProjectActions, downloadProjectActionsArtifact, saveProjectActionsLog,
   projectPullRequestConversation, projectPullRequestCommits, projectPullRequestCommitFiles, projectPullRequestChecks,
   projectPullRequestJobLog, projectPullRequestViewed, projectPullRequestBranches, projectPullRequestCandidates, renderProjectPullRequestMarkdown,
   projectPullRequestTexts,

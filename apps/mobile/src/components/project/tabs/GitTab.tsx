@@ -15,12 +15,13 @@ import { useProjectUi } from '@/projects/ui-store';
 import { colors, spacing } from '@/theme';
 import { RepoChips } from '../RepoChips';
 import { SectionLink } from '../Section';
+import { ActionsTab } from './ActionsTab';
 import { PullRequestsTab } from './PullRequestsTab';
 import { WorktreesTab } from './WorktreesTab';
 
 /**
  * The Git tab, as on the desktop: Changes | History | Worktrees | Pull
- * Requests (PRs). Each view is
+ * Requests (PRs) | Actions. Each view is
  * built when first shown and kept, so its scroll and sheets survive switching;
  * the project remembers which one was open.
  */
@@ -34,6 +35,7 @@ export function GitTab({ project, active = true }: { project: Project; active?: 
     history: <HistoryView project={project} />,
     worktrees: <WorktreesTab project={project} active={active && view === 'worktrees'} />,
     pulls: <PullRequestsTab project={project} active={active && view === 'pulls'} />,
+    actions: <ActionsTab project={project} active={active && view === 'actions'} />,
   };
 
   return (
@@ -51,7 +53,7 @@ export function GitTab({ project, active = true }: { project: Project; active?: 
                 accessibilityState={{ selected: on }}
                 accessibilityLabel={a11y ?? label}
               >
-                <Text style={[styles.optionText, on && styles.optionTextOn]} numberOfLines={1}>{label}</Text>
+                <Text style={[styles.optionText, on && styles.optionTextOn]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{label}</Text>
               </Pressable>
             );
           })}
@@ -152,7 +154,8 @@ const styles = StyleSheet.create({
   switch: { height: 36, flexDirection: 'row', backgroundColor: colors.background, borderRadius: 10, padding: 3, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   option: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 7 },
   optionOn: { backgroundColor: 'rgba(122,132,255,0.16)' },
-  optionText: { color: colors.textDim, fontSize: 13.5, fontWeight: '600' },
+  // Five views across a phone: a long label shrinks a little rather than being cut.
+  optionText: { color: colors.textDim, fontSize: 13, fontWeight: '600', paddingHorizontal: 2 },
   optionTextOn: { color: '#e4e4fa' },
   text: { color: colors.textFaint, fontSize: 13, paddingVertical: spacing.sm },
   empty: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },

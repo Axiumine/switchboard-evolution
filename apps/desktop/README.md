@@ -67,6 +67,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 - **IDE emulation** (Claude only) — Review and edit Claude's proposed diffs in a side panel before they land.
 - **Projects** — Group work by what it is, not where it lives: a folder on disk, a brief the agent reads, a plan, a todo list, and the sessions filed under it.
 - **Worktrees tab** — Every git worktree of a project's repositories in one list: create, open, lock, move, prune, and remove them, and start a session in any of them.
+- **Pull Requests and Actions** — In the Git tab, through the GitHub CLI: pull requests as GitHub shows them, and GitHub Actions as its Actions tab does (workflows, runs, the job graph, logs as each step finishes, Run workflow, re-run, cancel, deployments to review, caches, runners).
 - **Node Knowledge tab** — The project's repositories as code graphs ([codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)): architecture, search, call traces, the impact of a change, Cypher queries, decision records, coverage, the 3D Lens, and the graph's tools in the project's agent sessions.
 - **Project tasks and server logs** — Run `.vscode/tasks.json` commands and keep their logs beside your sessions.
 - **Scheduled tasks** — Start a session with a prompt on a timer, in a project, a track, or any folder.
