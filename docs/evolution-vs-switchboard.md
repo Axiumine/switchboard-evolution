@@ -53,7 +53,7 @@ What "an app of its own" means:
 - The phone sees and drives terminals: it starts Claude, Codex or OpenCode sessions, types, fits the terminal to its screen, attaches files and photos, and reads the tail of a long conversation.
 - Unread and needs-you marks are shared between window and phone. A session open on the phone counts as seen.
 - Projects, plans, todos, schedules and files work from the phone: upload, rename, trash, a safe save that refuses if the file changed meanwhile, and download of any file.
-- The Git Graph with all its actions, worktrees, pull requests, project tasks, the Task Manager, search and replace, and staging also work from the phone.
+- The Git Graph with all its actions, worktrees, pull requests, GitHub Actions, project tasks, the Task Manager, search and replace, and staging also work from the phone.
 - IDE diffs can be answered from the phone. The first answer wins, and the window says the phone answered.
 - Internet access goes through Cloudflare or ngrok tunnels, set up from the devices dialog. Secrets are encrypted with the system keychain, and only a phone holding the access key gets in through a tunnel.
 - With remote access on, closing the window only hides it and sessions keep running. The computer stays awake while a session works.
@@ -89,6 +89,14 @@ What "an app of its own" means:
   - the title edited in place; the description, comments and replies written, edited, hidden or deleted where GitHub allows; conversations resolved; reviews (Comment, Approve, Request changes); reviewers, assignees and labels changed; the branch updated with its base; failed jobs run again
   - Merge (the repository's merge methods, the branch deleted on GitHub if you want), Convert to draft, Ready for review, Change base, Close and Reopen, each asked first; the local checkout is never touched
   - the same on the phone, on a screen of its own
+- **Actions**, GitHub Actions as GitHub's own Actions tab shows it, through the same `gh`:
+  - the workflows and Management (caches, deployments, the repository's self-hosted runners; attestations and metrics open GitHub's page in the app)
+  - the runs, filtered with GitHub's qualifiers (`is:failure branch:main`…) and the Event, Status, Branch and Actor menus, read again every 30 seconds
+  - Run workflow with the workflow's inputs, Re-run (all, failed, one job, with debug logging), Cancel, Delete, Disable and Enable, a status badge
+  - a run's page: what started it, the graph of its jobs, annotations, artifacts, the deployments waiting for a review (Approve, Reject), its usage and workflow file
+  - a job's steps and their logs as each step finishes, folded groups, search, timestamps, downloads, and GitHub's live log for the step running now
+  - "Open in Actions" from a pull request's checks
+  - the same on the phone
 
 ### 4. Files
 

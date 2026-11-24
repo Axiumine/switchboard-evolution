@@ -1,5 +1,5 @@
-// The Git tab of a project: Changes (staging), History (the Git Graph) and
-// Worktrees. Repositories are the folders attached to the project; every git
+// The Git tab of a project: Changes (staging), History (the Git Graph),
+// Worktrees, Pull Requests and Actions. Repositories are the folders attached to the project; every git
 // command runs in main and the renderer only receives data.
 //
 // Changes stages and unstages like a Git client: whole files from the lists
@@ -43,7 +43,7 @@ function gitTabState(projectId) {
 }
 
 // The Git tab's views, in the order its switch shows them.
-const GIT_WORKSPACE_VIEWS = ['changes', 'history', 'worktrees', 'pulls'];
+const GIT_WORKSPACE_VIEWS = ['changes', 'history', 'worktrees', 'pulls', 'actions'];
 
 function projectGitView(projectOrId) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
@@ -63,6 +63,7 @@ function setProjectGitView(projectOrId, view) {
   const repoStates = { changes: changesState };
   if (typeof gitGraphState === 'function') repoStates.history = gitGraphState(projectId);
   if (typeof prTabState === 'function') repoStates.pulls = prTabState(projectId);
+  if (typeof actTabState === 'function') repoStates.actions = actTabState(projectId);
   const from = repoStates[current];
   const to = repoStates[view];
   if (from && to && from !== to && from.selectedRepo) to.selectedRepo = from.selectedRepo;
@@ -71,13 +72,13 @@ function setProjectGitView(projectOrId, view) {
 
 function gitWorkspaceNavHtml(view) {
   const button = (name, label) => `<button type="button" id="git-workspace-${name}-tab" class="git-workspace-nav-btn${view === name ? ' active' : ''}" data-git-view="${name}" role="tab" aria-selected="${view === name}" aria-controls="git-workspace-view">${label}</button>`;
-  return `<div class="git-workspace-subnav"><div class="git-workspace-nav" role="tablist" aria-label="Git view">${button('changes', 'Changes')}${button('history', 'History')}${button('worktrees', 'Worktrees')}${button('pulls', 'Pull Requests')}</div></div>`;
+  return `<div class="git-workspace-subnav"><div class="git-workspace-nav" role="tablist" aria-label="Git view">${button('changes', 'Changes')}${button('history', 'History')}${button('worktrees', 'Worktrees')}${button('pulls', 'Pull Requests')}${button('actions', 'Actions')}</div></div>`;
 }
 
 /**
  * The Git tab: Changes (working tree and diffs), History (the Git Graph,
- * with its actions), as upstream lays it out, then Worktrees and Pull
- * Requests (project-pull-requests-view.js).
+ * with its actions), as upstream lays it out, then Worktrees, Pull Requests
+ * (project-pull-requests-view.js) and Actions (project-actions-view.js).
  */
 function renderProjectGitWorkspace(project, body) {
   const view = projectGitView(project);
@@ -96,6 +97,7 @@ function renderProjectGitWorkspace(project, body) {
   if (view === 'history') renderProjectGitGraphTab(project, viewBody);
   else if (view === 'worktrees') renderProjectWorktreesTab(project, viewBody);
   else if (view === 'pulls') renderProjectPullRequestsTab(project, viewBody);
+  else if (view === 'actions') renderProjectActionsTab(project, viewBody);
   else renderProjectGitTab(project, viewBody);
 }
 

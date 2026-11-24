@@ -31,6 +31,7 @@ const modules = {
   'star-tints.js': 'apps/desktop/public/star-tints.js',
   'donate.js': 'apps/desktop/public/donate.js',
   'knowledge-model.js': 'apps/desktop/public/knowledge-model.js',
+  'actions-model.js': 'apps/desktop/public/actions-model.js',
 };
 
 const header = (file) =>

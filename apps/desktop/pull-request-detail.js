@@ -633,8 +633,12 @@ async function checks(dir, { remote = null, number } = {}) {
   return { ok: true, number: n, headOid, rollup, checks: shown, summary: checksSummary(shown), truncated: hasNextPage };
 }
 
-/** A job's log as plain lines: no colours, no timestamp in front of each line, at most the last MAX_LOG_BYTES. */
-function cleanLog(text, maxBytes = MAX_LOG_BYTES) {
+/**
+ * A job's log as plain lines: no colours, no timestamp in front of each line
+ * (unless `timestamps`, for the Actions view's own toggle), at most the last
+ * MAX_LOG_BYTES.
+ */
+function cleanLog(text, maxBytes = MAX_LOG_BYTES, { timestamps = false } = {}) {
   let log = String(text || '').replace(/^\uFEFF/, '');
   let truncated = false;
   if (Buffer.byteLength(log) > maxBytes) {
@@ -648,7 +652,7 @@ function cleanLog(text, maxBytes = MAX_LOG_BYTES) {
     .replace(/\r\n/g, '\n')
     .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
     .split('\n')
-    .map(line => line.replace(/^\uFEFF?\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?/, ''))
+    .map(line => (timestamps ? line.replace(/^\uFEFF/, '') : line.replace(/^\uFEFF?\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?/, '')))
     .join('\n');
   return { text: log, truncated };
 }
@@ -658,22 +662,30 @@ function validJobId(value) {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
+/**
+ * gh's answer for a log's REST path. A recent gh holds back an answer with
+ * terminal escapes (a log's colours) unless told to let them through, and an
+ * older one knows no such flag: so it is asked for only when gh names it.
+ * cleanLog takes the escapes off.
+ */
+async function readLog(target, apiPath) {
+  const args = ['api', '--hostname', target.host, apiPath];
+  let result = await pr.run(args, { timeoutMs: pr.FILES_TIMEOUT_MS });
+  if (result.code !== 0 && /--allow-escape-sequences/.test(`${result.stderr || ''}${result.stdout || ''}`)) {
+    result = await pr.run([...args, '--allow-escape-sequences'], { timeoutMs: pr.FILES_TIMEOUT_MS });
+  }
+  return result;
+}
+
 /** The log of one GitHub Actions job (once it has finished: GitHub keeps none of a running one). */
-async function jobLog(dir, { remote = null, jobId } = {}) {
+async function jobLog(dir, { remote = null, jobId, timestamps = false } = {}) {
   const id = validJobId(jobId);
   if (!id) return { error: 'Not a job', code: 'bad-request' };
   const { target, failure } = await pr.targetFor(dir, remote || null);
   if (failure) return failure;
-  const args = ['api', '--hostname', target.host, `repos/${target.owner}/${target.repo}/actions/jobs/${id}/logs`];
   let result;
   try {
-    result = await pr.run(args, { timeoutMs: pr.FILES_TIMEOUT_MS });
-    // A recent gh holds back an answer with terminal escapes (a log's colours)
-    // unless told to let them through, and an older one knows no such flag: so
-    // it is asked for only when gh names it. cleanLog takes the escapes off.
-    if (result.code !== 0 && /--allow-escape-sequences/.test(`${result.stderr || ''}${result.stdout || ''}`)) {
-      result = await pr.run([...args, '--allow-escape-sequences'], { timeoutMs: pr.FILES_TIMEOUT_MS });
-    }
+    result = await readLog(target, `repos/${target.owner}/${target.repo}/actions/jobs/${id}/logs`);
   } catch (err) {
     return pr.thrownFailure(err);
   }
@@ -682,7 +694,7 @@ async function jobLog(dir, { remote = null, jobId } = {}) {
     if (failed.code === 'not-found') return { error: 'GitHub has no log of this job, or not yet: a log comes once the job has finished.', code: 'not-found' };
     return failed;
   }
-  return { ok: true, jobId: id, ...cleanLog(result.stdout) };
+  return { ok: true, jobId: id, ...cleanLog(result.stdout, MAX_LOG_BYTES, { timestamps: timestamps === true }) };
 }
 
 /** Which files of the pull request this account marked as viewed (or whose viewed mark a new change dismissed). */
@@ -754,6 +766,8 @@ async function renderMarkdown(dir, { remote = null, text } = {}) {
 
 module.exports = {
   conversation, commits, commitFiles, checks, jobLog, viewed, branches, candidates, renderMarkdown,
+  // for actions.js
+  readLog, validJobId,
   // exported for tests
   timelineItem, thread, pullRequestHead, reviewers, checkOf, checkBucket, latestChecks, cleanLog, reactions,
   CONVERSATION_QUERY, COMMITS_QUERY, CHECKS_QUERY, TIMELINE_TYPES, MAX_LOG_BYTES, MAX_MARKDOWN,

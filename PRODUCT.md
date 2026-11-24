@@ -30,7 +30,7 @@ Product copy does not cite Switchboard: the name already says where the app come
 
 - Desktop: macOS first, with Windows and Linux builds. Agent CLIs run in terminals (xterm) inside the app, kept alive by herdr-core across restarts.
 - Projects are folders on disk with `CLAUDE.md`, `AGENTS.md`, `plan.md`, `plan-tracker.md`, `todos.md` and `memory.md`, written and read by the agents themselves. Claude Code and Codex transcripts stay in their own folders, OpenCode's sessions in its own database; the app reads them.
-- Git is part of the daily loop: changes and staging (files, hunks, lines), history graph with actions, worktrees, pull requests (list, conversation with comments and reviews, commits, checks and their logs, diffs, merge, draft, change base, close, reopen).
+- Git is part of the daily loop: changes and staging (files, hunks, lines), history graph with actions, worktrees, pull requests (list, conversation with comments and reviews, commits, checks and their logs, diffs, merge, draft, change base, close, reopen) and GitHub Actions (workflows, runs and their jobs and logs, Run workflow, re-run, cancel, deployments to review, caches, runners).
 - Phone: Android (including dual-screen devices) and iOS, paired to the computer with a QR code and connected over Tailscale. Used for short checks, answering an agent, small edits, staging, starting a session.
 - Sessions last hours; many run at once; the interface is dense and lives open all day.
 

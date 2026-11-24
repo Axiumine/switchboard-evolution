@@ -289,7 +289,7 @@ test('a collapsed folder that hides the selected file is highlighted in its plac
   assert.equal(folder.className, 'git-folder-row selected');
 });
 
-test('the Git tab switches between Changes, History, Worktrees and Pull Requests, in that order', () => {
+test('the Git tab switches between Changes, History, Worktrees, Pull Requests and Actions, in that order', () => {
   const ctx = loadContext();
   assert.equal(ctx.projectGitView('p1'), 'changes');
   ctx.setProjectGitView('p1', 'worktrees');
@@ -298,22 +298,27 @@ test('the Git tab switches between Changes, History, Worktrees and Pull Requests
   assert.equal(ctx.projectGitView('p1'), 'worktrees', 'an unknown view is ignored');
   const html = ctx.gitWorkspaceNavHtml('worktrees');
   const labels = [...html.matchAll(/data-git-view="(\w+)"[^>]*>([^<]+)</g)].map(m => [m[1], m[2]]);
-  assert.deepEqual(labels, [['changes', 'Changes'], ['history', 'History'], ['worktrees', 'Worktrees'], ['pulls', 'Pull Requests']]);
+  assert.deepEqual(labels, [['changes', 'Changes'], ['history', 'History'], ['worktrees', 'Worktrees'], ['pulls', 'Pull Requests'], ['actions', 'Actions']]);
   assert.match(html, /id="git-workspace-worktrees-tab" class="git-workspace-nav-btn active"/);
   ctx.setProjectGitView('p1', 'pulls');
   assert.equal(ctx.projectGitView('p1'), 'pulls');
+  ctx.setProjectGitView('p1', 'actions');
+  assert.equal(ctx.projectGitView('p1'), 'actions');
 });
 
-test('the chosen repository goes along from Changes and History to Pull Requests and back', () => {
-  const states = { history: { selectedRepo: null }, pulls: { selectedRepo: null } };
+test('the chosen repository goes along from Changes and History to Pull Requests, Actions and back', () => {
+  const states = { history: { selectedRepo: null }, pulls: { selectedRepo: null }, actions: { selectedRepo: null } };
   const ctx = loadContext();
   // The other views' states are globals of their own files.
   ctx.gitGraphState = () => states.history;
   ctx.prTabState = () => states.pulls;
+  ctx.actTabState = () => states.actions;
   ctx.gitTabState('p2').selectedRepo = '/code/api';
   ctx.setProjectGitView('p2', 'pulls');
   assert.equal(states.pulls.selectedRepo, '/code/api');
   states.pulls.selectedRepo = '/code/web';
+  ctx.setProjectGitView('p2', 'actions');
+  assert.equal(states.actions.selectedRepo, '/code/web');
   ctx.setProjectGitView('p2', 'history');
   assert.equal(states.history.selectedRepo, '/code/web');
   // Worktrees has no repository of its own: the next view keeps its own.
