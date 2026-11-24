@@ -197,7 +197,7 @@ export type ListRow =
   | { kind: 'empty'; key: string; text: string };
 
 export type ListInput = {
-  groups: { active: Project[]; snoozed: Project[]; done: Project[] };
+  groups: { starred?: Project[]; active: Project[]; snoozed: Project[]; done: Project[] };
   /** While searching: the projects found, with the sessions to list under each. Null otherwise. */
   found: Map<string, Session[]> | null;
   /** The sessions no project claims, already narrowed to the search's while searching. */
@@ -253,6 +253,7 @@ export function projectListRows(input: ListInput): ListRow[] {
   const { found, ui, other } = input;
   const searching = found !== null;
   const keep = (list: Project[]) => (found ? list.filter((p) => found.has(p.id)) : list);
+  const starred = keep(input.groups.starred || []);
   const active = keep(input.groups.active);
   const snoozed = keep(input.groups.snoozed);
   const done = keep(input.groups.done);
@@ -265,8 +266,12 @@ export function projectListRows(input: ListInput): ListRow[] {
     for (const session of found?.get(p.id) || []) rows.push({ kind: 'found', key: `f:${p.id}:${session.sessionId}`, project: p, session });
   };
 
-  if (!active.length && !snoozed.length && !done.length) {
+  if (!starred.length && !active.length && !snoozed.length && !done.length) {
     rows.push({ kind: 'empty', key: 'empty', text: searching ? 'No project matches.' : 'No projects yet.' });
+  }
+  if (starred.length) {
+    rows.push({ kind: 'section', key: 's:starred', title: 'Starred' });
+    starred.forEach(project);
   }
   if (active.length) {
     rows.push({ kind: 'section', key: 's:active', title: 'Active' });

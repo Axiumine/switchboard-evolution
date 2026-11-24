@@ -909,6 +909,50 @@ function updateProjectTaskIndicators(projectPath) {
   });
 }
 
+/** A project row's star, after the name: dim until the row is under the pointer, gold when starred. */
+function projectStarHtml(project) {
+  const starred = !!project.starred;
+  const label = starred ? 'Unstar project' : 'Star project';
+  return `<button type="button" class="proj-star${starred ? ' starred' : ''}" title="${label}" aria-label="${starred ? 'Unstar' : 'Star'} ${escapeHtml(project.name)}" aria-pressed="${starred}">${starIconSvg(starred, 12)}</button>`;
+}
+
+/**
+ * The sections of the Projects tab. Starred holds the starred projects at
+ * work, above Active; each is newest first. A snoozed or finished project
+ * stays on its shelf, starred ones first there: the shelf reads as "what
+ * comes back first", Done newest first.
+ */
+function projectListGroups(projects, { isSnoozed, sortTime }) {
+  const starred = [], active = [], snoozed = [], done = [];
+  for (const p of projects) {
+    if (p.status === 'done') done.push(p);
+    else if (isSnoozed(p)) snoozed.push(p);
+    else (p.starred ? starred : active).push(p);
+  }
+  const byEvent = (a, b) => sortTime(b) - sortTime(a);
+  const starFirst = (a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0);
+  starred.sort(byEvent);
+  active.sort(byEvent);
+  done.sort((a, b) => starFirst(a, b) || byEvent(a, b));
+  snoozed.sort((a, b) => starFirst(a, b) || Date.parse(a.snoozedUntil) - Date.parse(b.snoozedUntil));
+  return { starred, active, snoozed, done };
+}
+
+/** Star a project, or take its star off: the row moves at once, then main keeps it. */
+async function toggleProjectStar(project) {
+  const starred = !project.starred;
+  project.starred = starred;
+  renderProjectList();
+  const result = await window.api.updateProject(project.id, { starred });
+  if (result?.error) {
+    project.starred = !starred;
+    renderProjectList();
+    alert(result.error);
+    return;
+  }
+  loadProjects();
+}
+
 function buildProjectRow(project) {
   const row = document.createElement('div');
   const expanded = projectDrawerOpen(project);
@@ -923,7 +967,7 @@ function buildProjectRow(project) {
   const toggleLabel = expanded ? 'Hide sessions' : 'Show sessions';
   row.innerHTML = `<button type="button" class="proj-expand" aria-expanded="${expanded}" aria-controls="proj-drawer-${escapeHtml(project.id)}" aria-label="${toggleLabel}" title="${toggleLabel}">${PICONS.chevronRight(11)}</button>` +
     markHtml(project, 28) +
-    `<span class="proj-text"><span class="proj-name">${escapeHtml(project.name)}</span><span class="proj-sub" aria-label="${escapeHtml(projectSubline(project))}">${projectSublineHtml(project)}</span></span>` +
+    `<span class="proj-text"><span class="proj-name-line"><span class="proj-name">${escapeHtml(project.name)}</span>${projectStarHtml(project)}</span><span class="proj-sub" aria-label="${escapeHtml(projectSubline(project))}">${projectSublineHtml(project)}</span></span>` +
     // At the right, the + for a new session, and under it the sessions at
     // work with their dot; the + is centred when there is nothing under it.
     `<span class="proj-side"><button type="button" class="proj-new" title="New session in the project" aria-label="New session in ${escapeHtml(project.name)}">${PICONS.plus(12)}</button>` +
@@ -1013,13 +1057,7 @@ function renderProjectList() {
   toolbar.innerHTML = `<button type="button" class="proj-new-btn" id="proj-new-btn">${PICONS.plus(12)}<span>New project</span></button>`;
   list.appendChild(toolbar);
 
-  const byEvent = (a, b) => projectSortTime(b) - projectSortTime(a);
-  const active = [], snoozed = [], done = [];
-  for (const p of projects) (p.status === 'done' ? done : isProjectSnoozed(p) ? snoozed : active).push(p);
-  active.sort(byEvent);
-  done.sort(byEvent);
-  // The shelf reads as "what comes back first".
-  snoozed.sort((a, b) => Date.parse(a.snoozedUntil) - Date.parse(b.snoozedUntil));
+  const { starred, active, snoozed, done } = projectListGroups(projects, { isSnoozed: isProjectSnoozed, sortTime: projectSortTime });
 
   if (!projects.length) {
     const empty = document.createElement('div');
@@ -1027,6 +1065,15 @@ function renderProjectList() {
     empty.id = 'projects-empty';
     empty.innerHTML = `<div class="projects-empty-text">${searchMatchIds !== null ? 'No project matches.' : 'No projects yet. A project is a folder that holds a brief, a plan, and the sessions that work on it.'}</div>`;
     list.appendChild(empty);
+  }
+
+  if (starred.length) {
+    const label = document.createElement('div');
+    label.className = 'proj-section';
+    label.id = 'proj-sec-starred';
+    label.textContent = 'Starred';
+    list.appendChild(label);
+    for (const project of starred) appendProject(project);
   }
 
   if (active.length) {
@@ -1117,6 +1164,8 @@ function bindProjectList() {
     row.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(projectMenuItems(project), { x: e.clientX, y: e.clientY }); };
     const toggle = row.querySelector('.proj-expand');
     if (toggle) toggle.onclick = (e) => { e.stopPropagation(); toggleProjectDrawer(project.id); };
+    const star = row.querySelector('.proj-star');
+    if (star) star.onclick = (e) => { e.stopPropagation(); toggleProjectStar(project); };
     const plus = row.querySelector('.proj-new');
     if (plus) plus.onclick = (e) => { e.stopPropagation(); showNewSessionMenu(findTreeProject(project.id) || project, null, e.currentTarget); };
   });
@@ -3453,6 +3502,7 @@ function projectMenuItems(project, { fromPage = false } = {}) {
     projectTabMenuItem(project, 'settings', ICONS.gear(14)),
     { label: 'Open project folder', icon: PICONS.open(14), onClick: () => window.api.openPath(project.root) },
     { sep: true },
+    { label: project.starred ? 'Unstar project' : 'Star project', icon: starIconSvg(!project.starred, 14), onClick: () => toggleProjectStar(project) },
     ...snoozeMenuItems(project),
     ...stopAllMenuItems(project),
     { label: isDone ? 'Reopen project' : 'Mark as done', icon: PICONS.check(14), onClick: () => toggleProjectDone(project) },

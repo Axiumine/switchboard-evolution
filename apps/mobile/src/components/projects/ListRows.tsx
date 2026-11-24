@@ -87,11 +87,14 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
         onPress={onOpen}
         style={({ pressed }) => [styles.projectRow, dim && styles.dim, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel={`${project.name}, ${spoken}`}
+        accessibilityLabel={`${project.name}${project.starred ? ', starred' : ''}, ${spoken}`}
       >
         <ProjectMark project={project} />
         <View style={styles.text}>
-          <Text style={styles.name} numberOfLines={1}>{project.name}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.name} numberOfLines={1}>{project.name}</Text>
+            {project.starred ? <Text style={styles.projectStar}>★</Text> : null}
+          </View>
           <View style={styles.metaRow}>
             {stats.map((stat, i) => (
               <Fragment key={stat.key}>
@@ -282,7 +285,10 @@ const styles = StyleSheet.create({
   mark: { alignItems: 'center', justifyContent: 'center' },
   markText: { fontWeight: '700', letterSpacing: 0.3 },
   text: { flex: 1, gap: 3, minWidth: 0 },
-  name: { color: colors.text, fontSize: 15.5, fontWeight: '600' },
+  name: { color: colors.text, fontSize: 15.5, fontWeight: '600', flexShrink: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  /** Gold, as the desktop's starred project. */
+  projectStar: { color: '#f5be3c', fontSize: 13 },
   metaRow: { flexDirection: 'row', alignItems: 'center', overflow: 'hidden' },
   meta: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   metaNamed: { color: colors.text },

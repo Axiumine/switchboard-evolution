@@ -327,6 +327,8 @@ db.exec(`
   // counts, so the renderer decides from the timestamp alone.
   if (!cols.has('snoozedUntil')) db.exec('ALTER TABLE projects ADD COLUMN snoozedUntil TEXT');
   if (!cols.has('snoozedAt')) db.exec('ALTER TABLE projects ADD COLUMN snoozedAt TEXT');
+  // A starred project sits above the others in the sidebar, as a starred session does.
+  if (!cols.has('starred')) db.exec('ALTER TABLE projects ADD COLUMN starred INTEGER DEFAULT 0');
 }
 // Which session started or finished a plan phase or a todo. Items are matched
 // by their text, not their line, so editing the file above an item does not
@@ -718,7 +720,7 @@ function deleteSetting(key) {
 
 // --- Project functions ---
 
-const PROJECT_PATCH_KEYS = ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'modified'];
+const PROJECT_PATCH_KEYS = ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'starred', 'modified'];
 const TRACK_PATCH_KEYS = ['name', 'cwd', 'cli', 'status', 'sortOrder'];
 const SCHEDULE_PATCH_KEYS = ['name', 'trackId', 'cwd', 'prompt', 'every', 'atHour', 'atMinute', 'weekday', 'cron', 'cli', 'enabled', 'catchUp', 'lastRunAt', 'lastSessionId', 'sessionConfig'];
 
@@ -751,7 +753,7 @@ function updatePatch(table, allowed, id, patch) {
     if (!(key in patch)) continue;
     sets.push(`${key} = ?`);
     let value = patch[key];
-    if (key === 'sharedBranch') value = value ? 1 : 0;
+    if (key === 'sharedBranch' || key === 'starred') value = value ? 1 : 0;
     values.push(value === undefined ? null : value);
   }
   if (!sets.length) return 0;

@@ -19,6 +19,8 @@ export type Schedule = {
 export type Project = {
   id: string; name: string; root: string; status: 'active' | 'done';
   snoozedUntil: string | null; defaultCwd: string | null;
+  /** Starred: listed above Active, and first on the Snoozed and Done shelves. */
+  starred?: boolean;
   /** The project folder's name, and the worktree branch when none is set. */
   slug?: string;
   /** One branch for every worktree of the project (branchName, else the slug), or each worktree names its own. */
@@ -74,14 +76,21 @@ export function rollupState(sessions: Session[], live: Record<string, LiveState>
   return URGENCY[best];
 }
 
-/** Active, snoozed (until it wakes, or a session needs you) and done. */
+/**
+ * Starred (the starred ones at work), active, snoozed (until it wakes, or a
+ * session needs you) and done, as the desktop's sidebar: a snoozed or
+ * finished project keeps its shelf, starred ones first there.
+ */
 export function groupProjects(projects: Project[], { now = Date.now(), live = {}, notices }: { now?: number; live?: Record<string, LiveState>; notices: Notices }) {
-  const groups: { active: Project[]; snoozed: Project[]; done: Project[] } = { active: [], snoozed: [], done: [] };
+  const groups: { starred: Project[]; active: Project[]; snoozed: Project[]; done: Project[] } = { starred: [], active: [], snoozed: [], done: [] };
   for (const project of projects) {
     if (project.status === 'done') groups.done.push(project);
     else if (projectSnoozed(project, now, rollupState(projectSessions(project), live, notices) === 'attention')) groups.snoozed.push(project);
-    else groups.active.push(project);
+    else (project.starred ? groups.starred : groups.active).push(project);
   }
+  const starFirst = (a: Project, b: Project) => Number(!!b.starred) - Number(!!a.starred);
+  groups.snoozed.sort(starFirst);
+  groups.done.sort(starFirst);
   return groups;
 }
 

@@ -10,7 +10,7 @@ const labels = between('const PROJECT_WINDOW_TAB_LABELS', '/** A tab of the stri
 const menu = between('/**\n * A row of the project menu that opens', 'function trackMenuItems(');
 
 function projectMenu(project, opts) {
-  const calls = { selected: [], windows: [] };
+  const calls = { selected: [], windows: [], starred: [] };
   const icon = name => () => `<${name}>`;
   const context = vm.createContext({
     window: { api: {
@@ -23,6 +23,8 @@ function projectMenu(project, opts) {
     newSessionItems: () => [],
     snoozeMenuItems: () => [],
     stopAllMenuItems: () => [],
+    starIconSvg: filled => `<star:${filled}>`,
+    toggleProjectStar: project => calls.starred.push(project.id),
   });
   vm.runInContext(`${labels}\n${menu}\nthis.items = projectMenuItems;`, context);
   return { items: context.items(project, opts), calls };
@@ -49,6 +51,7 @@ test('Files, Git and Settings open their tab on the project page, or in a window
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), {
     selected: [['p1', 'files'], ['p1', 'git'], ['p1', 'settings']],
     windows: [['p1', 'files'], ['p1', 'git'], ['p1', 'settings']],
+    starred: [],
   });
 });
 
@@ -56,4 +59,15 @@ test('the menu of the page itself has the three rows too', () => {
   const { items } = projectMenu({ id: 'p1', root: '/p', status: 'active' }, { fromPage: true });
   assert.ok(['Files', 'Git', 'Settings'].every(label => items.some(i => i.label === label)));
   assert.equal(items.some(i => i.label === 'Open overview'), false);
+});
+
+test('the project menu stars a project, or takes its star off', () => {
+  const plain = projectMenu({ id: 'p1', root: '/p', status: 'active' });
+  const star = plain.items.find(i => i.label === 'Star project');
+  assert.equal(star.icon, '<star:true>');
+  star.onClick();
+  assert.deepEqual([...plain.calls.starred], ['p1']);
+  const starred = projectMenu({ id: 'p2', root: '/p', status: 'active', starred: true });
+  assert.ok(starred.items.some(i => i.label === 'Unstar project'));
+  assert.equal(starred.items.some(i => i.label === 'Star project'), false);
 });

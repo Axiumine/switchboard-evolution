@@ -112,7 +112,7 @@ allow('create-project', [fields({
 }, ['name'])]);
 allow('update-project', [isId, fields({
   name: isName, status: oneOf('active', 'done'), sharedBranch: isBool, branchName: optional(isName),
-  defaultCwd: optional(isPath), snoozedUntil: optional(isString(40)),
+  defaultCwd: optional(isPath), snoozedUntil: optional(isString(40)), starred: isBool,
 })]);
 // Forgets the project; its folder stays on disk.
 allow('delete-project', [isId]);

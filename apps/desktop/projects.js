@@ -698,6 +698,7 @@ function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
     defaultCwd: row.defaultCwd || null,
     snoozedUntil: row.snoozedUntil || null,
     snoozedAt: row.snoozedAt || null,
+    starred: !!row.starred,
     created: row.created, modified: row.modified,
     lastActivity: null, sessionCount: 0,
     addedFilesPath: added.dirPath,
@@ -805,6 +806,7 @@ function updateProject(id, patch) {
     clean.status = patch.status;
   }
   if (patch?.sharedBranch !== undefined) clean.sharedBranch = !!patch.sharedBranch;
+  if (patch?.starred !== undefined) clean.starred = !!patch.starred;
   if (patch?.branchName !== undefined) {
     clean.branchName = typeof patch.branchName === 'string' && patch.branchName.trim() ? patch.branchName.trim() : null;
   }
@@ -823,7 +825,8 @@ function updateProject(id, patch) {
     clean.snoozedAt = null;
   }
   if (!Object.keys(clean).length) return { ok: true, project: loadProjectNode(id) };
-  clean.modified = new Date().toISOString();
+  // A star is not work on the project: it leaves the modified time alone.
+  if (Object.keys(clean).some(key => key !== 'starred')) clean.modified = new Date().toISOString();
   db.updateProject(id, clean);
   // The brief's title comes from the project name, so a rename rewrites it.
   if (clean.name) syncProjectBrief(id).catch(err => log.error?.('[projects] could not retitle the brief', err));
