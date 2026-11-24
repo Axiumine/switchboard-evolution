@@ -97,9 +97,14 @@ function setup({ handlers = {}, projects: list = { p1: ['/work/api', '/work/web'
   return { db, client, events };
 }
 
+// The graph on, as a test starts from it (setSettings would also read the folders that have none).
+function graphOn(db, projectId) {
+  db.setSetting(`knowledge:${projectId}`, { ...knowledge.settingsFor(projectId), enabled: true });
+}
+
 test('settings are normalized, and names cannot be set from outside', () => {
   const { db } = setup();
-  assert.deepEqual(knowledge.normalizeSettings(null), { enabled: false, mode: 'full', toolProfile: 'all', crossRepo: true, autoRefresh: true, names: {}, indexed: {}, share: {}, savedQueries: [] });
+  assert.deepEqual(knowledge.normalizeSettings(null), { enabled: false, mode: 'full', toolProfile: 'all', crossRepo: true, autoRefresh: true, names: {}, indexed: {}, share: {}, worktrees: {}, savedQueries: [] });
   const r = knowledge.setSettings('p1', { enabled: true, mode: 'fast', toolProfile: 'scout', names: { '/work/api': 'evil' }, share: { '/work/api': true, '/elsewhere': true }, savedQueries: [{ name: 'calls', query: 'MATCH (n) RETURN n' }, { query: '' }] });
   assert.equal(r.settings.enabled, true);
   assert.equal(r.settings.mode, 'fast');
@@ -426,12 +431,12 @@ test('projects.js gives knowledge.js the folder check it relies on', () => {
 
 test('the brief gets a Code graph section only with the graph on, naming each indexed folder', async () => {
   const synced = [];
-  setup({ handlers: { list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }, { name: 'web', root_path: '/work/web' }] }) } });
+  const { db } = setup({ handlers: { list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }, { name: 'web', root_path: '/work/web' }] }) } });
   assert.equal(knowledge.briefSection('p1'), '');
-  knowledge.setSettings('p1', { enabled: true });
-  assert.match(knowledge.briefSection('p1'), /no attached folder is indexed yet/);
+  graphOn(db, 'p1');
+  assert.equal(knowledge.briefSection('p1'), '', 'on, but no graph to name yet');
   await knowledge.nameFor('p1', '/work/api');
-  assert.match(knowledge.briefSection('p1'), /no attached folder is indexed yet/, 'a name alone is not a graph');
+  assert.equal(knowledge.briefSection('p1'), '', 'a name alone is not a graph');
   await knowledge.status('p1');
   const section = knowledge.briefSection('p1');
   assert.match(section, /^## Code graph \(codebase-memory-mcp\)/);
@@ -551,7 +556,7 @@ test('a change while a folder is read is read again after; a job CBM lost is giv
   let release;
   const gate = new Promise(r => { release = r; });
   let answer = 'running';
-  const { client } = setup({
+  const { db, client } = setup({
     handlers: {
       list_projects: () => ({ projects: [{ name: 'api', root_path: '/work/api' }] }),
       index_repository: async (args) => {
@@ -561,7 +566,7 @@ test('a change while a folder is read is read again after; a job CBM lost is giv
       },
     },
   });
-  knowledge.setSettings('p1', { enabled: true });
+  graphOn(db, 'p1');
   await knowledge.status('p1');
   await knowledge.index('p1', '/work/api');
   const again = await knowledge.index('p1', '/work/api', { kind: 'refresh' });
@@ -596,4 +601,287 @@ test('the graph is only read: write clauses and files out of the folder are refu
   await assert.rejects(knowledge.query('p1', '/work/api', 'check_index_coverage', { paths: ['src/a.js', '../b.js'] }), /a path in the folder/);
   await knowledge.query('p1', '/work/api', 'get_file_outline', { file_path: 'src/app.js' });
   await knowledge.query('p1', '/work/api', 'check_index_coverage', { paths: ['src/a.js', 'lib/b.ts'] });
+});
+
+// --- Worktrees: a graph of their own while they are in a project ---
+
+/** A CBM that keeps its graphs: an index job ends after `polls` status calls; `order` records what it was asked. */
+function cbmWorld({ polls = 1 } = {}) {
+  const graphs = new Map(); // name → root
+  const left = new Map();
+  const world = { graphs, order: [], failDelete: false };
+  world.handlers = {
+    list_projects: () => ({ projects: [...graphs].map(([name, root]) => ({ name, root_path: root })) }),
+    index_repository: (args) => {
+      if (args.mode === 'cross-repo-intelligence') { world.order.push(`link ${args.name}`); return { status: 'ok' }; }
+      if (args.status) {
+        const n = (left.get(args.name) ?? 1) - 1;
+        left.set(args.name, n);
+        world.order.push(`poll ${args.name}`);
+        if (n > 0) return { state: 'running' };
+        graphs.set(args.name, args.repo_path);
+        return { state: 'succeeded' };
+      }
+      left.set(args.name, polls);
+      world.order.push(`index ${args.name}`);
+      return { state: 'queued' };
+    },
+    delete_project: (args) => {
+      if (world.failDelete) throw new Error('the daemon is busy');
+      world.order.push(`delete ${args.project}`);
+      return { project: args.project, status: graphs.delete(args.project) ? 'deleted' : 'not_found' };
+    },
+    index_status: (args) => ({ project: args.project, status: 'ready' }),
+  };
+  return world;
+}
+
+// Short waits (polls, refreshes) run at once; the wait for a job before a delete does not end by itself.
+const jobTimers = { setTimeout: (fn, ms) => { if (ms < 60_000) setImmediate(fn); return 1; }, clearTimeout() {} };
+const WT = '/work/api.worktrees/feat-login';
+
+function addWorktree(db, projectId, folderPath, sourcePath, branch) {
+  db.rows.folders.push({ projectId, path: folderPath, mode: 'worktree', sourcePath, branch, sortOrder: 9 });
+}
+
+function removeFolder(db, projectId, folderPath) {
+  const row = db.rows.folders.find(f => f.projectId === projectId && f.path === folderPath);
+  db.rows.folders = db.rows.folders.filter(f => f !== row);
+  return row;
+}
+
+async function until(check, what) {
+  for (let i = 0; i < 500; i++) {
+    if (check()) return;
+    await flush();
+  }
+  assert.fail(`still waiting for ${what}`);
+}
+
+test('a worktree is named after its repository and branch, and remembered as one', async () => {
+  const world = cbmWorld();
+  world.graphs.set('billing-api', '/work/api');
+  const { db } = setup({ handlers: world.handlers, projects: { p1: ['/work/api'] } });
+  addWorktree(db, 'p1', WT, '/work/api', 'feat/login');
+  addWorktree(db, 'p1', '/elsewhere/login', '/work/api', 'feat/login');
+  addWorktree(db, 'p1', '/tmp/wt/fix', '/work/web', 'fix: the #2 bug');
+  addWorktree(db, 'p1', '/tmp/wt/detached-head', '/work/web', '');
+  assert.equal(await knowledge.nameFor('p1', WT), 'billing-api-wt-feat-login', 'the name CBM has for the repository');
+  assert.equal(await knowledge.nameFor('p1', '/elsewhere/login'), 'billing-api-wt-feat-login-2', 'made unique');
+  assert.equal(await knowledge.nameFor('p1', '/tmp/wt/fix'), 'web-wt-fix-the-2-bug', 'else the repository folder\'s name');
+  assert.equal(await knowledge.nameFor('p1', '/tmp/wt/detached-head'), 'web-wt-detached-head', 'no branch: the worktree folder\'s name');
+  assert.deepEqual(Object.keys(knowledge.settingsFor('p1').worktrees).sort(), [WT, '/elsewhere/login', '/tmp/wt/fix', '/tmp/wt/detached-head'].sort());
+});
+
+test('a worktree that joins a project with the graph on is indexed on its own, outside the cross-repo links', async () => {
+  const world = cbmWorld();
+  world.graphs.set('api', '/work/api');
+  world.graphs.set('web', '/work/web');
+  const { db, client } = setup({ handlers: world.handlers, timers: jobTimers });
+  await knowledge.status('p1');
+  const folder = { path: WT, mode: 'worktree', sourcePath: '/work/api', branch: 'feat/login' };
+  addWorktree(db, 'p1', WT, '/work/api', 'feat/login');
+  const starts = () => client.calls.filter(c => c.tool === 'index_repository' && c.args.async);
+
+  knowledge.folderChanged({ projectId: 'p1', folder, change: 'attached' });
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(starts().length, 0, 'the graph is off');
+
+  client.setFound(null);
+  knowledge.setSettings('p1', { enabled: true });
+  knowledge.folderChanged({ projectId: 'p1', folder, change: 'attached' });
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(starts().length, 0, 'no CBM to index with');
+  client.setFound({ path: '/opt/cbm/codebase-memory-mcp', version: '0.12.1', ok: true });
+
+  knowledge.folderChanged({ projectId: 'p1', folder, change: 'attached' });
+  await until(() => knowledge.settingsFor('p1').indexed[WT], 'the worktree\'s graph');
+  assert.deepEqual(starts().map(c => c.args), [{ repo_path: WT, name: 'api-wt-feat-login', mode: 'full', async: true, index_worktree: true }]);
+  assert.equal(world.order.filter(o => o.startsWith('link')).length, 0, 'a second checkout of api links nothing');
+
+  const brief = knowledge.briefSection('p1');
+  assert.match(brief, /\| `\/work\/api\.worktrees\/feat-login` \(worktree of `\/work\/api`, branch `feat\/login`\) \| `api-wt-feat-login` \|/);
+  assert.match(brief, /when you work in a worktree, pass its name/);
+  assert.match(brief, /CROSS_HTTP_CALLS/, 'api and web are still linked');
+  removeFolder(db, 'p1', '/work/web');
+  assert.doesNotMatch(knowledge.briefSection('p1'), /CROSS_HTTP_CALLS/, 'a repository and its worktree are not two folders to link');
+
+  const row = (await knowledge.status('p1')).folders.find(f => f.path === WT);
+  assert.deepEqual([row.mode, row.sourcePath, row.branch, row.indexed], ['worktree', '/work/api', 'feat/login', true]);
+  assert.deepEqual((await knowledge.status('p1')).folders.find(f => f.path === '/work/api').sourcePath, null);
+});
+
+test('a worktree that leaves the project loses its graph, once the job reading it ends', async () => {
+  const world = cbmWorld({ polls: 3 });
+  const { db, client, events } = setup({ handlers: world.handlers, timers: jobTimers, projects: { p1: ['/work/api'], p2: ['/work/web'] } });
+  graphOn(db, 'p1');
+  addWorktree(db, 'p1', WT, '/work/api', 'feat/login');
+  await knowledge.index('p1', WT);
+  knowledge.folderChanged({ projectId: 'p1', folder: removeFolder(db, 'p1', WT), change: 'detached' });
+  await until(() => world.order.includes('delete api-wt-feat-login'), 'the delete');
+  assert.deepEqual(world.order, ['index api-wt-feat-login', 'poll api-wt-feat-login', 'poll api-wt-feat-login', 'poll api-wt-feat-login', 'delete api-wt-feat-login']);
+  assert.equal(world.graphs.size, 0);
+  await until(() => events.some(e => e.reason === 'forgotten' && e.folderPath === WT), 'the event');
+  const s = knowledge.settingsFor('p1');
+  assert.deepEqual([s.names[WT], s.indexed[WT], s.worktrees[WT]], [undefined, undefined, undefined]);
+
+  // A folder that is not a worktree keeps its graph and its name.
+  await knowledge.nameFor('p2', '/work/web');
+  knowledge.folderChanged({ projectId: 'p2', folder: removeFolder(db, 'p2', '/work/web'), change: 'detached' });
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(knowledge.settingsFor('p2').names['/work/web'], 'web');
+
+  // A worktree another project still has keeps its graph: only this project forgets it.
+  addWorktree(db, 'p1', '/wt/shared', '/work/api', 'shared');
+  addWorktree(db, 'p2', '/wt/shared', '/work/api', 'shared');
+  await knowledge.nameFor('p1', '/wt/shared');
+  await knowledge.nameFor('p2', '/wt/shared');
+  knowledge.folderChanged({ projectId: 'p1', folder: removeFolder(db, 'p1', '/wt/shared'), change: 'detached' });
+  await until(() => !knowledge.settingsFor('p1').names['/wt/shared'], 'p1 forgetting it');
+  assert.equal(knowledge.settingsFor('p2').names['/wt/shared'], 'api-wt-shared');
+  assert.equal(client.calls.filter(c => c.tool === 'delete_project').length, 1);
+});
+
+test('a worktree that moves keeps its name: the old graph goes before the new one is made', async () => {
+  const world = cbmWorld();
+  const { db } = setup({ handlers: world.handlers, timers: jobTimers, projects: { p1: ['/work/api'] } });
+  graphOn(db, 'p1');
+  addWorktree(db, 'p1', WT, '/work/api', 'feat/login');
+  await knowledge.index('p1', WT, { wait: true });
+  const row = removeFolder(db, 'p1', WT);
+  addWorktree(db, 'p1', '/work/moved', '/work/api', 'feat/login');
+  knowledge.folderChanged({ projectId: 'p1', folder: row, change: 'detached' });
+  knowledge.folderChanged({ projectId: 'p1', folder: { ...row, path: '/work/moved' }, change: 'attached' });
+  await until(() => knowledge.settingsFor('p1').indexed['/work/moved'], 'the moved worktree\'s graph');
+  assert.equal(knowledge.settingsFor('p1').names['/work/moved'], 'api-wt-feat-login');
+  assert.deepEqual([...world.graphs], [['api-wt-feat-login', '/work/moved']]);
+});
+
+test('the sweep deletes what CBM did not take, and graphs of folders that left while the app could not act', async (t) => {
+  const kept = fs.mkdtempSync(path.join(os.tmpdir(), 'kn-kept-'));
+  t.after(() => fs.rmSync(kept, { recursive: true, force: true }));
+  const world = cbmWorld();
+  const { db, client } = setup({ handlers: world.handlers, timers: jobTimers, projects: { p1: ['/work/api'] } });
+  assert.deepEqual(await knowledge.sweepOrphans(), { ok: true, deleted: 0 });
+  assert.equal(client.calls.length, 0, 'nothing to delete: CBM is not asked');
+
+  addWorktree(db, 'p1', WT, '/work/api', 'feat/login');
+  await knowledge.index('p1', WT, { wait: true });
+  world.failDelete = true;
+  knowledge.folderChanged({ projectId: 'p1', folder: removeFolder(db, 'p1', WT), change: 'detached' });
+  await until(() => !knowledge.settingsFor('p1').names[WT], 'the worktree forgotten');
+  assert.ok(world.graphs.has('api-wt-feat-login'), 'CBM did not take the delete');
+  assert.deepEqual(db.getSetting('knowledge-orphans'), [{ name: 'api-wt-feat-login', path: WT }]);
+
+  // Left while the app was away: a worktree, a folder gone from disk, a folder still there.
+  const s = knowledge.settingsFor('p1');
+  Object.assign(s.names, { '/old/wt': 'api-wt-old', '/gone/repo-kn': 'gone', [kept]: 'docs' });
+  s.worktrees['/old/wt'] = true;
+  db.setSetting('knowledge:p1', s);
+  world.graphs.set('api-wt-old', '/old/wt');
+  world.graphs.set('gone', '/gone/repo-kn');
+  world.graphs.set('docs', kept);
+  client.setFound(null);
+  assert.deepEqual(await knowledge.sweepOrphans(), { ok: false, deleted: 0 }, 'no CBM: tried again later');
+  client.setFound({ path: '/opt/cbm/codebase-memory-mcp', version: '0.12.1', ok: true });
+  world.failDelete = false;
+  assert.deepEqual(await knowledge.sweepOrphans(), { ok: true, deleted: 3 });
+  assert.deepEqual([...world.graphs.keys()], ['docs'], 'a detached folder still on disk keeps its graph');
+  assert.deepEqual(knowledge.settingsFor('p1').names, { [kept]: 'docs' });
+  assert.deepEqual(db.getSetting('knowledge-orphans'), []);
+
+  // A name a folder took again is in use: it leaves the list, its graph stays.
+  db.setSetting('knowledge-orphans', [{ name: 'docs', path: '/somewhere/else' }]);
+  assert.deepEqual(await knowledge.sweepOrphans(), { ok: true, deleted: 0 });
+  assert.ok(world.graphs.has('docs'));
+  assert.deepEqual(db.getSetting('knowledge-orphans'), []);
+});
+
+// --- New projects: the graph on, each folder read as it joins ---
+
+test('a new project starts with the graph on, and its folders are read one after the other as they join', async () => {
+  const world = cbmWorld({ polls: 2 });
+  const { db, client, events } = setup({ handlers: world.handlers, timers: jobTimers });
+  knowledge.projectCreated({ projectId: 'nope' });
+  assert.equal(db.getSetting('knowledge:nope'), null, 'no such project: nothing saved');
+  knowledge.projectCreated({ projectId: 'p1' });
+  assert.equal(knowledge.settingsFor('p1').enabled, true);
+  assert.ok(events.some(e => e.projectId === 'p1' && e.reason === 'settings'));
+
+  knowledge.folderChanged({ projectId: 'p1', folder: { path: '/work/api', mode: 'in-place' }, change: 'attached' });
+  knowledge.folderChanged({ projectId: 'p1', folder: { path: '/work/web', mode: 'in-place' }, change: 'attached' });
+  await until(() => knowledge.settingsFor('p1').indexed['/work/web'], 'web\'s graph');
+  const starts = client.calls.filter(c => c.tool === 'index_repository' && c.args.async).map(c => c.args);
+  assert.deepEqual(starts, [
+    { repo_path: '/work/api', name: 'api', mode: 'full', async: true },
+    { repo_path: '/work/web', name: 'web', mode: 'full', async: true },
+  ]);
+  assert.ok(world.order.indexOf('index web') > world.order.lastIndexOf('poll api'), 'web waits for api\'s job to end');
+  await until(() => world.order.some(o => o.startsWith('link')), 'the cross-repo link');
+  const brief = knowledge.briefSection('p1');
+  assert.match(brief, /\| `\/work\/api` \| `api` \|/);
+  assert.match(brief, /\| `\/work\/web` \| `web` \|/);
+});
+
+test('turning the graph on reads the folders that have none; nothing is read with the graph off or without CBM', async () => {
+  const world = cbmWorld();
+  world.graphs.set('api', '/work/api');
+  const { db, client } = setup({ handlers: world.handlers, timers: jobTimers, projects: { p1: ['/work/api', '/work/web', '/work/docs'] } });
+  await knowledge.status('p1');
+  const starts = () => client.calls.filter(c => c.tool === 'index_repository' && c.args.async).map(c => c.args.repo_path);
+
+  knowledge.folderChanged({ projectId: 'p1', folder: { path: '/work/web', mode: 'in-place' }, change: 'attached' });
+  client.setFound(null);
+  knowledge.setSettings('p1', { enabled: true });
+  for (let i = 0; i < 5; i++) await flush();
+  assert.deepEqual(starts(), [], 'the graph off, then no CBM');
+
+  knowledge.setSettings('p1', { enabled: false });
+  client.setFound({ path: '/opt/cbm/codebase-memory-mcp', version: '0.12.1', ok: true });
+  knowledge.setSettings('p1', { enabled: true });
+  removeFolder(db, 'p1', '/work/docs');
+  await until(() => knowledge.settingsFor('p1').indexed['/work/web'], 'web\'s graph');
+  for (let i = 0; i < 5; i++) await flush();
+  assert.deepEqual(starts(), ['/work/web'], 'api has its graph; docs left before its turn');
+
+  knowledge.setSettings('p1', { enabled: false });
+  knowledge.setSettings('p1', { enabled: true });
+  for (let i = 0; i < 5; i++) await flush();
+  assert.deepEqual(starts(), ['/work/web'], 'on again: every folder has its graph');
+});
+
+test('auto_index on and auto_index_limit at the largest CBM takes: set once over CBM\'s own defaults, never over the user\'s', async () => {
+  const values = { auto_index: 'false', auto_index_limit: '50000' };
+  const ran = [];
+  const runConfig = async (bin, args) => {
+    ran.push(args.join(' '));
+    if (args[1] === 'set') { values[args[2]] = args[3]; return 'ok\n'; }
+    return 'Configuration:\n' + Object.entries(values).map(([k, v]) => `  ${k.padEnd(25)} = ${v}`).join('\n') + '\n';
+  };
+  const { db, client, events } = setup({ runConfig });
+  client.setFound(null);
+  assert.deepEqual(await knowledge.applyConfigDefaults(), { ok: false, applied: [] }, 'no CBM: the next start tries again');
+  assert.deepEqual(ran, []);
+
+  client.setFound({ path: '/opt/cbm/codebase-memory-mcp', version: '0.12.1', ok: true });
+  assert.deepEqual(await knowledge.applyConfigDefaults(), { ok: true, applied: ['auto_index', 'auto_index_limit'] });
+  assert.deepEqual([values.auto_index, values.auto_index_limit], ['true', '2147483647']);
+  assert.ok(events.some(e => e.reason === 'config'));
+
+  Object.assign(values, { auto_index: 'false', auto_index_limit: '50000' });
+  ran.length = 0;
+  assert.deepEqual(await knowledge.applyConfigDefaults(), { ok: true, applied: [] });
+  assert.deepEqual(ran, [], 'done once: the value is the user\'s from then on, and CBM is not asked again');
+
+  db.setSetting('knowledge-config-defaults', null);
+  values.auto_index_limit = '120000';
+  assert.deepEqual(await knowledge.applyConfigDefaults(), { ok: true, applied: ['auto_index'] });
+  assert.deepEqual([values.auto_index, values.auto_index_limit], ['true', '120000'], 'a value set before is kept');
+  assert.deepEqual(db.getSetting('knowledge-config-defaults'), { auto_index: true, auto_index_limit: true });
+
+  // More than CBM's int would wrap (4294967296 reads as 0): it takes the largest instead.
+  await knowledge.setConfig('auto_index_limit', '9999999999');
+  assert.equal(values.auto_index_limit, '2147483647');
+  await knowledge.setConfig('auto_index_limit', '80000');
+  assert.equal(values.auto_index_limit, '80000');
 });

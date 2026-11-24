@@ -830,6 +830,10 @@ knowledge.init({
 });
 // Projects with the code graph on get a "Code graph" section in their managed block.
 projects.addBriefSection((id) => knowledge.briefSection(id));
+// A new project starts with the graph on; a folder that joins such a project is indexed (a worktree
+// as a graph of its own, which it loses when it leaves).
+projects.onProjectCreated((event) => knowledge.projectCreated(event));
+projects.onFolderChange((event) => knowledge.folderChanged(event));
 addSink((channel, args) => {
   if (channel === 'git-graph-repo-changed' && typeof args[0] === 'string') knowledge.scheduleRefresh(args[0]);
 });
@@ -3821,6 +3825,11 @@ function startScheduleTicker() {
     startScheduleTicker();
     // Projects with the code graph on refresh it when their repositories move.
     knowledge.startWatching();
+    // Graphs nothing uses any more (a worktree that left while CBM was away), once the app has settled.
+    setTimeout(() => {
+      knowledge.sweepOrphans().catch((err) => log.warn('[knowledge] sweep failed', err.message));
+      knowledge.applyConfigDefaults().catch((err) => log.warn('[knowledge] could not apply the CBM defaults', err.message));
+    }, 30_000).unref?.();
     // The remote-access switch stays where it was left.
     if (remoteAccessSettings().enabled) startRemoteAccess();
 

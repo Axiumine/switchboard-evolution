@@ -1,6 +1,6 @@
 import { expect, test } from '@jest/globals';
 
-import { chooseFolder, impactArgs } from '@/knowledge/model';
+import { chooseFolder, folderLabel, impactArgs, worktreeNote } from '@/knowledge/model';
 import { KNOWLEDGE_VIEWS, parseKnowledgeView, parseTab, PROJECT_TABS } from '@/projects/tabs';
 
 test('the project page has Node Knowledge between Git and Settings', () => {
@@ -29,4 +29,13 @@ test('the folder shown: the one picked while attached, else the first indexed, e
   expect(chooseFolder(folders, '/gone')).toBe('/work/api');
   expect(chooseFolder([{ path: '/work/web' }], undefined)).toBe('/work/web');
   expect(chooseFolder([], undefined)).toBeNull();
+});
+
+test('a worktree is named as one, with its repository and branch; other folders are not', () => {
+  const wt = { path: '/work/api.worktrees/feat-login', mode: 'worktree', sourcePath: '/work/api', branch: 'feat/login' };
+  expect(folderLabel(wt)).toBe('feat-login · worktree');
+  expect(folderLabel({ path: '/work/api/', mode: 'in-place' })).toBe('api');
+  expect(worktreeNote(wt)).toBe('Worktree of api, branch feat/login. Its code graph is its own, deleted when it leaves the project.');
+  expect(worktreeNote({ path: '/w', mode: 'worktree' })).toBe('Worktree. Its code graph is its own, deleted when it leaves the project.');
+  expect(worktreeNote({ path: '/work/api', mode: 'in-place' })).toBeNull();
 });

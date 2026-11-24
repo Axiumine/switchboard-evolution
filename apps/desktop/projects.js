@@ -165,6 +165,43 @@ function extraBriefSections(projectId) {
   return parts.join('\n\n');
 }
 
+// Modules told when a folder joins a project or leaves it (knowledge.js
+// indexes a folder that joins a project with the code graph on, and gives a
+// worktree a graph of its own while it is there):
+// fn({ projectId, folder: { path, mode, sourcePath, branch }, change: 'attached' | 'detached' }).
+// A folder that moves leaves from its old path and joins at the new one.
+const folderListeners = [];
+
+function onFolderChange(fn) {
+  if (typeof fn === 'function') folderListeners.push(fn);
+}
+
+// Modules told when a project is made, before its folders join it (knowledge.js
+// turns the code graph on): fn({ projectId }).
+const createdListeners = [];
+
+function onProjectCreated(fn) {
+  if (typeof fn === 'function') createdListeners.push(fn);
+}
+
+function projectCreated(projectId) {
+  for (const fn of createdListeners) {
+    try { fn({ projectId }); } catch (err) { log.error?.('[projects] a project listener failed', err); }
+  }
+}
+
+function folderChanged(projectId, folder, change) {
+  if (!folder) return;
+  const event = {
+    projectId,
+    folder: { path: folder.path, mode: folder.mode || 'in-place', sourcePath: folder.sourcePath || null, branch: folder.branch || null },
+    change,
+  };
+  for (const fn of folderListeners) {
+    try { fn(event); } catch (err) { log.error?.('[projects] a folder listener failed', err); }
+  }
+}
+
 /**
  * A new brief: the managed block, then whatever the template adds below it as
  * the user's own text. Without a template the managed block is the whole file.
@@ -737,6 +774,8 @@ async function createProject(spec) {
       cli: t.cli && isHarnessId(t.cli) ? t.cli : null, status: 'active', sortOrder: i, created: now,
     }));
   }
+  projectCreated(row.id);
+  for (const f of inPlace) folderChanged(row.id, { path: f.path, mode: 'in-place' }, 'attached');
 
   const errors = [];
   for (const f of folders.filter(f => f.mode === 'worktree')) {
@@ -811,8 +850,10 @@ function normalizeSnooze(row, value, status) {
 function deleteProject(id) {
   const row = db.getProject(id);
   if (!row) return { error: 'Project not found' };
+  const folders = db.listProjectFolders(id);
   db.deleteProject(id);
   log.info?.(`[projects] removed "${row.name}" (folder kept at ${row.root})`);
+  for (const folder of folders) folderChanged(id, folder, 'detached');
   refreshPlanWatchers();
   notifyRendererProjectsChanged();
   return { ok: true, root: row.root };
@@ -830,6 +871,7 @@ async function attachFolder(id, spec) {
   db.upsertProjectFolder({ projectId: id, path: normalized.path, mode: 'in-place', sortOrder });
   db.updateProject(id, { modified: new Date().toISOString() });
   await syncProjectBrief(id);
+  folderChanged(id, { path: normalized.path, mode: 'in-place' }, 'attached');
   notifyRendererProjectsChanged();
   return { ok: true, project: loadProjectNode(id) };
 }
@@ -964,6 +1006,7 @@ async function attachWorktree(project, spec, { notify = true } = {}) {
   db.updateProject(project.id, { modified: new Date().toISOString() });
   await syncProjectBrief(project.id);
   log.info?.(`[projects] worktree ${target} on ${branch} from ${source}`);
+  folderChanged(project.id, { path: target, mode: 'worktree', sourcePath: source, branch }, 'attached');
   if (notify) notifyRendererProjectsChanged();
   return { ok: true, project: loadProjectNode(project.id), folder: { path: target, mode: 'worktree', sourcePath: source, branch }, copiedEnv: env.copied };
 }
@@ -999,6 +1042,7 @@ async function detachFolder(id, folderPath, opts = {}) {
   }
   db.updateProject(id, { modified: new Date().toISOString() });
   await syncProjectBrief(id);
+  if (folder) folderChanged(id, folder, 'detached');
   notifyRendererProjectsChanged();
   return { ok: true, project: loadProjectNode(id), worktreeRemoved };
 }
@@ -1029,6 +1073,7 @@ async function registerWorktreeFolder(projectId, { path: folderPath, sourcePath,
   db.upsertProjectFolder({ projectId, ...folder, sortOrder });
   db.updateProject(projectId, { modified: new Date().toISOString() });
   await syncProjectBrief(projectId);
+  folderChanged(projectId, folder, 'attached');
   notifyRendererProjectsChanged();
   return { ok: true, project: loadProjectNode(projectId), folder };
 }
@@ -1061,7 +1106,11 @@ async function moveFolderPath(projectId, fromPath, toPath) {
     if (cwd) db.updateTrack(track.id, { cwd });
   }
   db.updateProject(projectId, { modified: new Date().toISOString() });
-  if (folder) await syncProjectBrief(projectId);
+  if (folder) {
+    await syncProjectBrief(projectId);
+    folderChanged(projectId, folder, 'detached');
+    folderChanged(projectId, { ...folder, path: to }, 'attached');
+  }
   notifyRendererProjectsChanged();
   return { ok: true, moved: !!folder, project: loadProjectNode(projectId) };
 }
@@ -2131,7 +2180,7 @@ async function editProjectPullRequest(projectId, folderPath, params) {
 
 module.exports = {
   init,
-  projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection,
+  projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection, onFolderChange, onProjectCreated,
   createProject, updateProject, deleteProject, attachFolder, detachFolder, requireAttachedFolder,
   folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths, readProjectGitEditFile, saveProjectGitEditFile,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
