@@ -154,3 +154,19 @@ test('a refresh of an indexed folder changes the bar, not what decides the view'
   s.status.folders[0].indexed = false;
   assert.notEqual(api.knGateSignature(proj, s), before, 'a graph gone is a new page');
 });
+
+test('a worktree folder is marked as one, with its repository and branch, in the picker and on its card', () => {
+  const api = load();
+  const proj = { id: 'p1', root: '/work/proj', folders: [
+    { path: '/work/api', mode: 'in-place' },
+    { path: '/work/api.worktrees/feat-login', mode: 'worktree', sourcePath: '/work/api', branch: 'feat/"login"' },
+  ] };
+  const s = api.knState(proj);
+  s.status = { binary: BIN, folders: [ready('/work/api', 'api'), ready('/work/api.worktrees/feat-login', 'api-wt-feat-login')] };
+  const nav = api.knSubnavHtml(proj, s);
+  assert.match(nav, /<option value="\/work\/api\.worktrees\/feat-login">feat-login · worktree<\/option>/);
+  assert.match(nav, /<option value="\/work\/api" selected>api<\/option>/);
+  const card = api.knFolderCardHtml(proj, s, proj.folders[1]);
+  assert.match(card, /<span class="kn-label kn-label--muted" title="Worktree of \/work\/api, branch feat\/&quot;login&quot;\. Its code graph is its own[^"]*">worktree<\/span>/);
+  assert.doesNotMatch(api.knFolderCardHtml(proj, s, proj.folders[0]), />worktree</);
+});

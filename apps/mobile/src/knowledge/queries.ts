@@ -17,6 +17,9 @@ export const SLOW_TIMEOUT_MS = 10 * 60_000;
 export type KnowledgeFolder = {
   path: string;
   mode: string;
+  /** A worktree's main checkout and branch (null for other folders; missing from older desktops). */
+  sourcePath?: string | null;
+  branch?: string | null;
   name: string | null;
   shared: boolean;
   indexed: boolean;
@@ -33,6 +36,8 @@ export type KnowledgeSettings = {
   autoRefresh: boolean;
   names: Record<string, string>;
   share: Record<string, boolean>;
+  /** The folders that were worktrees when named. */
+  worktrees?: Record<string, boolean>;
   savedQueries: { name: string; query: string }[];
 };
 

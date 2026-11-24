@@ -9485,7 +9485,8 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .kn-folder-card--current { border-color: rgb(from var(--accent) r g b / 0.4); }
 .kn-folder-card .ws-card-h { min-width: 0; }
 .kn-folder-card .ws-card-h svg { flex: 0 0 auto; }
-.kn-folder-card .ws-card-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The folder's own name keeps its width (up to a cap); the CBM name gives way first. */
+.kn-folder-card .ws-card-title { flex: 0 0 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kn-folder-card .ws-card-meta { flex: 0 1 auto; min-width: 0; }
 .kn-folder-card .ws-ghost { flex: 0 0 auto; }
 .kn-folder-line { display: flex; align-items: center; gap: 6px; }
@@ -9610,6 +9611,7 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .kn-result--static { cursor: default; }
 .kn-result--static:hover { background: transparent; }
 .kn-label--muted { color: #9a9ab0; background: rgba(255,255,255,0.06); font-weight: 500; }
+.kn-set-folder .ws-row-k b .kn-label { margin-left: 6px; vertical-align: 1px; }
 .kn-trace-notice { color: color-mix(in srgb, var(--accent) 77%, white); }
 .kn-query-editor { border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); overflow: hidden; height: 170px; min-height: 90px; resize: vertical; background: #121218; }
 .kn-query-editor .cm-editor { height: 100%; }

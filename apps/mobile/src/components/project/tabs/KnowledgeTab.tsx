@@ -4,7 +4,7 @@ import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { KButton, KCard, KEmpty, KError, KLoading, KSection, KSeg, kstyles, SymbolRow, Chips } from '@/components/knowledge/parts';
 import { AdrView, CompareView, CoverageView, ImpactView, openSymbol, QueryView, SearchView, TraceView } from '@/components/knowledge/views';
 import { Sheet } from '@/components/Sheet';
-import { chooseFolder } from '@/knowledge/model';
+import { chooseFolder, folderLabel, worktreeNote } from '@/knowledge/model';
 import { knowledgeAction, SLOW_TIMEOUT_MS, useKnowledgeQuery, useKnowledgeStatus, useKnowledgeSupported, type KnowledgeFolder, type KnowledgeStatus } from '@/knowledge/queries';
 import type { Project } from '@/projects/model';
 import { KNOWLEDGE_VIEWS, parseKnowledgeView, type KnowledgeView } from '@/projects/tabs';
@@ -47,7 +47,7 @@ export function KnowledgeTab({ project, active = true }: { project: Project; act
       <View style={styles.bar}>
         <KSeg label="Node Knowledge view" value={view} onChange={(v: KnowledgeView) => patchUi({ knowledgeView: v })} options={KNOWLEDGE_VIEWS} />
         {folders.length > 1 && current ? (
-          <KButton label={`${baseName(current.path)}${current.indexed ? '' : ' (not indexed)'}`} onPress={() => setPicking(true)} />
+          <KButton label={`${folderLabel(current)}${current.indexed ? '' : ' (not indexed)'}`} onPress={() => setPicking(true)} />
         ) : null}
       </View>
       <View style={styles.body}>{body}</View>
@@ -55,7 +55,7 @@ export function KnowledgeTab({ project, active = true }: { project: Project; act
         visible={picking}
         title="Folder"
         onClose={() => setPicking(false)}
-        options={folders.map((f) => ({ label: baseName(f.path), hint: f.indexed ? f.path : `${f.path} · not indexed`, onPress: () => { patchUi({ knowledgeFolder: f.path }); setPicking(false); } }))}
+        options={folders.map((f) => ({ label: folderLabel(f), hint: f.indexed ? f.path : `${f.path} · not indexed`, onPress: () => { patchUi({ knowledgeFolder: f.path }); setPicking(false); } }))}
       />
     </View>
   );
@@ -127,7 +127,7 @@ function OverviewView({ project, status, folder }: { project: Project; status: K
         const sum = f.indexed && f.index ? indexSummary(f.index) : null;
         const busy = f.job && jobActive(f.job);
         return (
-          <KCard key={f.path} title={baseName(f.path)} meta={busy ? jobText(f.job) : sum ? `${sum.nodes.toLocaleString('en-US')} nodes · ${ago(sum.indexedAt)}` : 'not indexed'} right={busy ? null : <KButton label={sum ? 'Refresh' : 'Index'} onPress={() => refresh(f.path)} />}>
+          <KCard key={f.path} title={folderLabel(f)} meta={busy ? jobText(f.job) : sum ? `${sum.nodes.toLocaleString('en-US')} nodes · ${ago(sum.indexedAt)}` : 'not indexed'} right={busy ? null : <KButton label={sum ? 'Refresh' : 'Index'} onPress={() => refresh(f.path)} />}>
             {sum && sum.crossRepo.status === 'ran' ? <Text style={[kstyles.help, styles.pad]}>Linked with {sum.crossRepo.targets.join(', ') || 'nothing'} · {sum.crossRepo.edges} cross-repo calls</Text> : null}
             {sum && (sum.gaps.files || sum.gaps.partial) ? <Text style={[kstyles.help, styles.pad]}>{sum.gaps.files} files left out · {sum.gaps.partial} read in part</Text> : null}
           </KCard>
@@ -173,7 +173,7 @@ function SettingsView({ project, status }: { project: Project; status: Knowledge
     <ScrollView contentContainerStyle={kstyles.page}>
       <KSection>Code graph</KSection>
       <KCard>
-        {row('Use the code graph', 'Keep the graphs fresh, tell the project\'s agents about them, and give their sessions the graph\'s tools.', <Switch value={settings.enabled} onValueChange={(v) => save({ enabled: v })} accessibilityLabel="Use the code graph" />)}
+        {row('Use the code graph', 'On in new projects. Index the folders (each one that joins, and those without a graph when turned on), keep the graphs fresh, tell the project\'s agents about them, and give their sessions the graph\'s tools.', <Switch value={settings.enabled} onValueChange={(v) => save({ enabled: v })} accessibilityLabel="Use the code graph" />)}
         {row('Refresh automatically', 'After a commit, a checkout or saved files.', <Switch value={settings.autoRefresh} onValueChange={(v) => save({ autoRefresh: v })} accessibilityLabel="Refresh automatically" />)}
         {row('Link the repositories', 'Find the calls one folder makes into another.', <Switch value={settings.crossRepo} onValueChange={(v) => save({ crossRepo: v })} accessibilityLabel="Link the repositories" />)}
         {row('How much to read', INDEX_MODES.find((m) => m.id === settings.mode)?.hint || '', <KButton label={INDEX_MODES.find((m) => m.id === settings.mode)?.label || 'Full'} onPress={() => setMode(true)} />)}
@@ -183,8 +183,9 @@ function SettingsView({ project, status }: { project: Project; status: Knowledge
       <KCard>
         {status.folders.map((f) => (
           <View key={f.path} style={styles.folder}>
-            <Text style={styles.rowLabel}>{baseName(f.path)}</Text>
+            <Text style={styles.rowLabel}>{folderLabel(f)}</Text>
             <Text style={kstyles.help}>{f.name ? `CBM name: ${f.name}` : 'Not indexed yet'}</Text>
+            {worktreeNote(f) ? <Text style={kstyles.help}>{worktreeNote(f)}</Text> : null}
             <View style={kstyles.bar}>
               <Switch value={!!settings.share[f.path]} onValueChange={(v) => save({ share: { [f.path]: v } })} accessibilityLabel="Share with the team" />
               <Text style={kstyles.help}>Share with the team</Text>

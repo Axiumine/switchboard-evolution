@@ -22,3 +22,20 @@ export function chooseFolder(folders: { path: string; indexed?: boolean }[], pic
   if (picked && folders.some((f) => f.path === picked)) return picked;
   return folders.find((f) => f.indexed)?.path ?? folders[0]?.path ?? null;
 }
+
+type FolderLike = { path: string; mode?: string; sourcePath?: string | null; branch?: string | null };
+
+const lastPart = (p: string) => p.split('/').filter(Boolean).pop() || p;
+
+/** A folder's name in the tab: its last part, and "worktree" for a worktree. */
+export function folderLabel(f: FolderLike): string {
+  return `${lastPart(f.path)}${f.mode === 'worktree' ? ' · worktree' : ''}`;
+}
+
+/** What a worktree is a checkout of, and what happens to its graph; null for any other folder. */
+export function worktreeNote(f: FolderLike): string | null {
+  if (f.mode !== 'worktree') return null;
+  const of = f.sourcePath ? ` of ${lastPart(f.sourcePath)}` : '';
+  const branch = f.branch ? `, branch ${f.branch}` : '';
+  return `Worktree${of}${branch}. Its code graph is its own, deleted when it leaves the project.`;
+}

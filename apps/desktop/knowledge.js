@@ -23,6 +23,9 @@ const { execFile } = require('child_process');
 
 const SETTINGS_PREFIX = 'knowledge:';
 const GLOBAL_KEY = 'knowledge';
+// Graphs whose delete CBM did not take (not running, busy): sweepOrphans() tries again.
+const ORPHANS_KEY = 'knowledge-orphans';
+const ORPHANS_MAX = 500;
 
 // The tools a folder can be asked anything of: none of them writes.
 const READ_TOOLS = new Set([
@@ -44,6 +47,8 @@ const JOB_MAX_MS = 2 * 60 * 60 * 1000;
 const POLL_UNKNOWN_MAX = 10;
 // How long the program found and the agents' configs are taken as read.
 const AGENTS_TTL_MS = 15_000;
+// How long a worktree's graph waits for a job still reading it before the delete goes ahead.
+const FORGET_WAIT_MS = 2 * 60 * 1000;
 
 const ARGS_MAX_BYTES = 64 * 1024;
 // CBM trims answers to 3,200 tokens by default, a budget for a model's context.
@@ -77,6 +82,17 @@ const CONFIG_KEYS = {
   ui_enabled: 'bool',
   ui_port: 'port',
 };
+// CBM reads a count into a C int (strtol, then a cast): more than this would wrap.
+const CBM_INT_MAX = 2147483647;
+// CBM settings the app changes once, the first time it finds CBM, and only
+// from CBM's own default: after that the value is the user's.
+const CONFIG_DEFAULTS = {
+  // A repository an agent opens a session in is indexed if it has no graph yet…
+  auto_index: { from: 'false', to: 'true' },
+  // …however big it is.
+  auto_index_limit: { from: '50000', to: String(CBM_INT_MAX) },
+};
+const CONFIG_DEFAULTS_KEY = 'knowledge-config-defaults';
 
 let db, log, projects, client, locator, emit, runConfig, fetchImpl, now, timers, watchRepo, syncBrief, cbmDir, runInstall;
 let keepAlive = null;
@@ -84,6 +100,8 @@ const jobs = new Map(); // folderPath → { projectId, name, state, mode, starte
 const refreshTimers = new Map(); // folderPath → timeout
 const linking = new Map(); // projectId → the cross-repo link under way
 let naming = Promise.resolve(); // names are picked one at a time
+let forgetting = Promise.resolve(); // graphs of folders that left, deleted one at a time
+let autoIndexing = Promise.resolve(); // folders that joined a project with the graph on, read one at a time
 let agentsCache = null; // { at, value }
 let latestVersion = null;
 let latestAsked = false;
@@ -109,6 +127,8 @@ function init(ctx) {
   refreshTimers.clear();
   linking.clear();
   naming = Promise.resolve();
+  forgetting = Promise.resolve();
+  autoIndexing = Promise.resolve();
   agentsCache = null;
   latestVersion = null;
   latestAsked = false;
@@ -157,6 +177,8 @@ function normalizeSettings(raw) {
     // index reuses it), so a name alone does not say there is one.
     indexed: cleanMap(s.indexed, (v) => (v === true ? true : null)),
     share: cleanMap(s.share, (v) => (v === true ? true : null)),
+    // The folders that were worktrees when named: their graph goes when they leave the project.
+    worktrees: cleanMap(s.worktrees, (v) => (v === true ? true : null)),
     savedQueries: cleanQueries(s.savedQueries),
   };
 }
@@ -201,8 +223,19 @@ function setSettings(projectId, patch) {
   const settings = settingsFor(projectId);
   watchEnabledFolders();
   if (current.enabled !== settings.enabled || current.crossRepo !== settings.crossRepo) briefChanged(projectId);
+  // Turned on: the folders without a graph are read now.
+  if (!current.enabled && settings.enabled) {
+    for (const f of db.listProjectFolders(projectId)) if (!settings.indexed[f.path]) autoIndex(projectId, f.path);
+  }
   emit('knowledge-changed', { projectId, reason: 'settings' });
   return { ok: true, settings };
+}
+
+/** A new project (projects.js onProjectCreated) starts with the code graph on; its folders are read as they join. */
+function projectCreated({ projectId } = {}) {
+  if (!projectId || !db.getProject(projectId)) return;
+  saveSettings(projectId, { ...settingsFor(projectId), enabled: true });
+  emit('knowledge-changed', { projectId, reason: 'settings' });
 }
 
 function globalSettings() {
@@ -239,9 +272,34 @@ function requireFolder(projectId, folderPath) {
   return projects.requireAttachedFolder(projectId, folderPath);
 }
 
+function nameSafe(value) {
+  return String(value || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').replace(/-+$/, '');
+}
+
 function folderNameBase(folderPath) {
-  const base = path.basename(folderPath).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').replace(/-+$/, '');
-  return (base || 'repo').slice(0, NAME_MAX - 4);
+  return (nameSafe(path.basename(folderPath)) || 'repo').slice(0, NAME_MAX - 4);
+}
+
+/**
+ * A worktree's name says what it is in the Lens: its repository's name (the
+ * one the main checkout has, else its folder's), -wt-, then its branch.
+ */
+function worktreeNameBase(folder, byFolder, listed) {
+  if (!folder.sourcePath) return folderNameBase(folder.path);
+  const indexedSource = listed.find(p => samePath(p.root_path, folder.sourcePath));
+  const source = byFolder.get(folder.sourcePath) || (indexedSource && cleanName(indexedSource.name)) || folderNameBase(folder.sourcePath);
+  const branch = nameSafe(folder.branch) || nameSafe(path.basename(folder.path)) || 'worktree';
+  return `${source}-wt-${branch}`.slice(0, NAME_MAX - 4).replace(/[-.]+$/, '');
+}
+
+function folderRow(projectId, folderPath) {
+  return db.listProjectFolders(projectId).find(f => f.path === folderPath) || null;
+}
+
+/** A worktree of a repository whose main checkout the project has too: a second copy of the same code. */
+function isCopy(projectId, folder) {
+  if (!folder || folder.mode !== 'worktree' || !folder.sourcePath) return false;
+  return db.listProjectFolders(projectId).some(f => f.path !== folder.path && samePath(f.path, folder.sourcePath));
 }
 
 /** Every name the app has given, by folder, across projects: one folder keeps one name. */
@@ -279,6 +337,8 @@ function nameFor(projectId, folderPath, listed = null) {
 async function pickName(projectId, folderPath, listed) {
   const settings = settingsFor(projectId);
   if (settings.names[folderPath]) return settings.names[folderPath];
+  const row = folderRow(projectId, folderPath);
+  const worktree = row?.mode === 'worktree';
   const { byFolder, taken } = assignedNames();
   let name = byFolder.get(folderPath) || null;
   if (!name) {
@@ -287,13 +347,14 @@ async function pickName(projectId, folderPath, listed) {
     if (existing && cleanName(existing.name)) name = existing.name;
     else {
       for (const p of indexed) taken.add(p.name);
-      const base = folderNameBase(folderPath);
+      const base = worktree ? worktreeNameBase(row, byFolder, indexed) : folderNameBase(folderPath);
       name = base;
       for (let i = 2; taken.has(name); i++) name = `${base}-${i}`;
     }
   }
   const fresh = settingsFor(projectId);
   fresh.names[folderPath] = name;
+  if (worktree) fresh.worktrees[folderPath] = true;
   saveSettings(projectId, fresh);
   return name;
 }
@@ -359,6 +420,9 @@ async function status(projectId) {
   const folders = db.listProjectFolders(projectId).map(f => ({
     path: f.path,
     mode: f.mode,
+    // A worktree's repository (its main checkout) and branch.
+    sourcePath: f.mode === 'worktree' ? f.sourcePath || null : null,
+    branch: f.mode === 'worktree' ? f.branch || null : null,
     name: settings.names[f.path] || null,
     shared: !!settings.share[f.path],
     indexed: false,
@@ -533,7 +597,7 @@ async function pollJob(folderPath, job, repoArgs) {
  * `wait` it resolves when the job ends.
  */
 async function index(projectId, folderPath, opts = {}) {
-  requireFolder(projectId, folderPath);
+  const folder = requireFolder(projectId, folderPath);
   const running = jobs.get(folderPath);
   if (running && !JOB_DONE.has(running.state)) {
     // A change while the folder is read: read it again once this job ends.
@@ -553,6 +617,8 @@ async function index(projectId, folderPath, opts = {}) {
     repoArgs = { repo_path: folderPath, name };
     const args = { ...repoArgs, mode, async: true };
     if (settings.share[folderPath]) args.persistence = true;
+    // CBM set to ignore worktrees (ignore_worktrees) still takes one asked for by name.
+    if (folder?.mode === 'worktree') args.index_worktree = true;
     const started = await client.call('index_repository', args);
     const state = started?.state || started?.status;
     if (typeof state === 'string') job.state = state;
@@ -565,20 +631,24 @@ async function index(projectId, folderPath, opts = {}) {
   }
   announceJob(folderPath);
   const done = pollJob(folderPath, job, repoArgs).then(async (finished) => {
+    // The folder left the project while it was read: forgetFolder() takes it from here.
+    if (!projectsWithFolder(folderPath).length) return finished;
     if (finished.state === 'succeeded') {
       const wasIndexed = !!settingsFor(projectId).indexed[folderPath];
       markIndexed(folderPath, true);
       watchEnabledFolders();
       // The brief names the folder once its first graph is there.
       if (!wasIndexed) for (const id of projectsWithFolder(folderPath)) briefChanged(id);
-      // Links between folders come with an index asked for, not with each refresh.
-      if (finished.kind === 'index' && settingsFor(projectId).crossRepo) {
+      // Links between folders come with an index asked for, not with each refresh,
+      // and not for a second checkout of a repository the project has.
+      if (finished.kind === 'index' && settingsFor(projectId).crossRepo && !isCopy(projectId, folderRow(projectId, folderPath))) {
         await linkCrossRepo(projectId).catch((err) => log.warn?.('[knowledge] cross-repo link failed', err.message));
       }
     }
     if (finished.again) scheduleRefresh(folderPath);
     return finished;
   });
+  job.done = done;
   if (opts.wait) await done;
   else done.catch(() => {});
   return { ok: true, job: jobFor(folderPath) };
@@ -612,7 +682,8 @@ function linkCrossRepo(projectId) {
 
 async function linkNow(projectId) {
   const settings = settingsFor(projectId);
-  const folders = db.listProjectFolders(projectId).map(f => f.path).filter(p => settings.names[p] && settings.indexed[p]);
+  // A worktree next to its main checkout would only link the same code twice.
+  const folders = db.listProjectFolders(projectId).filter(f => !isCopy(projectId, f)).map(f => f.path).filter(p => settings.names[p] && settings.indexed[p]);
   if (folders.length < 2) return { ok: true, linked: 0 };
   const listed = new Set((await listProjects()).map(p => p.name));
   const indexed = folders.filter(p => listed.has(settings.names[p]));
@@ -696,6 +767,140 @@ async function deleteIndex(projectId, folderPath) {
   markIndexed(folderPath, false);
   for (const id of projectsWithFolder(folderPath)) { changed(id, folderPath, 'deleted'); briefChanged(id); }
   return { ok: true, result };
+}
+
+// --- Worktrees: a graph of their own while they are in a project ---
+
+/**
+ * A folder joined a project or left it (projects.js onFolderChange). One that
+ * joins a project with the graph on is indexed; a worktree as a CBM project
+ * of its own (a Lens project too). A worktree that leaves, removed or only
+ * detached, loses its graph; any other folder keeps it. A folder is read
+ * after the deletes asked before it, so a worktree that moves keeps its name.
+ */
+function folderChanged({ projectId, folder, change } = {}) {
+  if (!projectId || !folder || typeof folder.path !== 'string') return;
+  if (change === 'detached') {
+    if (folder.mode !== 'worktree') return;
+    forgetting = forgetting.then(() => forgetFolder(projectId, folder.path))
+      .catch((err) => log.warn?.('[knowledge] could not delete a worktree\'s graph', folder.path, err.message));
+    return;
+  }
+  if (change === 'attached' && settingsFor(projectId).enabled) autoIndex(projectId, folder.path);
+}
+
+/**
+ * Index a folder of a project with the graph on, when CBM is there: one
+ * folder after the other, each once the deletes asked before it are done.
+ * Skipped when, by its turn, the folder left or the graph was turned off.
+ */
+function autoIndex(projectId, folderPath) {
+  const found = client.refresh();
+  if (!found || !found.ok) return autoIndexing;
+  const deletes = forgetting;
+  autoIndexing = autoIndexing.then(() => deletes).then(() => {
+    if (!settingsFor(projectId).enabled || !folderRow(projectId, folderPath)) return null;
+    return index(projectId, folderPath, { wait: true });
+  }).catch((err) => log.warn?.('[knowledge] could not index a folder that joined', folderPath, err.message));
+  return autoIndexing;
+}
+
+function orphans() {
+  const raw = db.getSetting(ORPHANS_KEY);
+  return Array.isArray(raw) ? raw.filter(o => o && cleanName(o.name)).map(o => ({ name: o.name, path: typeof o.path === 'string' ? o.path : null })) : [];
+}
+
+function saveOrphans(list) {
+  db.setSetting(ORPHANS_KEY, list.slice(-ORPHANS_MAX));
+}
+
+function dropFolder(projectId, folderPath) {
+  const s = settingsFor(projectId);
+  let dropped = false;
+  for (const key of ['names', 'indexed', 'share', 'worktrees']) {
+    if (folderPath in s[key]) { delete s[key][folderPath]; dropped = true; }
+  }
+  if (dropped) saveSettings(projectId, s);
+}
+
+/** Delete a graph from CBM, once a job still reading the folder ends. False when CBM did not take it: the name is kept for later. */
+async function deleteGraph(name, folderPath) {
+  const running = jobs.get(folderPath);
+  if (running && !JOB_DONE.has(running.state)) {
+    running.again = false;
+    let timer = null;
+    await Promise.race([
+      Promise.resolve(running.done).catch(() => {}),
+      new Promise(r => { timer = timers.setTimeout(r, FORGET_WAIT_MS); }),
+    ]);
+    timers.clearTimeout(timer);
+  }
+  const pendingTimer = refreshTimers.get(folderPath);
+  if (pendingTimer) { timers.clearTimeout(pendingTimer); refreshTimers.delete(folderPath); }
+  try {
+    await client.call('delete_project', { project: name });
+  } catch (err) {
+    log.warn?.('[knowledge] the graph stays for now', name, err.message);
+    saveOrphans(orphans().filter(o => o.name !== name).concat({ name, path: folderPath }));
+    return false;
+  }
+  jobs.delete(folderPath);
+  saveOrphans(orphans().filter(o => o.name !== name));
+  return true;
+}
+
+/**
+ * A folder left a project: its name goes from the project's settings and,
+ * when no project has the folder any more, its graph goes from CBM (and from
+ * every project's settings). A delete CBM does not take is tried again by
+ * sweepOrphans().
+ */
+async function forgetFolder(projectId, folderPath) {
+  const name = settingsFor(projectId).names[folderPath] || null;
+  const owners = projectsWithFolder(folderPath);
+  let deleted = false;
+  if (name && !owners.length) deleted = await deleteGraph(name, folderPath);
+  dropFolder(projectId, folderPath);
+  if (!owners.length) {
+    for (const p of db.listProjects()) if (p.id !== projectId) dropFolder(p.id, folderPath);
+  }
+  changed(projectId, folderPath, 'forgotten');
+  return { ok: true, name, deleted };
+}
+
+/**
+ * Delete the graphs nothing uses any more: the ones whose delete CBM did not
+ * take, and those of folders that left their project while the app could
+ * not act (a worktree, or a folder gone from disk). Never a graph a project
+ * still has attached. CBM starts only when there is something to delete.
+ */
+async function sweepOrphans() {
+  const stale = [];
+  for (const project of db.listProjects()) {
+    const s = settingsFor(project.id);
+    const own = new Set(db.listProjectFolders(project.id).map(f => f.path));
+    for (const folder of Object.keys(s.names)) {
+      if (own.has(folder)) continue;
+      if (s.worktrees[folder] || !fs.existsSync(folder)) stale.push({ projectId: project.id, folder });
+    }
+  }
+  if (!stale.length && !orphans().length) return { ok: true, deleted: 0 };
+  const found = client.refresh();
+  if (!found || !found.ok) return { ok: false, deleted: 0 };
+  let deleted = 0;
+  for (const { projectId, folder } of stale) {
+    const r = await forgetFolder(projectId, folder).catch((err) => { log.warn?.('[knowledge] sweep', folder, err.message); return null; });
+    if (r?.deleted) deleted += 1;
+  }
+  for (const orphan of orphans()) {
+    // A folder took the name again in the meantime: that graph is in use.
+    if (assignedNames().taken.has(orphan.name)) {
+      saveOrphans(orphans().filter(o => o.name !== orphan.name));
+      continue;
+    }
+    if (await deleteGraph(orphan.name, orphan.path || '')) deleted += 1;
+  }
+  return { ok: true, deleted };
 }
 
 // --- ADR and runtime traces ---
@@ -830,6 +1035,8 @@ function cleanConfigValue(key, value) {
     if (kind === 'limit' && v === 'off') return v;
     const n = Number(v);
     if (!Number.isInteger(n) || n < 1) throw new Error(`${key} takes a whole number${kind === 'limit' ? ' or off' : ''}`);
+    // A count past CBM's int would wrap (4294967296 reads as 0): the largest it takes instead.
+    if (kind === 'count') return String(Math.min(n, CBM_INT_MAX));
     return String(n);
   }
   throw new Error(`Unknown setting: ${key}`);
@@ -859,6 +1066,39 @@ async function setConfig(key, value) {
   await runConfig(found.path, ['config', 'set', key, clean]);
   emit('knowledge-changed', { projectId: null, reason: 'config' });
   return getConfig();
+}
+
+/**
+ * Apply CONFIG_DEFAULTS once: each key still at CBM's own default takes the
+ * app's; a key the user set is left alone. Nothing runs once every key is
+ * done, or while CBM is missing (the next start, or a download, tries again).
+ */
+async function applyConfigDefaults() {
+  const raw = db.getSetting(CONFIG_DEFAULTS_KEY);
+  const done = raw && typeof raw === 'object' ? { ...raw } : {};
+  const todo = Object.keys(CONFIG_DEFAULTS).filter(key => done[key] !== true);
+  if (!todo.length) return { ok: true, applied: [] };
+  const found = client.refresh();
+  if (!found || !found.ok) return { ok: false, applied: [] };
+  const current = parseConfigList(await runConfig(found.path, ['config', 'list']));
+  const applied = [];
+  for (const key of todo) {
+    const { from, to } = CONFIG_DEFAULTS[key];
+    if (!(key in current)) continue; // a CBM that does not list it yet: next time
+    if (current[key] === from) {
+      try {
+        await runConfig(found.path, ['config', 'set', key, to]);
+        applied.push(key);
+      } catch (err) {
+        log.warn?.('[knowledge] could not set', key, err.message);
+        continue;
+      }
+    }
+    done[key] = true;
+  }
+  db.setSetting(CONFIG_DEFAULTS_KEY, done);
+  if (applied.length) emit('knowledge-changed', { projectId: null, reason: 'config' });
+  return { ok: true, applied };
 }
 
 async function probe(url) {
@@ -898,16 +1138,22 @@ async function lens(projectId, folderPath, workspace) {
 function briefSection(projectId) {
   const s = settingsFor(projectId);
   if (!s.enabled) return '';
-  const folders = db.listProjectFolders(projectId).map(f => f.path);
-  const named = folders.filter(p => s.names[p] && s.indexed[p]);
+  const rows = db.listProjectFolders(projectId).filter(f => s.names[f.path] && s.indexed[f.path]);
+  // Nothing to name yet (a new project, CBM missing): the section comes with the first graph.
+  if (!rows.length) return '';
   const lines = ['## Code graph (codebase-memory-mcp)'];
-  if (!named.length) {
-    lines.push('The code graph is on for this project, but no attached folder is indexed yet. Index them in Switchboard\'s Node Knowledge tab.');
-    return lines.join('\n') + '\n';
-  }
+  const folderCell = (f) => {
+    if (f.mode !== 'worktree') return `\`${f.path}\``;
+    const of = f.sourcePath ? ` of \`${f.sourcePath}\`` : '';
+    return `\`${f.path}\` (worktree${of}${f.branch ? `, branch \`${f.branch}\`` : ''})`;
+  };
   lines.push('The attached folders are indexed by codebase-memory-mcp (CBM), and Switchboard keeps the indexes fresh. Pass these names as `project` to every CBM tool:');
-  lines.push('', '| Folder | CBM project |', '|---|---|', ...named.map(p => `| \`${p}\` | \`${s.names[p]}\` |`), '');
+  lines.push('', '| Folder | CBM project |', '|---|---|', ...rows.map(f => `| ${folderCell(f)} | \`${s.names[f.path]}\` |`), '');
   lines.push('Graph first: `search_graph` to find a symbol, `trace_path` for who calls what, `get_code_snippet` to read it, `query_graph` (read-only Cypher) for questions over many hops, `get_architecture` for the layout, and `detect_changes` before a commit to see what a change reaches. Use `search_code` or grep for literal text and for the files `check_index_coverage` flags. Each folder\'s architecture decisions are in `manage_adr`.');
+  if (rows.some(f => f.mode === 'worktree')) {
+    lines.push('', 'A worktree has a graph of its own, of its branch: when you work in a worktree, pass its name, not the main checkout\'s. Switchboard deletes that graph when the worktree leaves the project.');
+  }
+  const named = rows.filter(f => !isCopy(projectId, f));
   if (named.length > 1 && s.crossRepo) {
     lines.push('', 'The folders are linked with each other: `query_graph(project, "MATCH (a)-[r:CROSS_HTTP_CALLS]->(b) RETURN a.name, a.file_path, b.name, properties(r)")` finds the calls one makes into another.');
   }
@@ -1034,6 +1280,7 @@ async function downloadBinary() {
     agentsCache = null;
     client.reset();
     emit('knowledge-changed', { projectId: null, reason: 'binary' });
+    applyConfigDefaults().catch((err) => log.warn?.('[knowledge] could not apply the CBM defaults', err.message));
     return { ok: true, installed };
   } catch (err) {
     download = { step: download?.step || 'download', error: err.message, done: true };
@@ -1081,6 +1328,12 @@ module.exports = {
   startWatching,
   stopWatching,
   deleteIndex,
+  projectCreated,
+  folderChanged,
+  forgetFolder,
+  sweepOrphans,
+  applyConfigDefaults,
+  CONFIG_DEFAULTS,
   adr,
   ingestTraces,
   ingestTracesFile,

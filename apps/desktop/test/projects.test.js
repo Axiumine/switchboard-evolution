@@ -255,6 +255,54 @@ test('updateProject, attach/detach, deleteProject keep the folder on disk', asyn
   } finally { t.cleanup(); }
 });
 
+test('modules hear when a folder joins or leaves a project; a move is a leave and a join', async () => {
+  const t = setup();
+  const seen = [];
+  // Listeners stay for the module's life: this one only records.
+  projects.onFolderChange((e) => seen.push(e));
+  projects.onFolderChange(() => { throw new Error('a listener that fails does not stop the others'); });
+  const repo = tmpDir('switchboard-events-repo-');
+  const wt = tmpDir('switchboard-events-wt-');
+  const movedTo = `${wt}-moved`;
+  try {
+    const { project } = await projects.createProject({ name: 'Events' });
+    await projects.attachFolder(project.id, { path: repo });
+    await projects.registerWorktreeFolder(project.id, { path: wt, sourcePath: repo, branch: 'feat/x' });
+    fs.renameSync(wt, movedTo);
+    await projects.moveFolderPath(project.id, wt, movedTo);
+    await projects.detachFolder(project.id, path.resolve(repo));
+    projects.deleteProject(project.id);
+    assert.deepEqual(seen.map(e => [e.projectId === project.id, e.change, e.folder.path, e.folder.mode, e.folder.sourcePath, e.folder.branch]), [
+      [true, 'attached', path.resolve(repo), 'in-place', null, null],
+      [true, 'attached', path.resolve(wt), 'worktree', path.resolve(repo), 'feat/x'],
+      [true, 'detached', path.resolve(wt), 'worktree', path.resolve(repo), 'feat/x'],
+      [true, 'attached', path.resolve(movedTo), 'worktree', path.resolve(repo), 'feat/x'],
+      [true, 'detached', path.resolve(repo), 'in-place', null, null],
+      [true, 'detached', path.resolve(movedTo), 'worktree', path.resolve(repo), 'feat/x'],
+    ]);
+  } finally { rm(repo); rm(movedTo); t.cleanup(); }
+});
+
+test('a new project is announced before its folders join it', async () => {
+  const t = setup();
+  const heard = [];
+  projects.onProjectCreated((e) => heard.push(['created', e.projectId]));
+  projects.onProjectCreated(() => { throw new Error('a listener that fails does not stop the creation'); });
+  projects.onFolderChange((e) => heard.push([e.change, e.projectId, e.folder.path, e.folder.mode]));
+  const a = tmpDir('switchboard-created-a-');
+  const b = tmpDir('switchboard-created-b-');
+  try {
+    const { project, errors } = await projects.createProject({ name: 'Created', folders: [{ path: a }, { path: b }] });
+    assert.deepEqual(errors, []);
+    assert.deepEqual(heard, [
+      ['created', project.id],
+      ['attached', project.id, path.resolve(a), 'in-place'],
+      ['attached', project.id, path.resolve(b), 'in-place'],
+    ]);
+    projects.deleteProject(project.id);
+  } finally { rm(a); rm(b); t.cleanup(); }
+});
+
 test('projectForCwd matches the root and nested paths, not a sibling with a common prefix', async () => {
   const t = setup();
   try {

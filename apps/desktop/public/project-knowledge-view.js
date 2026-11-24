@@ -28,6 +28,17 @@ function knFolders(project) {
   return (project.folders || []).filter(f => f && f.path);
 }
 
+/** What a worktree folder is a checkout of, and what happens to its graph. */
+function knWorktreeTitle(f) {
+  if (!f || f.mode !== 'worktree') return '';
+  const of = f.sourcePath ? ` of ${f.sourcePath}` : '';
+  return `Worktree${of}${f.branch ? `, branch ${f.branch}` : ''}. Its code graph is its own: made when it joins a project with the code graph on, deleted when it leaves the project.`;
+}
+
+function knWorktreeTag(f) {
+  return f && f.mode === 'worktree' ? `<span class="kn-label kn-label--muted" title="${escapeAttr(knWorktreeTitle(f))}">worktree</span>` : '';
+}
+
 /** The folder the tab shows: the one picked, else the first indexed one, else the first. */
 function knFolder(project, s = knState(project)) {
   const folders = knFolders(project);
@@ -106,7 +117,8 @@ function knSubnavHtml(project, s) {
   const options = folders.map(f => {
     const st = knFolderStatus(s, f.path);
     const mark = st?.job && KnowledgeModel.jobActive(st.job) ? ' (indexing)' : st?.indexed ? '' : ' (not indexed)';
-    return `<option value="${escapeAttr(f.path)}"${f.path === folder ? ' selected' : ''}>${escapeHtml(pathBasename(f.path))}${mark}</option>`;
+    const kind = f.mode === 'worktree' ? ' · worktree' : '';
+    return `<option value="${escapeAttr(f.path)}"${f.path === folder ? ' selected' : ''}>${escapeHtml(pathBasename(f.path))}${kind}${mark}</option>`;
   }).join('');
   let meta = '';
   if (fstatus?.job && KnowledgeModel.jobActive(fstatus.job)) meta = `<span class="kn-busy" aria-hidden="true"></span>${escapeHtml(KnowledgeModel.jobText(fstatus.job))}`;
@@ -387,6 +399,7 @@ function knFolderCardHtml(project, s, f) {
     <div class="ws-card-h">
       ${PICONS.folder(13)}
       <span class="ws-card-title" title="${escapeAttr(f.path)}">${escapeHtml(pathBasename(f.path))}</span>
+      ${knWorktreeTag(f)}
       ${st.name && st.name !== pathBasename(f.path) ? `<span class="ws-card-meta mono" title="The name codebase-memory-mcp knows it by">${escapeHtml(st.name)}</span>` : ''}
       <span class="kn-spacer"></span>
       ${busy ? '' : `<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="index-folder" title="${sum ? 'Read the folder again (only what changed)' : 'Build its code graph'}">${sum ? PICONS.refresh(11) : PICONS.play(11)}<span>${sum ? 'Refresh' : 'Index'}</span></button>`}
@@ -558,7 +571,7 @@ function renderKnowledgeSettings(project, view, body) {
     const st = knFolderStatus(s, f.path) || {};
     const busy = st.job && KnowledgeModel.jobActive(st.job);
     return `<div class="ws-row kn-set-folder" data-kn-folder="${escapeAttr(f.path)}">
-      <div class="ws-row-k"><b>${escapeHtml(pathBasename(f.path))}</b><span class="mono" title="${escapeAttr(f.path)}">${escapeHtml(st.name ? `CBM name: ${st.name}` : 'Not indexed yet')}</span></div>
+      <div class="ws-row-k"><b>${escapeHtml(pathBasename(f.path))}${knWorktreeTag(f)}</b><span class="mono" title="${escapeAttr(f.path)}">${escapeHtml(st.name ? `CBM name: ${st.name}` : 'Not indexed yet')}</span></div>
       <div class="ws-row-v">
         <label class="ws-check" title="Write the graph to .codebase-memory/graph.db.zst in the repository at each index, so a teammate who clones it starts from it"><input type="checkbox" data-kn-share${st.shared ? ' checked' : ''}>Share with the team</label>
         <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="ignore" title="The files codebase-memory-mcp leaves out (.cbmignore, as .gitignore)">${PICONS.file(11)}<span>Ignore rules</span></button>
@@ -572,7 +585,7 @@ function renderKnowledgeSettings(project, view, body) {
     <div class="ws-sec"><span>Code graph</span><span class="ws-saved" id="kn-set-saved">${PICONS.check(11)}<span>Saved</span></span></div>
     <div class="ws-card">
       <div class="ws-row">
-        <div class="ws-row-k"><b>Use the code graph</b><span>Keep this project's graphs fresh as its repositories change, tell its agents about them (a Code graph section in CLAUDE.md and AGENTS.md), and give its Claude and Codex sessions the graph's tools.</span></div>
+        <div class="ws-row-k"><b>Use the code graph</b><span>On in new projects. Index the project's folders (each one that joins it, and those without a graph when you turn this on), keep the graphs fresh as the repositories change, tell its agents about them (a Code graph section in CLAUDE.md and AGENTS.md), and give its Claude and Codex sessions the graph's tools. A worktree that joins the project gets a graph of its own, deleted when it leaves.</span></div>
         <div class="ws-row-v">${knSwitchHtml('kn-set-enabled', settings.enabled)}</div>
       </div>
       <div class="ws-row">
