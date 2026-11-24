@@ -24,6 +24,23 @@ test('projects split into active, snoozed and done; a snoozed one needing you is
   expect(groups.done.map((p) => p.id)).toEqual(['old']);
 });
 
+test('starred projects at work go above Active; snoozed and done ones stay on their shelf, first there', () => {
+  const projects = [
+    project('web'),
+    project('fav', { starred: true }),
+    project('later', { snoozedUntil: '2026-11-02T08:00:00Z' }),
+    project('later-fav', { snoozedUntil: '2026-11-03T08:00:00Z', starred: true }),
+    project('old'),
+    project('old-fav', { status: 'done', starred: true }),
+  ];
+  projects[4].status = 'done';
+  const groups = groupProjects(projects, { now, live: {}, notices: noticesFrom({}) });
+  expect(groups.starred.map((p) => p.id)).toEqual(['fav']);
+  expect(groups.active.map((p) => p.id)).toEqual(['web']);
+  expect(groups.snoozed.map((p) => p.id)).toEqual(['later-fav', 'later']);
+  expect(groups.done.map((p) => p.id)).toEqual(['old-fav', 'old']);
+});
+
 test('a project reads as its most urgent session', () => {
   const p = project('web', {
     sessions: [{ sessionId: 'a', projectPath: '/p' }],

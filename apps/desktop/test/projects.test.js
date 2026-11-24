@@ -49,8 +49,8 @@ function makeFakeDb({ global = {} } = {}) {
     updateProject: (id, patch) => {
       const row = rows.projects.find(r => r.id === id);
       if (!row) return 0;
-      for (const key of ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'modified']) {
-        if (key in patch) row[key] = key === 'sharedBranch' ? (patch[key] ? 1 : 0) : patch[key];
+      for (const key of ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'starred', 'modified']) {
+        if (key in patch) row[key] = key === 'sharedBranch' || key === 'starred' ? (patch[key] ? 1 : 0) : patch[key];
       }
       return 1;
     },
@@ -225,6 +225,22 @@ test('snooze: a wake time in the future, kept as an overlay on an active project
     const woken = projects.updateProject(project.id, { snoozedUntil: null }).project;
     assert.equal(woken.snoozedUntil, null);
     assert.equal(woken.snoozedAt, null);
+  } finally { t.cleanup(); }
+});
+
+test('a star: kept on the project, without touching its modified time', async () => {
+  const t = setup();
+  try {
+    const { project } = await projects.createProject({ name: 'Favourite' });
+    assert.equal(project.starred, false, 'a new project has no star');
+    const starred = projects.updateProject(project.id, { starred: true }).project;
+    assert.equal(starred.starred, true);
+    assert.equal(starred.modified, project.modified, 'a star is not work on the project');
+    assert.equal(projects.buildProjectTree(false).projects.find(p => p.id === project.id).starred, true, 'the tree carries it to the sidebar and the phone');
+    assert.equal(projects.updateProject(project.id, { starred: false }).project.starred, false);
+    const renamed = projects.updateProject(project.id, { name: 'Favourite 2', starred: true }).project;
+    assert.equal(renamed.starred, true);
+    assert.equal(renamed.name, 'Favourite 2');
   } finally { t.cleanup(); }
 });
 

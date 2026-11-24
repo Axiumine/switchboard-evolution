@@ -5088,6 +5088,36 @@ body { display: flex; flex-direction: column; }
   text-overflow: ellipsis;
 }
 
+/* The name's line: the name, then its star (dim until the row is under the
+   pointer, gold when the project is starred). */
+.proj-name-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.proj-name-line > .proj-name { min-width: 0; }
+.proj-star {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #7a7a96;
+  opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.12s, color 0.12s, transform 0.12s;
+}
+.proj-row:hover .proj-star { opacity: 0.7; }
+.proj-star:hover,
+.proj-star:focus-visible { opacity: 1; color: #f5be3c; transform: scale(1.15); }
+.proj-star.starred { opacity: 1; color: #f5be3c; }
+
 .proj-sub {
   font-size: 11px;
   color: #7a7a90;

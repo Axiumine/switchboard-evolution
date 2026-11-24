@@ -47,8 +47,8 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 ## 2. Projects tab: list, search, groups and drawer
 
 - [ ] A "New project" button at the top of the list opens the New project dialog — `projects-view.js` (`#proj-new-btn`, `showNewProjectDialog`)
-- [ ] Projects are listed under "Active", then a collapsible "Snoozed · n" shelf (ordered by wake time), then a collapsible "Done · n" — `projects-view.js` (`renderProjectList`, `#proj-sec-snoozed`, `#proj-sec-done`)
-- [ ] Each project row shows a coloured initials mark, its name, a state dot (needs you, working, finished and not read, open, back from snooze), a running-task indicator and a running-session count — `projects-view.js` (`buildProjectRow`, `projectDotState`, `updateProjectTaskIndicator`)
+- [ ] Projects are listed under "Starred" (the starred projects at work), then "Active", then a collapsible "Snoozed · n" shelf (ordered by wake time), then a collapsible "Done · n"; on the two shelves the starred ones come first — `projects-view.js` (`renderProjectList`, `projectListGroups`, `#proj-sec-starred`, `#proj-sec-snoozed`, `#proj-sec-done`)
+- [ ] Each project row shows a coloured initials mark, its name with a star after it (dim until the row is under the pointer, gold when starred; a click stars or unstars it, kept in `projects.starred`), a state dot (needs you, working, finished and not read, open, back from snooze), a running-task indicator and a running-session count — `projects-view.js` (`buildProjectRow`, `projectStarHtml`, `toggleProjectStar`, `projectDotState`, `updateProjectTaskIndicator`)
 - [ ] Each row's second line shows the numbers for plan (done/total), todos (open/total), tracks and sessions (master) — `projects-view.js` (`projectRowStats`, `projectSublineHtml`)
 - [ ] Clicking a row opens the project page on its remembered tab — `projects-view.js` (`selectProject`)
 - [ ] The chevron before a row opens a drawer under it with the project's sessions, and the drawer stays open across window reloads (master) — `projects-view.js` (`toggleProjectDrawer`, `buildProjectDrawer`, `projectsUi.expandedProjects`)
@@ -59,7 +59,7 @@ The desktop app is a copy of the `master` branch of the Switchboard fork (upstre
 - [ ] Clicking a session in a drawer opens it on the project's Session tab (master) — `projects-view.js` (`openSession`, `enterWorking`, `projectTabSession`)
 - [ ] Cmd+Arrow and Cmd+Shift+[ ] walk the drawer's rows in the order shown (master) — `grid-view.js` (`sessionNavRows`), `projects-view.js` (`projectsTabNavRows`)
 - [ ] A "No project · n" row at the foot lists sessions no project claims, grouped by folder, folders open or closed, stale folders folded (master) — `projects-view.js` (`sessionsWithoutProject`, `buildOtherSessionsDrawer`, `#proj-sec-other`)
-- [ ] Right-click on a project opens its menu: Open overview, New session (CLI submenu), New track…, Rename…, Attach folder…, New scheduled task…, Settings, Open project folder, Snooze (presets and Pick a time…), Wake now, Snooze again, Stop all, Mark as done / Reopen project, Remove project… — `projects-view.js` (`projectMenuItems`, `snoozeMenuItems`, `stopAllMenuItems`)
+- [ ] Right-click on a project opens its menu: Open overview, New session (CLI submenu), New track…, Rename…, Attach folder…, New scheduled task…, Settings, Open project folder, Star project / Unstar project, Snooze (presets and Pick a time…), Wake now, Snooze again, Stop all, Mark as done / Reopen project, Remove project… — `projects-view.js` (`projectMenuItems`, `snoozeMenuItems`, `stopAllMenuItems`)
 - [ ] A snoozed project hides from Active until its wake time, comes back marked "back from snooze", and comes back at once when a session in it needs input; a project that needs input cannot be snoozed — `snooze.js` (shared), `projects-view.js` (`isProjectSnoozed`, `armProjectWakeTimer`, `snoozeProject`)
 - [ ] Marking a project done or removing it first lists running sessions, tasks, schedules and worktrees and asks what to do about them — `projects-view.js` (`confirmMarkDone`, `confirmStopWork`, `removeProjectFlow`)
 - [ ] Remove project… asks for the word delete to be typed (any case) before the Remove button works — `projects-view.js` (`confirmRemoveProject`, `isRemoveProjectWord`)
@@ -533,7 +533,7 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 
 ## `(tabs)/projects.tsx` (Projects)
 
-- [ ] Project list with Active, Snoozed and Done sections, "No project" folders, numbers on each row, drawers with sessions grouped by Time, Track or State (combo "Group each project's sessions by") — `(tabs)/projects.tsx`, `projects/list-ui.ts`, `projects/drawer.ts`
+- [ ] Project list with Starred, Active, Snoozed and Done sections (a ★ after a starred project's name), "No project" folders, numbers on each row, drawers with sessions grouped by Time, Track or State (combo "Group each project's sessions by") — `(tabs)/projects.tsx`, `projects/list-ui.ts`, `projects/drawer.ts`
 - [ ] Search projects by name and sessions by content or title, with leave-out and Stop — `(tabs)/projects.tsx`
 - [ ] "New" creates a project from a name — `(tabs)/projects.tsx` (`TextPrompt`)
 - [ ] Tap a project to open it; tap a session row to open it in its project; "More" and archived toggles per list — `(tabs)/projects.tsx`
@@ -541,7 +541,7 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 ## `project/[id]/index.tsx` (Project)
 
 - [ ] Tabs Overview, Session (when a session is open), Plan with `done/total`, Todos with the open count, Files, Git, Settings; each is built on first visit and kept — `project/[id]/index.tsx`, `components/project/ProjectTabBar.tsx`
-- [ ] Project ⋯ sheet: New session…, Rename…, New track…, Attach a folder…, Snooze… (presets) / Wake now, Mark as done / Reopen (asks about running work), Settings, Remove project… — `project/[id]/index.tsx` (`projectOptions`), `projects/flows.ts`
+- [ ] Project ⋯ sheet: New session…, Rename…, New track…, Attach a folder…, Star / Unstar, Snooze… (presets) / Wake now, Mark as done / Reopen (asks about running work), Settings, Remove project… — `project/[id]/index.tsx` (`projectOptions`), `projects/flows.ts`
 - [ ] Remove project… (sheet and Settings) asks for the word delete to be typed before Remove works — `components/project/RemoveProjectPrompt.tsx`, `projects/settings.ts` (`isRemoveProjectWord`)
 - [ ] Overview: a section per track (⋯ sheet: New session here…, Rename…, Mark as done / Reopen, Delete track…), Other sessions, Schedules (New, and per schedule Run now, Edit…, Pause / Resume, Delete…), Files (project folder and each attached folder), Attach a folder… — `components/project/tabs/OverviewTab.tsx`
 - [ ] Plan: phases and items with tick, long-press for "Start a session on this" and Edit…, "Add to the plan…"; Todos: the todos, the same way, with "Add a todo…" — `components/project/tabs/PlanTab.tsx` (`part`), `components/project/PlanSection.tsx`

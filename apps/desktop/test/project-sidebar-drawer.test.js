@@ -254,3 +254,50 @@ test('in the Projects tab, navigation follows the list the session on screen cam
   assert.deepEqual(tabRows({ active: 'loose', viewerShown: false }), ['other'], 'a session outside every project: the No project list');
   assert.deepEqual(tabRows({ active: 'filed' }), ['card'], 'the page: its track cards');
 });
+
+// --- Starred projects ---
+
+function starContext() {
+  const context = vm.createContext({
+    escapeHtml: text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+    starIconSvg: filled => `<svg data-filled="${filled}"></svg>`,
+  });
+  vm.runInContext(between('function projectStarHtml(', '/** Star a project, or take its star off'), context);
+  return context;
+}
+
+test('starred projects at work get a section of their own above Active, newest first', () => {
+  const { projectListGroups } = starContext();
+  const time = { a: 1, b: 5, c: 3, d: 9, e: 2, f: 4, g: 7, h: 8 };
+  const projects = [
+    { id: 'a', status: 'active', starred: true },
+    { id: 'b', status: 'active' },
+    { id: 'c', status: 'active', starred: true },
+    { id: 'd', status: 'active' },
+    { id: 'e', status: 'active', starred: true, snoozedUntil: '2026-12-02T08:00:00.000Z' },
+    { id: 'f', status: 'active', snoozedUntil: '2026-12-01T08:00:00.000Z' },
+    { id: 'g', status: 'done', starred: true },
+    { id: 'h', status: 'done' },
+  ];
+  const groups = projectListGroups(projects, { isSnoozed: p => !!p.snoozedUntil, sortTime: p => time[p.id] });
+  const ids = list => plain(list).map(p => p.id);
+  assert.deepEqual(ids(groups.starred), ['c', 'a']);
+  assert.deepEqual(ids(groups.active), ['d', 'b']);
+  assert.deepEqual(ids(groups.snoozed), ['e', 'f'], 'a snoozed project stays on its shelf, starred ones first');
+  assert.deepEqual(ids(groups.done), ['g', 'h'], 'a finished one too, though h moved later');
+});
+
+test("a project row's star says what a click does, and is filled once starred", () => {
+  const { projectStarHtml } = starContext();
+  const off = projectStarHtml({ name: 'A & B', starred: false });
+  assert.match(off, /class="proj-star"/);
+  assert.match(off, /title="Star project"/);
+  assert.match(off, /aria-label="Star A &amp; B"/);
+  assert.match(off, /aria-pressed="false"/);
+  assert.match(off, /data-filled="false"/);
+  const on = projectStarHtml({ name: 'A', starred: true });
+  assert.match(on, /class="proj-star starred"/);
+  assert.match(on, /title="Unstar project"/);
+  assert.match(on, /aria-pressed="true"/);
+  assert.match(on, /data-filled="true"/);
+});

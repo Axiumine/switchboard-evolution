@@ -79,6 +79,7 @@ export default function ProjectScreen() {
     { label: 'New track…', onPress: () => setRename({ kind: 'new-track', id: project.id, name: '' }) },
     { label: 'Note', onPress: () => { openNote(project.id); } },
     { label: 'Attach a folder…', onPress: () => router.push({ pathname: '/folders', params: { projectId: project.id } }) },
+    { label: project.starred ? 'Unstar' : 'Star', onPress: () => run('update-project', [project.id, { starred: !project.starred }]) },
     ...(project.status === 'done' ? [] : snoozed
       ? [{ label: 'Wake now', onPress: () => run('update-project', [project.id, { snoozedUntil: null }]) }]
       : [{ label: 'Snooze…', onPress: () => setSnoozing(true) }]),

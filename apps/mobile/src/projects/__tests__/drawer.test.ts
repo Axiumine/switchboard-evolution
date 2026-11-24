@@ -127,6 +127,13 @@ describe('projectListRows', () => {
     expect(kinds(projectListRows(input()))).toEqual(['section', 'project:app', 'toggle:snoozed:false', 'toggle:done:false']);
   });
 
+  it('lists the starred projects under Starred, above Active', () => {
+    const fav = project('fav', { starred: true });
+    const rows = projectListRows(input({ groups: { starred: [fav], active: [app], snoozed: [later], done: [shipped] } }));
+    expect(kinds(rows)).toEqual(['section', 'project:fav', 'section', 'project:app', 'toggle:snoozed:false', 'toggle:done:false']);
+    expect(rows.filter((r) => r.kind === 'section').map((r) => (r.kind === 'section' ? r.title : ''))).toEqual(['Starred', 'Active']);
+  });
+
   it('opens a drawer under its row: headings, eight rows, then "+ N older"', () => {
     const rows = projectListRows(input({ ui: { ...DEFAULT_LIST_UI, expanded: { app: true } } }));
     const drawer = rows.slice(2, rows.findIndex((r) => r.kind === 'end') + 1);
