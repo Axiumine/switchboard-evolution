@@ -216,9 +216,17 @@ async function openFileInProjectEditor(project, rel, { allowExternal = false, ro
   markSelectedRow(rel);
   const ed = ensureProjectEditor();
   const filePath = projectEntryPath(root, rel);
+  const sameFile = ed.projectId === project.id && ed.root === root && ed.rel === rel && ed.panel.filePath === filePath;
+  // Unsaved changes in the file shown: Save, Don't Save or stay on it.
+  if (!sameFile && ed.panel.filePath && !(await ed.panel.confirmLeave())) {
+    state.selected = ed.projectId === project.id && ed.root === root ? ed.rel : null;
+    markSelectedRow(state.selected);
+    return;
+  }
+  if (state.openRequest !== request) return;
   closeDiffView({ restore: false });
   // Same file already open: keep the editor and whatever is typed in it.
-  if (ed.projectId === project.id && ed.root === root && ed.rel === rel && ed.panel.filePath === filePath) {
+  if (sameFile) {
     host.replaceChildren(ed.host);
     return;
   }
@@ -251,6 +259,7 @@ async function openFileToSide(project, root, rel) {
   const side = ensureSideEditor();
   const filePath = projectEntryPath(root, rel);
   if (!(side.projectId === project.id && side.root === root && side.rel === rel && side.panel.filePath === filePath)) {
+    if (side.panel.filePath && !(await side.panel.confirmLeave())) return;
     const result = await readForEditor(project, root, rel);
     if (result?.code === 'PREVIEW_UNAVAILABLE') { await openUnsupportedFile(result, filePath, root); return; }
     if (!result?.ok) { alert(result?.error || 'Could not open the file.'); return; }

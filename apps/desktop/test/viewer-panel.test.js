@@ -13,8 +13,13 @@ function setup(options = {}) {
     appendChild(child) { this.children.push(child); },
     insertBefore(child) { this.children.unshift(child); },
     replaceChildren(...children) { this.children = children; },
+    after(sibling) { this.afterSibling = sibling; },
+    querySelector() { return null; },
   });
-  const toolbar = { setTitle(title) { this.titleEl.textContent = title; }, setPath() {}, setWrapMode() {}, setPreviewMode() {} };
+  const toolbar = {
+    setTitle(title) { this.titleEl.textContent = title; }, setPath() {}, setWrapMode() {}, setPreviewMode() {},
+    setDirty(dirty) { this.dirty = dirty; },
+  };
   for (const key of ['el', 'titleEl', 'previewBtn', 'wrapBtn', 'saveBtn', 'gotoLineBtn', 'copyContentBtn', 'openExternalBtn', 'revealBtn', 'shareBtn', 'fontSmallerBtn', 'fontLargerBtn']) toolbar[key] = element();
   toolbar.flashSave = () => { toolbar.flashes = (toolbar.flashes || 0) + 1; };
   const revoked = [];
@@ -25,8 +30,10 @@ function setup(options = {}) {
   const api = { watchFile() {}, unwatchFile() {}, revealFile: filePath => revealed.push(filePath) };
   const stored = new Map();
   const listeners = {};
+  const documentListeners = {};
   const context = vm.createContext({
-    document: { createElement: element },
+    document: { createElement: element, addEventListener(type, callback) { (documentListeners[type] ||= []).push(callback); } },
+    navigator: { platform: 'MacIntel' },
     localStorage: { getItem: key => (stored.has(key) ? stored.get(key) : null), setItem: (key, value) => stored.set(key, String(value)) },
     Uint8Array, Blob, atob, setTimeout, clearTimeout, alert: message => alerts.push(message),
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
@@ -53,7 +60,7 @@ function setup(options = {}) {
     ...options,
   });
   const media = { previewType: 'image', mimeType: 'image/png', base64: 'AAEC' };
-  return { panel, toolbar, revoked, api, media, revealed, alerts, saved: () => saved, writes, stored, context };
+  return { panel, toolbar, revoked, api, media, revealed, alerts, saved: () => saved, writes, stored, context, documentListeners };
 }
 
 test('the toolbar opens the shown file in its default app and reports failures', async () => {
@@ -357,4 +364,120 @@ test('without autosave an edit waits for Save, which still flashes', async () =>
   await panel._save();
   assert.deepEqual(writes, [['/app.js', 'ab']]);
   assert.equal(toolbar.flashes, 1);
+});
+
+test('the title shows a dot while there are unsaved changes, gone once saved', async () => {
+  const { panel, toolbar } = setup();
+  panel.open('Code', '/app.js', 'a');
+  assert.equal(toolbar.dirty, false);
+  panel.editorView.dispatch({ changes: { from: 0, to: 1, insert: 'ab' } });
+  assert.equal(toolbar.dirty, true);
+  await panel._save();
+  assert.equal(toolbar.dirty, false);
+});
+
+test('before showing another file, unsaved changes are saved, dropped or kept, as the user answers', async () => {
+  const { panel, api, writes } = setup();
+  const asked = [];
+  let answer = 'cancel';
+  api.confirmUnsavedChanges = async (name) => { asked.push(name); return answer; };
+  panel.open('app.js', '/app.js', 'a');
+  assert.equal(await panel.confirmLeave(), true, 'nothing to save: no question');
+  assert.deepEqual(asked, []);
+  panel.editorView.dispatch({ changes: { from: 0, to: 1, insert: 'ab' } });
+  assert.equal(await panel.confirmLeave(), false, 'Cancel stays');
+  assert.deepEqual(asked, ['app.js']);
+  answer = 'discard';
+  assert.equal(await panel.confirmLeave(), true);
+  assert.deepEqual(writes, []);
+  answer = 'save';
+  assert.equal(await panel.confirmLeave(), true);
+  assert.deepEqual(writes, [['/app.js', 'ab']]);
+});
+
+test('an autosaving viewer saves instead of asking', async () => {
+  const { panel, api, writes } = setup({ autosaveMs: 60_000 });
+  api.confirmUnsavedChanges = async () => { throw new Error('asked'); };
+  panel.open('Note', '/note.md', 'a');
+  panel.editorView.dispatch({ changes: { from: 0, to: 1, insert: 'ab' } });
+  assert.equal(await panel.confirmLeave(), true);
+  assert.deepEqual(writes, [['/note.md', 'ab']]);
+});
+
+test('a change on disk is put in place when nothing is unsaved, and asked about when something is', async () => {
+  const { panel, api, context, toolbar } = setup();
+  const set = [];
+  context.window.cmSetText = (view, text) => { set.push(text); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); return true; };
+  let disk = 'a';
+  api.readFileForPanel = async () => ({ ok: true, content: disk });
+  panel.open('Code', '/app.js', 'a');
+  disk = 'from disk';
+  await panel._reloadFromDisk();
+  assert.deepEqual(set, ['from disk'], 'reloaded in place (keeping the cursor)');
+  assert.equal(panel.getContent(), 'from disk');
+  assert.equal(panel.isDirty(), false);
+  // Unsaved changes: never overwritten, a question instead.
+  panel.editorView.dispatch({ changes: { from: 0, to: 9, insert: 'mine' } });
+  disk = 'from disk again';
+  await panel._reloadFromDisk();
+  assert.equal(panel.getContent(), 'mine');
+  assert.equal(panel.conflictEl.hidden, false);
+  assert.equal(toolbar.el.afterSibling, panel.conflictEl, 'the question sits under the toolbar');
+  // Reload takes the disk; the question goes.
+  panel._applyDiskContent(panel._diskContent);
+  assert.equal(panel.getContent(), 'from disk again');
+  assert.equal(panel.conflictEl.hidden, true);
+  assert.equal(panel.isDirty(), false);
+  // The disk saying what the editor has (its own save) is no question.
+  panel.editorView.dispatch({ changes: { from: 0, to: 15, insert: 'saved' } });
+  disk = 'saved';
+  await panel._reloadFromDisk();
+  assert.equal(panel.conflictEl.hidden, true);
+  assert.equal(panel.isDirty(), false);
+});
+
+test('the text given back and compared keeps the file\'s line breaks (cmGetText)', () => {
+  const { panel, context } = setup();
+  // As the editor does: its lines split on any break, given back with the file's CRLF.
+  context.window.cmGetText = view => view.state.doc.toString().replace(/\r?\n/g, '\r\n');
+  panel.open('Win', '/win.txt', 'a\r\nb');
+  assert.equal(panel.getContent(), 'a\r\nb');
+  assert.equal(panel.isDirty(), false);
+});
+
+test('Cmd/Ctrl+F where no field has the focus opens the find bar of the viewer shown', () => {
+  const { panel, context, documentListeners } = setup();
+  const opened = [];
+  context.window.cmOpenSearch = (view, opts) => { opened.push(opts); return true; };
+  panel.open('Code', '/app.js', 'a');
+  Object.assign(panel.container, { isConnected: true, getClientRects: () => [{}], contains: () => false });
+  const key = (props) => {
+    const event = { key: '', code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: { tagName: 'DIV' }, defaultPrevented: false, ...props };
+    event.preventDefault = () => { event.defaultPrevented = true; };
+    for (const listener of documentListeners.keydown) listener(event);
+    return event;
+  };
+  assert.equal(key({ key: 'f', code: 'KeyF', metaKey: true }).defaultPrevented, true);
+  // (Objects made in the vm's realm: compared as JSON.)
+  assert.deepEqual(JSON.parse(JSON.stringify(opened)), [{ replace: false }]);
+  assert.equal(key({ key: 'ƒ', code: 'KeyF', metaKey: true, altKey: true }).defaultPrevented, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(opened.at(-1))), { replace: true });
+  // A field keeps its keys; other keys pass.
+  assert.equal(key({ key: 'f', code: 'KeyF', metaKey: true, target: { tagName: 'INPUT' } }).defaultPrevented, false);
+  assert.equal(key({ key: 'k', code: 'KeyK', metaKey: true }).defaultPrevented, false);
+  assert.equal(opened.length, 2);
+});
+
+test('the editor\'s keys work from the toolbar: F3, Ctrl+G, Cmd+Shift+O go to the editor', () => {
+  const { panel, context } = setup();
+  const ran = [];
+  context.window.cmRunEditorKeys = (view, event) => { ran.push(event.key); return true; };
+  panel.open('Code', '/app.js', 'a');
+  panel.editorView.dom = { contains: () => false };
+  for (const props of [{ key: 'F3', code: 'F3' }, { key: 'g', code: 'KeyG', ctrlKey: true }, { key: 'O', code: 'KeyO', metaKey: true, shiftKey: true }, { key: 'x', code: 'KeyX' }]) {
+    const event = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: { tagName: 'BUTTON', closest: () => null }, defaultPrevented: false, ...props };
+    event.preventDefault = () => { event.defaultPrevented = true; };
+    panel._onKeyDown(event);
+  }
+  assert.deepEqual(ran, ['F3', 'g', 'O']);
 });

@@ -300,6 +300,8 @@ async function adoptPlanInto(project, plan) {
 }
 
 async function openPlan(plan) {
+  // Unsaved changes in the plan shown: Save, Don't Save or stay on it.
+  if (planPanel.filePath && currentPlanFilename !== plan.filename && !(await planPanel.confirmLeave())) return;
   // Mark active in sidebar
   markActivePlan(plan.filename);
 
@@ -316,6 +318,8 @@ async function openPlan(plan) {
   memoryViewer.style.display = 'none';
   settingsViewer.style.display = 'none';
   processViewer.style.display = 'none';
+  // The message history sits over this viewer when it stays shown (and takes its Cmd+F).
+  jsonlViewer.style.display = 'none';
   planViewer.style.display = 'flex';
 
   planPanel.open(plan.title, currentPlanFilePath, currentPlanContent);

@@ -33,6 +33,32 @@ test('buildSearchRegExp: match case, whole word, regex, and a readable error', (
   assert.throws(() => textSearch.buildSearchRegExp({ query: '' }), /Type something/);
 });
 
+test('a regex replacement takes \\n, \\t, \\\\ and the case of a group (\\u \\l \\U \\L), as VS Code', () => {
+  const m = /(\w+)-(\w+)/.exec('foo-BAR');
+  assert.equal(textSearch.expandReplacement('$1\\n$2\\t\\\\', m), 'foo\nBAR\t\\');
+  assert.equal(textSearch.expandReplacement('\\U$1 \\L$2', m), 'FOO bar');
+  assert.equal(textSearch.expandReplacement('\\u$1 \\l$2', m), 'Foo bAR');
+  assert.equal(textSearch.expandReplacement('\\u\\u$1', m), 'FOo');
+  // A case op waits for the next group; an unknown escape stays as typed.
+  assert.equal(textSearch.expandReplacement('\\Ux-$1 \\q', m), 'x-FOO \\q');
+  const named = /(?<k>\w+)/.exec('key');
+  assert.equal(textSearch.expandReplacement('\\U$<k>', named), 'KEY');
+  assert.equal(textSearch.replacementFor({ query: '(\\w+)', isRegex: true }, 'abc', '\\U$1'), 'ABC');
+  // Not a regular expression: the replace text as typed.
+  assert.equal(textSearch.replacementFor({ query: 'abc' }, 'abc', '\\U$1\\n'), '\\U$1\\n');
+});
+
+test('preserveCase writes the replacement in the case of the match, as VS Code\'s Preserve Case', () => {
+  assert.equal(textSearch.preserveCase('cart', 'Basket'), 'basket');
+  assert.equal(textSearch.preserveCase('CART', 'basket'), 'BASKET');
+  assert.equal(textSearch.preserveCase('Cart', 'basket'), 'Basket');
+  assert.equal(textSearch.preserveCase('cART', 'Basket'), 'basket');
+  assert.equal(textSearch.preserveCase('Foo-Bar', 'baz-qux'), 'Baz-Qux');
+  assert.equal(textSearch.preserveCase('foo_BAR', 'baz_qux'), 'baz_QUX');
+  assert.equal(textSearch.preserveCase('123', 'abc'), 'abc');
+  assert.equal(textSearch.preserveCase('', 'abc'), 'abc');
+});
+
 test('matchesInLine skips empty matches and replacementFor expands groups only for a regex', () => {
   const re = textSearch.buildSearchRegExp({ query: 'x*', isRegex: true });
   assert.deepEqual(textSearch.matchesInLine(re, 'axxbx').map(m => [m.column, m.text]), [[1, 'xx'], [4, 'x']]);

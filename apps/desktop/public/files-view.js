@@ -362,6 +362,8 @@ function markActiveFile(filePath) {
 
 /** Show the file in the main area's editor, whatever its kind (text, image, PDF…). */
 async function openFileHere(filePath) {
+  // Unsaved changes in the file shown: Save, Don't Save or stay on it.
+  if (memoryPanel.filePath && memoryPanel.filePath !== filePath && !(await memoryPanel.confirmLeave())) return;
   const request = ++filesOpenRequest;
   currentMemoryFilePath = filePath;
   const row = markActiveFile(filePath);
@@ -381,6 +383,8 @@ async function openFileHere(filePath) {
   statsViewer.style.display = 'none';
   settingsViewer.style.display = 'none';
   processViewer.style.display = 'none';
+  // The message history sits over this viewer when it stays shown (and takes its Cmd+F).
+  jsonlViewer.style.display = 'none';
   memoryViewer.style.display = 'flex';
 
   memoryPanel.open(fileBaseName(filePath), filePath, result.content || '', result);

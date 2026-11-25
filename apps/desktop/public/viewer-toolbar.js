@@ -15,6 +15,8 @@ const PREVIEW_ICON = '<svg stroke="currentColor" fill="currentColor" stroke-widt
 
 const GOTO_LINE_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M4.268 21a2 2 0 0 0 1.727 1H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v3"></path><path d="m9 18-1.5-1.5"></path><circle cx="5" cy="14" r="3"></circle><g stroke="currentColor" stroke-width="1" text-anchor="middle" font-family="monospace" font-size="8"><text x="10" y="10">1</text><text x="14" y="18">2</text></g></svg>';
 
+const FIND_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>';
+
 const SHARE_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><path d="M16 6l-4-4-4 4"></path><path d="M12 2v13"></path></svg>';
 
 // A− and A+: the letter A with a minus or a plus beside it.
@@ -55,7 +57,7 @@ function flashButtonText(btn, text, duration = 1200) {
  */
 function toggleMarkdownPreview({ editorEl, previewEl, toggleBtn, editorView, isPreview, storageKey }) {
   if (!isPreview) {
-    const content = editorView ? editorView.state.doc.toString() : '';
+    const content = editorView ? (window.cmGetText ? window.cmGetText(editorView) : editorView.state.doc.toString()) : '';
     previewEl.innerHTML = window.marked.parse(content);
     editorEl.style.display = 'none';
     previewEl.style.display = 'block';
@@ -81,6 +83,8 @@ function toggleMarkdownPreview({ editorEl, previewEl, toggleBtn, editorView, isP
  * @param {boolean} opts.copyContent  - Show copy-content button
  * @param {boolean} opts.preview      - Show preview toggle
  * @param {boolean} opts.wrap         - Show wrap toggle
+ * @param {boolean} opts.find         - Show the find button (Cmd/Ctrl+F)
+ * @param {boolean} opts.gotoLine     - Show the go-to-line button (Ctrl+G)
  * @param {boolean} opts.save         - Show save button
  * @param {boolean} opts.openExternal - Show open-in-default-app button
  * @param {boolean} opts.share        - Show share button
@@ -110,6 +114,7 @@ function toggleMarkdownPreview({ editorEl, previewEl, toggleBtn, editorView, isP
  *   .setPath(text)
  *   .setPreviewMode(active)
  *   .setWrapMode(active)
+ *   .setDirty(dirty)  - The title shows that there are unsaved changes
  *   .flashSave()
  *   .on(event, handler)  - Attach event handlers
  */
@@ -123,6 +128,15 @@ function createViewerToolbar(opts = {}) {
   const titleEl = document.createElement('span');
   titleEl.className = 'viewer-toolbar-title';
   infoEl.appendChild(titleEl);
+
+  // A dot after the title while there are unsaved changes, as an editor tab has.
+  const dirtyEl = document.createElement('span');
+  dirtyEl.className = 'viewer-toolbar-dirty';
+  dirtyEl.textContent = '●';
+  dirtyEl.title = 'Unsaved changes';
+  dirtyEl.setAttribute('aria-label', 'Unsaved changes');
+  dirtyEl.hidden = true;
+  infoEl.appendChild(dirtyEl);
 
   const pathEl = document.createElement('span');
   pathEl.className = 'viewer-toolbar-path';
@@ -195,11 +209,23 @@ function createViewerToolbar(opts = {}) {
     controlsEl.appendChild(wrapBtn);
   }
 
+  const isMacToolbar = /Mac|iPhone|iPad/.test(navigator.platform);
+  let findBtn = null;
+  if (opts.find) {
+    findBtn = document.createElement('button');
+    findBtn.className = 'fp-toolbar-btn fp-icon-btn';
+    findBtn.title = `Find and replace (${isMacToolbar ? 'Cmd+F' : 'Ctrl+F'})`;
+    findBtn.setAttribute('aria-label', 'Find and replace');
+    findBtn.innerHTML = FIND_ICON;
+    controlsEl.appendChild(findBtn);
+  }
+
   let gotoLineBtn = null;
   if (opts.gotoLine) {
     gotoLineBtn = document.createElement('button');
     gotoLineBtn.className = 'fp-toolbar-btn fp-icon-btn';
-    gotoLineBtn.title = 'Go to line (Cmd+G)';
+    gotoLineBtn.title = 'Go to line (Ctrl+G)';
+    gotoLineBtn.setAttribute('aria-label', 'Go to line');
     gotoLineBtn.innerHTML = GOTO_LINE_ICON;
     controlsEl.appendChild(gotoLineBtn);
   }
@@ -284,9 +310,12 @@ function createViewerToolbar(opts = {}) {
     copyPathBtn,
     copyContentBtn,
     diffToggleBtn,
+    findBtn,
     gotoLineBtn,
+    dirtyEl,
 
     setTitle(text) { titleEl.textContent = text; },
+    setDirty(dirty) { dirtyEl.hidden = !dirty; },
     setPath(text) { pathEl.textContent = text; },
 
     setPreviewMode(active) {

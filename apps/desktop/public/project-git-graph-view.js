@@ -2795,7 +2795,8 @@ function gitGraphBindKeyboard(project, state, body) {
     if (gitGraphIsEditableTarget(e.target) && e.key !== 'Escape') return;
     // Keys in the open file's viewer are the viewer's: its arrows, its search.
     // Esc still closes the file expanded over the window.
-    const inViewer = e.target && typeof e.target.closest === 'function' && e.target.closest('.gg-inline-diff-body');
+    // The file expanded over the window (#gg-diff-host) and any editor count as the viewer too.
+    const inViewer = e.target && typeof e.target.closest === 'function' && e.target.closest('.gg-inline-diff-body, #gg-diff-host, .cm-editor');
     if (inViewer && !(e.key === 'Escape' && document.getElementById('gg-diff-host'))) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {

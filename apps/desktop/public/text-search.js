@@ -77,19 +77,88 @@
     return m ? expandReplacement(text, m) : text;
   }
 
-  /** `replace` with $$, $&, $1…$99 and $<name> taken from the match `m`, as String.prototype.replace does. */
+  const GROUP_TOKEN = /^\$(\$|&|`|'|\d{1,2}|<([^>]*)>)/;
+
+  /**
+   * `replace` with what a regular expression's match `m` gives it, as VS Code
+   * does: $$, $&, $1…$99 and $<name> as String.prototype.replace takes them;
+   * \n a new line, \t a tab, \\ a backslash; and \u, \l (the next character
+   * upper or lower case) and \U, \L (all of it) before a group: "\U$1".
+   */
   function expandReplacement(replace, m) {
-    return replace.replace(/\$(\$|&|`|'|\d{1,2}|<([^>]*)>)/g, (whole, token, name) => {
-      if (token === '$') return '$';
-      if (token === '&') return m[0];
-      if (token === '`' || token === "'") return whole;
-      if (name !== undefined) return m.groups && Object.hasOwn(m.groups, name) ? (m.groups[name] ?? '') : whole;
-      const two = Number(token);
-      if (token.length === 2 && two < m.length) return m[two] ?? '';
-      const one = Number(token[0]);
-      if (one > 0 && one < m.length) return (m[one] ?? '') + token.slice(1);
-      return whole;
-    });
+    let out = '';
+    let caseOps = [];
+    for (let i = 0; i < replace.length; i += 1) {
+      const c = replace[i];
+      if (c === '\\' && i + 1 < replace.length) {
+        const next = replace[i + 1];
+        if (next === '\\') { out += '\\'; i += 1; continue; }
+        if (next === 'n') { out += '\n'; i += 1; continue; }
+        if (next === 't') { out += '\t'; i += 1; continue; }
+        if (next === 'u' || next === 'l' || next === 'U' || next === 'L') { caseOps.push(next); i += 1; continue; }
+      }
+      const group = c === '$' ? GROUP_TOKEN.exec(replace.slice(i)) : null;
+      if (!group) { out += c; continue; }
+      i += group[0].length - 1;
+      const [whole, token, name] = group;
+      if (token === '$') { out += '$'; continue; }
+      if (token === '`' || token === "'") { out += whole; continue; }
+      let piece = null;
+      let rest = '';
+      if (token === '&') piece = m[0];
+      else if (name !== undefined) piece = m.groups && Object.hasOwn(m.groups, name) ? (m.groups[name] ?? '') : null;
+      else if (token.length === 2 && Number(token) < m.length) piece = m[Number(token)] ?? '';
+      else if (Number(token[0]) > 0 && Number(token[0]) < m.length) { piece = m[Number(token[0])] ?? ''; rest = token.slice(1); }
+      if (piece === null) { out += whole; continue; }
+      out += applyCaseOps(piece, caseOps) + rest;
+      caseOps = [];
+    }
+    return out;
+  }
+
+  /** `text` with \u \l (one character each) and \U \L (the rest of it) applied in order. */
+  function applyCaseOps(text, ops) {
+    if (!ops.length) return text;
+    let out = '';
+    let all = '';
+    let op = 0;
+    for (const ch of text) {
+      if (all === 'U') { out += ch.toUpperCase(); continue; }
+      if (all === 'L') { out += ch.toLowerCase(); continue; }
+      const next = op < ops.length ? ops[op++] : '';
+      if (next === 'U' || next === 'L') all = next;
+      out += next === 'u' || next === 'U' ? ch.toUpperCase() : next === 'l' || next === 'L' ? ch.toLowerCase() : ch;
+    }
+    return out;
+  }
+
+  /**
+   * `replacement` written in the case of `matched`, as VS Code's Preserve
+   * Case: all upper or all lower case, a capital first letter, or the same
+   * for each part of a name joined by - or _ ("foo-bar" → "Baz-Qux" for
+   * "Foo-Bar").
+   */
+  function preserveCase(matched, replacement) {
+    const match = String(matched ?? '');
+    const text = String(replacement ?? '');
+    if (!match || !text) return text;
+    const hyphens = sameParts(match, text, '-');
+    const underscores = sameParts(match, text, '_');
+    if (hyphens !== underscores) {
+      const sep = hyphens ? '-' : '_';
+      const parts = match.split(sep);
+      return text.split(sep).map((part, i) => preserveCase(parts[i], part)).join(sep);
+    }
+    if (match.toUpperCase() === match && match.toLowerCase() !== match) return text.toUpperCase();
+    if (match.toLowerCase() === match && match.toUpperCase() !== match) return text.toLowerCase();
+    const first = match[0];
+    if (first.toUpperCase() === first && first.toLowerCase() !== first) return text[0].toUpperCase() + text.slice(1);
+    if (first.toLowerCase() === first && first.toUpperCase() !== first) return text[0].toLowerCase() + text.slice(1);
+    return text;
+  }
+
+  function sameParts(match, text, sep) {
+    return match.includes(sep) && text.includes(sep) && match.split(sep).length === text.split(sep).length;
   }
 
   /**
@@ -154,7 +223,7 @@
     return out;
   }
 
-  const api = { escapeRegExp, buildSearchRegExp, matchesInLine, replacementFor, expandReplacement, globListMatcher };
+  const api = { escapeRegExp, buildSearchRegExp, matchesInLine, replacementFor, expandReplacement, preserveCase, globListMatcher };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TextSearch = api;
 })(typeof window !== 'undefined' ? window : globalThis);

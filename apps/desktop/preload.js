@@ -375,6 +375,8 @@ contextBridge.exposeInMainWorld('api', {
   getFileAtCommit: (projectPath, relativePath, hash, repoPath) => ipcRenderer.invoke('get-file-at-commit', projectPath, relativePath, hash, repoPath),
   openFileWithApp: (filePath, projectRoot, appPath) => ipcRenderer.invoke('open-file-with-app', filePath, projectRoot, appPath),
   saveFileForPanel: (filePath, content) => ipcRenderer.invoke('save-file-for-panel', filePath, content),
+  // 'save', 'discard' or 'cancel', for an editor with unsaved changes.
+  confirmUnsavedChanges: (fileName) => ipcRenderer.invoke('confirm-unsaved-changes', fileName),
   watchFile: (filePath) => ipcRenderer.invoke('watch-file', filePath),
   unwatchFile: (filePath) => ipcRenderer.invoke('unwatch-file', filePath),
   onFileChanged: (callback) => {

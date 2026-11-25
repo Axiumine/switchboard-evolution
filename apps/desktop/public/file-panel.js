@@ -187,6 +187,11 @@ function handleClose() {
   }
 }
 
+/** A diff editor's text with its file's line breaks (CRLF stays CRLF). */
+function diffEditorText(view) {
+  return window.cmGetText ? window.cmGetText(view) : view.state.doc.toString();
+}
+
 async function handleDiffSave() {
   const state = currentPanelSessionId ? getSessionState(currentPanelSessionId) : null;
   const tab = state?.currentTab;
@@ -194,9 +199,9 @@ async function handleDiffSave() {
 
   let content;
   if (tab._diffMode === 'inline') {
-    content = tab.editorView.state.doc.toString();
+    content = diffEditorText(tab.editorView);
   } else if (tab.editorView.b) {
-    content = tab.editorView.b.state.doc.toString();
+    content = diffEditorText(tab.editorView.b);
   }
   if (content == null) return;
 
@@ -407,6 +412,10 @@ async function openFileInPanel(sessionId, filePath, location = {}) {
     showPanel(state);
     return;
   }
+  // Unsaved changes in the file shown: Save, Don't Save or stay on it.
+  if (currentPanelSessionId === sessionId && state.currentTab?.type === 'file' && fpViewerPanel.filePath
+    && !(await fpViewerPanel.confirmLeave())) return;
+  if (state.fileOpenRequest !== request) return;
   const previousTab = state.currentTab;
   let result;
   try { result = await window.api.readFileForPanel(filePath); } catch (err) { result = { ok: false, error: err.message }; }
@@ -630,9 +639,9 @@ async function handleDiffAction(sessionId, tab, action) {
     let editedContent = null;
     if (tab.editorView) {
       if (tab._diffMode === 'inline') {
-        editedContent = tab.editorView.state.doc.toString();
+        editedContent = diffEditorText(tab.editorView);
       } else if (tab.editorView.b) {
-        editedContent = tab.editorView.b.state.doc.toString();
+        editedContent = diffEditorText(tab.editorView.b);
       }
     }
 
