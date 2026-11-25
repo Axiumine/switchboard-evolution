@@ -62,6 +62,11 @@ export function toolFilePath(name: string, input: unknown): string | null {
   return typeof path === 'string' && path ? path : null;
 }
 
+/** Whether a path a tool names is spelled as a folder (a trailing slash), not a file: its open button then says so. */
+export function isFolderPath(path: string): boolean {
+  return /[\\/]$/.test(stripLocation(path.trim()));
+}
+
 /** A plan Claude wrote in plan mode: its markdown, where it is saved, and its title. */
 export type PlanRef = { text: string; file: string | null; title: string };
 

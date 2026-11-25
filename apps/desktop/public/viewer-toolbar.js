@@ -15,16 +15,21 @@ const PREVIEW_ICON = '<svg stroke="currentColor" fill="currentColor" stroke-widt
 
 const GOTO_LINE_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M4.268 21a2 2 0 0 0 1.727 1H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v3"></path><path d="m9 18-1.5-1.5"></path><circle cx="5" cy="14" r="3"></circle><g stroke="currentColor" stroke-width="1" text-anchor="middle" font-family="monospace" font-size="8"><text x="10" y="10">1</text><text x="14" y="18">2</text></g></svg>';
 
-const OPEN_EXTERNAL_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg>';
-
 const SHARE_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><path d="M16 6l-4-4-4 4"></path><path d="M12 2v13"></path></svg>';
-
-const FOLDER_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>';
 
 // A− and A+: the letter A with a minus or a plus beside it.
 const FONT_SMALLER_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M2 19 7.5 5h1L14 19"/><path d="M4.4 13.5h7.2"/><path d="M16 12h6"/></svg>';
 
 const FONT_LARGER_ICON = '<svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M2 19 7.5 5h1L14 19"/><path d="M4.4 13.5h7.2"/><path d="M16 12h6"/><path d="M19 9v6"/></svg>';
+
+// The buttons that open something take the app's own icons for it
+// (action-icons.js, loaded before this file, the same on the phone): the
+// default application, the file manager, a window of its own.
+function viewerActionIconSvg(name) {
+  const icons = typeof window !== 'undefined' && window.ActionIcons ? window.ActionIcons
+    : typeof ActionIcons !== 'undefined' ? ActionIcons : null;
+  return icons ? icons.actionIconSvg(name, 14) : '';
+}
 
 const CLOSE_ICON = '<svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 512 512" width="14" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M400 145.49 366.51 112 256 222.51 145.49 112 112 145.49 222.51 256 112 366.51 145.49 400 256 289.49 366.51 400 400 366.51 289.49 256 400 145.49z"></path></svg>';
 
@@ -214,7 +219,7 @@ function createViewerToolbar(opts = {}) {
     openExternalBtn.className = 'fp-toolbar-btn fp-icon-btn';
     openExternalBtn.title = 'Open in default app';
     openExternalBtn.setAttribute('aria-label', openExternalBtn.title);
-    openExternalBtn.innerHTML = OPEN_EXTERNAL_ICON;
+    openExternalBtn.innerHTML = viewerActionIconSvg('fileOutput');
     controlsEl.appendChild(openExternalBtn);
   }
 
@@ -236,7 +241,7 @@ function createViewerToolbar(opts = {}) {
     revealBtn.className = 'fp-toolbar-btn fp-icon-btn';
     revealBtn.title = 'Reveal in ' + manager;
     revealBtn.setAttribute('aria-label', revealBtn.title);
-    revealBtn.innerHTML = FOLDER_ICON;
+    revealBtn.innerHTML = viewerActionIconSvg('folderOpen');
     controlsEl.appendChild(revealBtn);
   }
 
@@ -246,7 +251,7 @@ function createViewerToolbar(opts = {}) {
     popOutBtn.className = 'fp-toolbar-btn fp-icon-btn';
     popOutBtn.title = 'Open in a window of its own';
     popOutBtn.setAttribute('aria-label', popOutBtn.title);
-    popOutBtn.innerHTML = typeof ICONS !== 'undefined' ? ICONS.popOut(14) : OPEN_EXTERNAL_ICON;
+    popOutBtn.innerHTML = typeof ICONS !== 'undefined' ? ICONS.popOut(14) : viewerActionIconSvg('newWindow');
     controlsEl.appendChild(popOutBtn);
   }
 

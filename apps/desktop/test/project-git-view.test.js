@@ -289,16 +289,16 @@ test('a collapsed folder that hides the selected file is highlighted in its plac
   assert.equal(folder.className, 'git-folder-row selected');
 });
 
-test('the Git tab switches between Changes, History, Worktrees, Pull Requests and Actions, in that order', () => {
+test('the Git tab switches between History, Changes, Worktrees, Pull Requests and Actions, in that order', () => {
   const ctx = loadContext();
-  assert.equal(ctx.projectGitView('p1'), 'changes');
+  assert.equal(ctx.projectGitView('p1'), 'history', 'a project opens on History');
   ctx.setProjectGitView('p1', 'worktrees');
   assert.equal(ctx.projectGitView('p1'), 'worktrees');
   ctx.setProjectGitView('p1', 'nonsense');
   assert.equal(ctx.projectGitView('p1'), 'worktrees', 'an unknown view is ignored');
   const html = ctx.gitWorkspaceNavHtml('worktrees');
   const labels = [...html.matchAll(/data-git-view="(\w+)"[^>]*>([^<]+)</g)].map(m => [m[1], m[2]]);
-  assert.deepEqual(labels, [['changes', 'Changes'], ['history', 'History'], ['worktrees', 'Worktrees'], ['pulls', 'Pull Requests'], ['actions', 'Actions']]);
+  assert.deepEqual(labels, [['history', 'History'], ['changes', 'Changes'], ['worktrees', 'Worktrees'], ['pulls', 'Pull Requests'], ['actions', 'Actions']]);
   assert.match(html, /id="git-workspace-worktrees-tab" class="git-workspace-nav-btn active"/);
   ctx.setProjectGitView('p1', 'pulls');
   assert.equal(ctx.projectGitView('p1'), 'pulls');
@@ -313,6 +313,7 @@ test('the chosen repository goes along from Changes and History to Pull Requests
   ctx.gitGraphState = () => states.history;
   ctx.prTabState = () => states.pulls;
   ctx.actTabState = () => states.actions;
+  ctx.gitTabState('p2').workspaceView = 'changes';
   ctx.gitTabState('p2').selectedRepo = '/code/api';
   ctx.setProjectGitView('p2', 'pulls');
   assert.equal(states.pulls.selectedRepo, '/code/api');
@@ -321,11 +322,47 @@ test('the chosen repository goes along from Changes and History to Pull Requests
   assert.equal(states.actions.selectedRepo, '/code/web');
   ctx.setProjectGitView('p2', 'history');
   assert.equal(states.history.selectedRepo, '/code/web');
-  // Worktrees has no repository of its own: the next view keeps its own.
+  // Worktrees takes the repository too, and hands it on.
+  ctx.wtTabState = () => states.worktrees;
+  states.worktrees = { selectedRepo: null };
   ctx.setProjectGitView('p2', 'worktrees');
-  states.history.selectedRepo = '/code/api';
+  assert.equal(states.worktrees.selectedRepo, '/code/web');
+  states.worktrees.selectedRepo = '/code/api';
   ctx.setProjectGitView('p2', 'changes');
   assert.equal(ctx.gitTabState('p2').selectedRepo, '/code/api');
+});
+
+test('several repositories shown go along between History, Pull Requests and Worktrees', () => {
+  const states = {
+    history: { selectedRepo: '/code/api', selectedRepos: ['/code/api', '/code/web'] },
+    pulls: { selectedRepo: null }, worktrees: { selectedRepo: null }, actions: { selectedRepo: null },
+  };
+  const ctx = loadContext();
+  ctx.RepoSelection = require('../public/repo-selection');
+  ctx.gitGraphState = () => states.history;
+  ctx.prTabState = () => states.pulls;
+  ctx.wtTabState = () => states.worktrees;
+  ctx.actTabState = () => states.actions;
+  ctx.gitTabState('p3').workspaceView = 'history';
+  ctx.setProjectGitView('p3', 'pulls');
+  assert.deepEqual([...states.pulls.selectedRepos], ['/code/api', '/code/web']);
+  assert.equal(states.pulls.selectedRepo, '/code/api');
+  ctx.setProjectGitView('p3', 'worktrees');
+  assert.deepEqual([...states.worktrees.selectedRepos], ['/code/api', '/code/web']);
+  // Actions shows one repository: the primary.
+  ctx.setProjectGitView('p3', 'actions');
+  assert.equal(states.actions.selectedRepo, '/code/api');
+  // Back from Actions with a repository History shows: History keeps both.
+  states.actions.selectedRepo = '/code/web';
+  ctx.setProjectGitView('p3', 'history');
+  assert.equal(states.history.selectedRepo, '/code/web');
+  assert.deepEqual([...states.history.selectedRepos], ['/code/api', '/code/web']);
+  // One History does not show: that one alone.
+  ctx.setProjectGitView('p3', 'actions');
+  states.actions.selectedRepo = '/code/docs';
+  ctx.setProjectGitView('p3', 'pulls');
+  assert.equal(states.pulls.selectedRepo, '/code/docs');
+  assert.deepEqual([...states.pulls.selectedRepos], ['/code/docs']);
 });
 
 // --- Staging: lists by side, stage / unstage buttons ---

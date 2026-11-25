@@ -4,6 +4,11 @@
 // remove the merged ones) plus Switchboard's own: start a session or a
 // terminal in a worktree, attach it to the project. Git runs in main
 // (worktrees.js); this file paints and asks.
+// Repository tabs (git-repo-tabs.js), as History has them, filter the list: a
+// name shows that repository alone, the checkbox before it adds another. A
+// repository here is a group by its git common directory, so a tab is a group,
+// and the selection (shared with History and Pull Requests) is mapped to the
+// groups through the folders attached to each.
 
 const projectWorktreesTabState = new Map();
 
@@ -79,6 +84,11 @@ function wtTabState(projectId) {
   if (!projectWorktreesTabState.has(projectId)) {
     projectWorktreesTabState.set(projectId, {
       repositories: null,
+      // The repositories shown (git-repo-tabs.js): selectedRepo is the primary.
+      // Kept as the tabs' keys (wtGroupKey), taken from what other views hand over.
+      selectedRepo: null,
+      selectedRepos: [],
+      tabsHtml: '',
       settings: null,
       query: '',
       // The filter combo's choice, kept while the app runs (not saved).
@@ -129,6 +139,97 @@ function wtFileManager() {
 
 function wtOpenLabel() {
   return `Open in ${wtFileManager()}`;
+}
+
+/** The icon of "Open in Finder…": a folder opening in the file manager. */
+function wtOpenIcon(size = 13) {
+  return typeof ICONS !== 'undefined' && ICONS.folderOpen ? ICONS.folderOpen(size) : PICONS.folder(size);
+}
+
+// --- Repository tabs ---
+
+/** The key a repository's tab carries: the folder it is attached as, or its git directory when it was only found inside a folder. */
+function wtGroupKey(group) {
+  return group.nested ? group.id : ((group.attachedFolders || [])[0] ?? group.id);
+}
+
+/** Whether a selection (folder paths, as History and Pull Requests keep it) names this repository: any folder it is attached as. */
+function wtGroupSelected(group, paths) {
+  const list = paths || [];
+  return list.includes(group.id) || (group.attachedFolders || []).some(folder => list.includes(folder));
+}
+
+/** The selection that shows this repository alone, as a click on its tab's name makes. */
+function wtSelectionForGroup(group) {
+  const key = wtGroupKey(group);
+  return { primary: key, paths: [key] };
+}
+
+/** The repositories the list shows: those the selection names, else the first. */
+function wtShownGroups(state) {
+  const groups = state.repositories || [];
+  if (groups.length <= 1) return groups;
+  const paths = [...(state.selectedRepos || []), ...(state.selectedRepo ? [state.selectedRepo] : [])];
+  const shown = groups.filter(group => wtGroupSelected(group, paths));
+  return shown.length ? shown : [groups[0]];
+}
+
+/** The tabs' items: one per repository. */
+function wtTabRepos(groups) {
+  return (groups || []).map(group => ({ path: wtGroupKey(group), label: group.name, title: group.mainPath }));
+}
+
+/** The selection in the tabs' terms: the keys of the repositories shown, and the primary's. */
+function wtTabSelection(state) {
+  const shown = wtShownGroups(state);
+  const primary = shown.find(group => wtGroupSelected(group, [state.selectedRepo])) || shown[0];
+  return { primary: primary ? wtGroupKey(primary) : null, paths: shown.map(wtGroupKey) };
+}
+
+/** Make the state hold the selection as the tabs' keys, whatever another view handed over. */
+function wtSyncSelection(state) {
+  if (!(state.repositories || []).length) return;
+  const selection = wtTabSelection(state);
+  state.selectedRepo = selection.primary;
+  state.selectedRepos = [...selection.paths];
+}
+
+/** Each repository's color: the same as in History for a folder, the rest after them. */
+function wtGroupColors(project, state) {
+  return typeof gitRepoColors === 'function' ? gitRepoColors(project, wtTabRepos(state.repositories)) : {};
+}
+
+function wtTabsHtml(project, state) {
+  if (typeof gitRepoTabsHtml !== 'function') return '';
+  return gitRepoTabsHtml(wtTabRepos(state.repositories), wtTabSelection(state), { multi: true, colors: wtGroupColors(project, state) });
+}
+
+/** The tabs again, when they or their selection changed. */
+function wtPaintTabs(project, state, body) {
+  const slot = body.querySelector('#wt-tabs');
+  if (!slot) return;
+  const html = wtTabsHtml(project, state);
+  if (state.tabsHtml === html && (slot.childElementCount > 0 || !html)) return;
+  state.tabsHtml = html;
+  slot.innerHTML = html;
+  if (typeof gitWireRepoTabs !== 'function') return;
+  const repos = wtTabRepos(state.repositories);
+  const changed = () => {
+    wtPaintTabs(project, state, body);
+    paintWorktreeList(project, state, body);
+  };
+  gitWireRepoTabs(slot, repos, {
+    onOnly: (repo) => {
+      wtSyncSelection(state);
+      if (gitRepoSelectOnly(state, repos, repo)) changed();
+    },
+    onToggle: (repo) => {
+      wtSyncSelection(state);
+      if (!gitRepoToggle(state, repos, repo)) return false;
+      changed();
+      return true;
+    },
+  });
 }
 
 // --- Order, filter, sessions ---
@@ -357,7 +458,7 @@ function wtRowHtml(wt, key, live, repo = null, order = 'default') {
       <div class="wt-row-actions">
         ${wt.exists ? `<button type="button" class="ws-btn ws-btn--sm" data-act="session" title="Start a session or a terminal in this worktree">${PICONS.plus(11)}<span>Session</span>${PICONS.chevronDown(10)}</button>
         ${wtCanShowChanges(wt) ? wtChangesButtonHtml(wt) : ''}
-        <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="open" title="${wtAttr(wtOpenLabel())}">${PICONS.folder(13)}</button>` : ''}
+        <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="open" title="${wtAttr(wtOpenLabel())}">${wtOpenIcon(13)}</button>` : ''}
         <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="more" title="More">${PICONS.dots(13)}</button>
       </div>
     </div>`;
@@ -404,7 +505,10 @@ function wtListHtml(project, state) {
   const settings = state.settings || {};
   const collapsed = new Set(settings.collapsedGroups || []);
   const live = wtSessionsByWorktree(repositories);
-  const groups = wtVisibleRepositories(repositories, state.query, settings.sortOrder || 'default', state.filter, live);
+  // Only the repositories the tabs show; with several, each header takes its color.
+  const shown = wtShownGroups(state);
+  const colors = shown.length > 1 ? wtGroupColors(project, state) : {};
+  const groups = wtVisibleRepositories(shown, state.query, settings.sortOrder || 'default', state.filter, live);
   if (!groups.length) {
     const filter = WT_FILTERS.find(([key]) => key === state.filter && key !== 'all');
     if (!filter) return `<div class="git-empty-state"><div class="git-empty-title">Nothing matches “${escapeHtml(state.query)}”</div></div>`;
@@ -425,8 +529,9 @@ function wtListHtml(project, state) {
         state.rows.set(key, { repo, wt, live: sessions });
         return wtRowHtml(wt, key, sessions, repo, settings.sortOrder || 'default');
       }).join('');
+    const color = colors[wtGroupKey(repo)];
     return `
-      <section class="git-section wt-repo" data-repo="${groupIndex}">
+      <section class="git-section wt-repo${color ? ' is-colored' : ''}" data-repo="${groupIndex}"${color ? ` style="--repo-color:${wtAttr(color)}"` : ''}>
         <div class="git-section-heading wt-repo-head">
           <button type="button" class="wt-repo-toggle" data-act="toggle" aria-expanded="${closed ? 'false' : 'true'}" title="${closed ? 'Show' : 'Hide'} its worktrees">${closed ? PICONS.chevronRight(10) : PICONS.chevronDown(10)}<span class="wt-repo-name">${escapeHtml(repo.name)}</span></button>
           <span class="wt-repo-path mono" title="${wtAttr(repo.mainPath)}">${escapeHtml(wtShortPath(repo.mainPath))}</span>
@@ -443,16 +548,23 @@ function wtListHtml(project, state) {
 
 function wtGroups(state) {
   const settings = state.settings || {};
-  const repositories = state.repositories || [];
-  return wtVisibleRepositories(repositories, state.query, settings.sortOrder || 'default', state.filter, wtSessionsByWorktree(repositories));
+  return wtVisibleRepositories(wtShownGroups(state), state.query, settings.sortOrder || 'default', state.filter, wtSessionsByWorktree(state.repositories || []));
 }
 
 function paintWorktreeList(project, state, body) {
   const list = body.querySelector('#wt-list');
   if (!list) return;
+  wtSyncSelection(state);
+  wtPaintTabs(project, state, body);
   list.innerHTML = wtListHtml(project, state);
   const summary = body.querySelector('#wt-summary');
-  if (summary) summary.textContent = wtSummaryText(state.repositories);
+  if (summary) summary.textContent = wtSummaryText(wtShownGroups(state));
+  // New, Remove merged and Prune work on the repositories shown.
+  const hasRepos = wtShownGroups(state).some(repo => !repo.error);
+  for (const id of ['wt-new', 'wt-merged', 'wt-prune']) {
+    const button = body.querySelector(`#${id}`);
+    if (button) button.disabled = !hasRepos;
+  }
   const groups = wtGroups(state);
 
   list.querySelector('[data-act="attach-folder"]')?.addEventListener('click', () => {
@@ -496,11 +608,14 @@ function wtBindNotice(project, body) {
 
 function paintWorktreesTab(project, state, body) {
   const settings = state.settings || {};
-  const hasRepos = (state.repositories || []).some(repo => !repo.error);
+  wtSyncSelection(state);
+  const hasRepos = wtShownGroups(state).some(repo => !repo.error);
+  state.tabsHtml = '';
   body.innerHTML = `
     <div class="git-tab-shell wt-shell">
+      <div id="wt-tabs"></div>
       <div class="git-tab-top">
-        <div><div class="git-tab-title">Worktrees</div><div class="git-tab-path" id="wt-summary">${escapeHtml(wtSummaryText(state.repositories))}</div></div>
+        <div><div class="git-tab-title">Worktrees</div><div class="git-tab-path" id="wt-summary">${escapeHtml(wtSummaryText(wtShownGroups(state)))}</div></div>
         <div class="wt-top-actions">
           <button type="button" class="ws-btn ws-btn--sm ws-btn--primary" id="wt-new" ${hasRepos ? '' : 'disabled'}>${PICONS.plus(11)}<span>New worktree</span></button>
           <button type="button" class="ws-btn ws-btn--sm" id="wt-merged" ${hasRepos ? '' : 'disabled'} title="Remove the worktrees whose branch is already merged">${WT_ICONS.merge(12)}<span>Remove merged</span></button>
@@ -653,7 +768,7 @@ function wtRowMenuItems(project, repo, wt, live = []) {
   if (wt.exists) {
     items.push({ label: 'New session', icon: PICONS.plus(13), submenu: wtSessionMenuItems(project, wt) });
     if (wtCanShowChanges(wt)) items.push({ label: 'Uncommitted and unpushed…', icon: WT_ICONS.gitGraph(13), onClick: () => wtChangesDialog(project, repo, wt) });
-    items.push({ label: wtOpenLabel(), icon: PICONS.folder(13), onClick: () => wtOpenFolder(project, wt.path) });
+    items.push({ label: wtOpenLabel(), icon: wtOpenIcon(13), onClick: () => wtOpenFolder(project, wt.path) });
   }
   items.push({ label: 'Copy path', icon: WT_ICONS.copy(13), onClick: () => wtCopyPath(project, wt.path) });
   const folder = wtFolderFor(project, wt);
@@ -702,15 +817,15 @@ function wtRepoMenuItems(project, repo) {
     );
   }
   items.push(
-    { label: wtOpenLabel(), icon: PICONS.folder(13), onClick: () => wtOpenFolder(project, repo.mainPath) },
+    { label: wtOpenLabel(), icon: wtOpenIcon(13), onClick: () => wtOpenFolder(project, repo.mainPath) },
     { label: 'Copy path', icon: WT_ICONS.copy(13), onClick: () => wtCopyPath(project, repo.mainPath) },
   );
   return items;
 }
 
-/** One repository: run fn on it; several: ask which first. */
+/** One repository: run fn on it; several shown: ask which of them first. */
 function wtPickRepository(project, anchor, fn) {
-  const repos = (wtTabState(project.id).repositories || []).filter(repo => !repo.error);
+  const repos = wtShownGroups(wtTabState(project.id)).filter(repo => !repo.error);
   if (repos.length === 1) return fn(repos[0]);
   showContextMenu([
     { head: 'Repository' },
@@ -762,6 +877,10 @@ function wtOpenInGitGraph(project, folder) {
     state.repositories = null;
     if (typeof gitGraphSaveUiPrefs === 'function') gitGraphSaveUiPrefs(project.id, state);
   }
+  // Leaving for History carries this view's selection over: it must be the folder just picked.
+  const own = wtTabState(project.id);
+  own.selectedRepo = folder.path;
+  own.selectedRepos = [folder.path];
   setProjectGitView(project, 'history');
   showProjectTab(project, 'git');
 }
@@ -935,7 +1054,8 @@ function wtStartPointOptions(branches) {
 
 function wtCreateDialog(project, repo) {
   const state = wtTabState(project.id);
-  const repos = (state.repositories || []).filter(item => !item.error);
+  // The repositories shown in the tabs are the ones to choose from.
+  const repos = wtShownGroups(state).filter(item => !item.error);
   if (!repos.length) return null;
   let current = repo && !repo.error ? repo : repos[0];
   const settings = state.settings || {};

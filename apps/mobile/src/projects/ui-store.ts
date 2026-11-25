@@ -10,10 +10,15 @@ import type { GitView, KnowledgeView, ProjectTab, ScrollKey, SessionView } from 
  */
 export type ProjectUi = {
   tab: ProjectTab;
-  /** The Git tab's view: Changes, History, Worktrees or Pull Requests. */
+  /** The Git tab's view: History (the default), Changes, Worktrees, Pull Requests or Actions. */
   gitView?: GitView;
-  /** The repository (folder path) Changes, History and Pull Requests show; they share it, as on the desktop. */
+  /**
+   * The repository (folder path) the Git tab's views share, as on the desktop: the primary one, which Changes and
+   * Actions show alone and the toolbar of History acts on.
+   */
   gitRepo?: string;
+  /** Every repository History, Pull Requests and Worktrees show together (the primary among them); one, or none yet, is just `gitRepo`. */
+  gitRepos?: string[];
   /** Node Knowledge: the view and the attached folder it shows. */
   knowledgeView?: KnowledgeView;
   knowledgeFolder?: string;

@@ -175,3 +175,34 @@ test('the table is a tree of folders by default, a flat list of paths on request
     assert.equal(compare.gitGraphCompareFirstPath(matrix, { fileView: 'list' }), 'README.md');
   });
 });
+
+// --- A History of several repositories: rows are named "<tag>:<hash>" ---
+
+test('a comparison of rows of several repositories asks git for the plain hashes and names the commits as the rows do', () => {
+  global.gitGraphPlainHash = (key) => String(key).replace(/^r\d+:/, '');
+  try {
+    const keyed = [
+      { hash: 'r1:#uncommitted', kind: 'uncommitted' },
+      { hash: 'r1:b2', shortHash: 'b2b2b2b', kind: 'commit', subject: 'Second' },
+      { hash: 'r0:a1', shortHash: 'a1a1a1a', kind: 'commit', subject: 'First' },
+    ];
+    const ordered = compare.gitGraphCompareOrder(keyed, ['r1:b2', 'r0:a1', 'r1:#uncommitted']);
+    assert.deepEqual(ordered, ['r0:a1', 'r1:b2', 'r1:#uncommitted']);
+    const spec = compare.gitGraphCompareSpecFor('p', '/code/web', keyed, ordered);
+    assert.deepEqual(spec.hashes, ['a1', 'b2', '#uncommitted']);
+    assert.deepEqual(spec.labels, ['a1a1a1a', 'b2b2b2b', 'Uncommitted']);
+    assert.deepEqual(spec.subjects, ['First', 'Second', 'Uncommitted Changes']);
+    assert.deepEqual(compare.gitGraphCompareStepArgs({ from: 'b2', to: '#uncommitted' }), ['b2', null], 'steps work on the spec\'s plain hashes');
+  } finally {
+    delete global.gitGraphPlainHash;
+  }
+});
+
+test('commits of different repositories get a Compare that is there but disabled, with the reason', () => {
+  const mixed = compare.gitGraphCompareButtonsHtml(2, { mixed: true });
+  assert.match(mixed, /id="gg-compare-btn"[^>]*disabled/);
+  assert.match(mixed, /id="gg-compare-window-btn"[^>]*disabled/);
+  assert.match(mixed, /Compare works within one repository/);
+  assert.doesNotMatch(compare.gitGraphCompareButtonsHtml(2), /disabled/);
+  assert.equal(compare.gitGraphCompareButtonsHtml(1, { mixed: true }), '');
+});

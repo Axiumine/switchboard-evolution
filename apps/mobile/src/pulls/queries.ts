@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
 import { create } from 'zustand';
 
 import { queryClient } from '@/remote/query';
@@ -34,20 +34,89 @@ export function useOpenPullRequests(projectId: string | undefined, folder: strin
   });
 }
 
-/** Closed and/or merged pull requests, PAGE_SIZE at a time: fetchNextPage reads the next ones. */
-export function usePagedPullRequests(projectId: string | undefined, folder: string | undefined, remote: string | undefined, states: PageState[], enabled = true) {
+/** A repository to read the pull requests of: its folder and the remote chosen there (none: the default). */
+export type PullTarget = { folder: string; remote: string | undefined };
+
+/** What one repository's open pull requests are, as the list needs it. */
+export type OpenState = { folder: string; listing: OpenListing | undefined; loading: boolean; updatedAt: number };
+
+/**
+ * The open pull requests of several repositories (the Git tab shows several at
+ * once), one query per repository, the same queries `useOpenPullRequests`
+ * makes for one. The answers come in the order of `targets`.
+ */
+export function useOpenPullRequestsMany(projectId: string | undefined, targets: readonly PullTarget[], enabled = true): OpenState[] {
   const online = useConnection((s) => s.status.state === 'online');
-  return useInfiniteQuery({
-    queryKey: ['pull-requests-page', projectId, folder, remote ?? '', states.join(',')],
-    queryFn: async ({ pageParam }) => {
-      const answer = await ask<PageListing>('get-pull-requests-page', [projectId, folder, remoteOpts(remote, { states, first: PAGE_SIZE, ...(pageParam ? { after: pageParam } : {}) })], LIST_TIMEOUT_MS);
-      if (!answer.ok) throw new Error(answer.error || 'The pull requests could not be read.');
-      return answer;
-    },
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => (last.hasNextPage && last.endCursor ? last.endCursor : undefined),
-    enabled: enabled && online && !!projectId && !!folder && states.length > 0,
-    staleTime: STALE_MS,
+  return useQueries({
+    queries: targets.map(({ folder, remote }) => ({
+      queryKey: ['pull-requests', projectId, folder, remote ?? ''],
+      queryFn: () => ask<OpenListing>('get-pull-requests', [projectId, folder, remoteOpts(remote)], LIST_TIMEOUT_MS),
+      enabled: enabled && online && !!projectId && !!folder,
+      staleTime: STALE_MS,
+    })),
+    combine: (results) => results.map((result, index): OpenState => ({ folder: targets[index].folder, listing: result.data, loading: result.isLoading, updatedAt: result.dataUpdatedAt })),
+  });
+}
+
+/** One repository's closed/merged pages so far, as the list needs them. */
+export type PagedState = {
+  folder: string;
+  /** The pages read, in order. */
+  pages: PageListing[];
+  /** The first page is on its way. */
+  loading: boolean;
+  /** The next page is on its way. */
+  loadingMore: boolean;
+  /** The last page's error, if it failed. */
+  error: string | null;
+  /** Where the next page starts, when GitHub has one. */
+  next: string | null;
+  /** GitHub's count of the pull requests in these states. */
+  totalCount: number | undefined;
+};
+
+/** The key a repository's pages are kept under: they belong to one remote and one set of states. */
+export function pagesKey(target: PullTarget, states: readonly PageState[]): string {
+  return `${target.folder}|${target.remote ?? ''}|${states.join(',')}`;
+}
+
+/**
+ * Closed and/or merged pull requests of several repositories, PAGE_SIZE at a
+ * time: one query per repository and page. `cursors` (by `pagesKey`) are where
+ * each page after the first starts, as earlier pages said (`next`); the view
+ * adds one to read the next. The answers come in the order of `targets`.
+ */
+export function usePagedPullRequestsMany(
+  projectId: string | undefined, targets: readonly PullTarget[], states: PageState[], cursors: Record<string, string[]>, enabled = true,
+): PagedState[] {
+  const online = useConnection((s) => s.status.state === 'online');
+  const entries = targets.flatMap((target, at) => [null, ...(cursors[pagesKey(target, states)] ?? [])].map((cursor) => ({ ...target, cursor, at })));
+  return useQueries({
+    queries: entries.map(({ folder, remote, cursor }) => ({
+      queryKey: ['pull-requests-page', projectId, folder, remote ?? '', states.join(','), cursor ?? ''],
+      queryFn: async () => {
+        const answer = await ask<PageListing>('get-pull-requests-page', [projectId, folder, remoteOpts(remote, { states, first: PAGE_SIZE, ...(cursor ? { after: cursor } : {}) })], LIST_TIMEOUT_MS);
+        if (!answer.ok) throw new Error(answer.error || 'The pull requests could not be read.');
+        return answer;
+      },
+      enabled: enabled && online && !!projectId && !!folder && states.length > 0,
+      staleTime: STALE_MS,
+    })),
+    combine: (results) => targets.map((target, at): PagedState => {
+      const mine = results.filter((_, index) => entries[index].at === at);
+      const pages = mine.flatMap((result) => (result.data ? [result.data] : []));
+      const last = mine[mine.length - 1];
+      const lastPage = last?.data;
+      return {
+        folder: target.folder,
+        pages,
+        loading: mine.length === 1 && !!last?.isLoading,
+        loadingMore: mine.length > 1 && !!last?.isLoading,
+        error: last?.error ? (last.error as Error).message : null,
+        next: lastPage?.hasNextPage && lastPage.endCursor ? lastPage.endCursor : null,
+        totalCount: lastPage?.totalCount,
+      };
+    }),
   });
 }
 

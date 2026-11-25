@@ -229,7 +229,7 @@ function knRenderSymbol(project, folder, box, d) {
         ${x.label ? `<span class="kn-label">${escapeHtml(x.label)}</span>` : ''}
         <span class="kn-spacer"></span>
         <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="trace-symbol" title="Who calls it and what it calls">${PICONS.branch(11)}<span>Trace</span></button>
-        <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="open-symbol">${PICONS.open(11)}<span>Open in Files</span></button>
+        <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="open-symbol">${ICONS.folderSearch(11)}<span>Open in Files</span></button>
         ${close}
       </div>
       <div class="kn-symbol-where mono">${escapeHtml(where)}</div>

@@ -53,7 +53,8 @@ const ACT_ICONS = {
   stop: actSvg('<rect x="6" y="6" width="12" height="12" rx="1"/>'),
   calendar: actSvg('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
   timer: actSvg('<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>'),
-  external: actSvg('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'),
+  // A web page (GitHub's own, opened in the app): the arrow out of a box means a window of its own.
+  globe: actSvg('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'),
   database: actSvg('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>'),
   rocket: actSvg('<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>'),
   server: actSvg('<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>'),
@@ -279,7 +280,7 @@ function actSideHtml(data, { showAll = false } = {}) {
       page.kind === 'runs' && String(page.workflowId) === String(w.id), off ? `<span class="act-nav-tag">${escapeHtml(off.startsWith('Disabled') ? 'Disabled' : off)}</span>` : '');
   }).join('');
   const more = list.length > shown.length ? `<button type="button" class="act-nav-more" data-act="nav-more">Show more workflows…</button>` : '';
-  const external = ACT_ICONS.external(11);
+  const external = ACT_ICONS.globe(11);
   const manage = [
     item('data-act="nav-caches"', 'Caches', page.kind === 'caches', '', ACT_ICONS.database(13)),
     item('data-act="nav-deployments"', 'Deployments', page.kind === 'deployments', '', ACT_ICONS.rocket(13)),
@@ -287,7 +288,7 @@ function actSideHtml(data, { showAll = false } = {}) {
     item('data-act="nav-github" data-page="attestations" title="Opens GitHub\'s page in the app"', 'Attestations', false, `<span class="act-nav-ext">${external}</span>`, ACT_ICONS.shield(13)),
     item('data-act="nav-github" data-page="usageMetrics" title="Opens GitHub\'s page in the app"', 'Usage metrics', false, `<span class="act-nav-ext">${external}</span>`, ACT_ICONS.chart(13)),
     item('data-act="nav-github" data-page="performanceMetrics" title="Opens GitHub\'s page in the app"', 'Performance metrics', false, `<span class="act-nav-ext">${external}</span>`, ACT_ICONS.gauge(13)),
-    data.workflows.data?.lockfile ? item('data-act="nav-lockfile" title="Opens .github/workflows/actions.lock"', 'Lockfile', false, `<span class="act-nav-ext">${external}</span>`, ACT_ICONS.lock(13)) : '',
+    data.workflows.data?.lockfile ? item('data-act="nav-lockfile" title="Opens .github/workflows/actions.lock"', 'Lockfile', false, `<span class="act-nav-ext">${ACT_ICONS.file(11)}</span>`, ACT_ICONS.lock(13)) : '',
   ].join('');
   return `
     <div class="act-side-section">
@@ -386,16 +387,15 @@ function actPaint(project, state, body) {
 }
 
 function actWireRepoPicker(project, state, body) {
-  body.querySelectorAll('.gg-repo-option').forEach((button) => {
-    const repo = (state.repositories || [])[Number(button.dataset.index)];
-    if (!repo) return;
-    button.onclick = () => {
+  if (typeof gitWireRepoTabs !== 'function') return;
+  gitWireRepoTabs(body, state.repositories || [], {
+    onOnly: (repo) => {
       if (state.selectedRepo === repo.path) return;
       state.selectedRepo = repo.path;
       state.notice = null;
       actPaint(project, state, body);
       actEnsureLoaded(project, state);
-    };
+    },
   });
 }
 

@@ -52,7 +52,7 @@ export function PlanCard({ tool, plan, waiting, width, onLongPress }: {
       <View style={styles.actions}>
         {plan.file && openFile ? (
           <Pressable onPress={() => openFile(plan.file!)} style={({ pressed }) => [styles.button, styles.primary, pressed && styles.pressed]} accessibilityRole="button">
-            <Ionicons name="open-outline" size={15} color="#fff" />
+            <Ionicons name="document-text-outline" size={15} color="#fff" />
             <Text style={[styles.buttonText, styles.primaryText]}>Open plan</Text>
           </Pressable>
         ) : null}

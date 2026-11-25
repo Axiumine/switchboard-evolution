@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { groupTools, type ChatRow } from '../chat-groups';
-import { homeShort, localLinkPath, looksLikePath, planOf, planTitle, stripLocation, toolFilePath } from '../file-refs';
+import { homeShort, isFolderPath, localLinkPath, looksLikePath, planOf, planTitle, stripLocation, toolFilePath } from '../file-refs';
 import type { ChatItem } from '../transcript';
 
 type Tool = Extract<ChatItem, { kind: 'tool' }>;
@@ -61,6 +61,15 @@ describe('the file of a tool', () => {
     expect(toolFilePath('Grep', { pattern: 'x', path: '/code' })).toBeNull();
     expect(toolFilePath('Bash', { command: 'ls' })).toBeNull();
     expect(toolFilePath('Read', null)).toBeNull();
+  });
+});
+
+describe('a folder a tool names', () => {
+  it('is spelled with a trailing slash', () => {
+    expect(isFolderPath('/code/src/')).toBe(true);
+    expect(isFolderPath('src\\')).toBe(true);
+    expect(isFolderPath('/code/src/app.ts')).toBe(false);
+    expect(isFolderPath('/code/src/app.ts:12')).toBe(false);
   });
 });
 

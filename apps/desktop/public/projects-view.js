@@ -266,6 +266,12 @@ const mainEl = document.getElementById('main');
 
 // --- Icons (stroke SVG, 24 grid) ---
 
+/** The system's file manager, as the menus name it. */
+function fileManagerName() {
+  const platform = typeof window !== 'undefined' && window.api ? window.api.platform : '';
+  return platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'Explorer' : 'File Manager';
+}
+
 const PICONS = {
   refresh: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17"/></svg>`,
   plus: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
@@ -290,7 +296,9 @@ const PICONS = {
   panel: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6.5 6.5h.01"/><path d="M9 6.5h.01"/></svg>`,
   popOut: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>`,
   globe: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
-  open: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`,
+  // The project's Overview (Lucide layout-dashboard). Opening a folder or a
+  // window has its own icons (ICONS.folderOpen, ICONS.popOut).
+  dashboard: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
   fork: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M21 3l-7.5 7.5a5 5 0 0 0-1.5 3.5v7"/><path d="M3 3l7.5 7.5a5 5 0 0 1 1.5 3.5v1"/></svg>`,
   messages: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/></svg>`,
   // The app's own archive glyph, so this view matches the Sessions tab.
@@ -749,7 +757,8 @@ function applyProjectDotState(dot, state) {
 }
 
 function updateProjectHeaderStatus(project) {
-  const titleLine = projectViewer?.querySelector('.ws-title-line');
+  // The dot has a slot of its own: the title line also holds the header's buttons.
+  const titleLine = projectViewer?.querySelector('.ws-title-status') || projectViewer?.querySelector('.ws-title-line');
   if (!titleLine) return;
   const state = groupState(projectSessionsAll(project));
   const dot = titleLine.querySelector('.proj-dot--lg');
@@ -1752,6 +1761,13 @@ function folderChipLabel(project, folder) {
   return branch ? `${pathBasename(folder.path)} · ${branch}` : pathBasename(folder.path);
 }
 
+/** The header chip's label: the folder's name, then its branch in bold. */
+function folderChipLabelHtml(project, folder) {
+  const branch = folderBranch(project, folder);
+  const name = `<span class="ws-chip-name">${escapeHtml(pathBasename(folder.path))}</span>`;
+  return branch ? `${name}<span class="ws-chip-sep"> · </span><b class="ws-chip-branch">${escapeHtml(branch)}</b>` : name;
+}
+
 /** Folders card: "worktree · main", "in place · main · modified", or "in place". */
 function folderModeText(project, folder) {
   const g = folderGit(project, folder);
@@ -1771,7 +1787,7 @@ function folderSettingsText(project, folder) {
 function folderChipHtml(project, folder) {
   const isWorktree = folder.mode === 'worktree';
   const icon = isWorktree ? PICONS.branch(12) : PICONS.folder(12);
-  return `<span class="ws-chip mono ${isWorktree ? 'ws-chip--worktree' : ''}" data-path="${escapeHtml(folder.path)}" title="${escapeHtml(folder.path)}">${icon}<span class="ws-chip-label">${escapeHtml(folderChipLabel(project, folder))}</span></span>`;
+  return `<span class="ws-chip mono ${isWorktree ? 'ws-chip--worktree' : ''}" data-path="${escapeHtml(folder.path)}" title="${escapeHtml(folder.path)}">${icon}<span class="ws-chip-label">${folderChipLabelHtml(project, folder)}</span></span>`;
 }
 
 /** Fetch git state for the project's folders unless the cache is fresh and covers every folder. Resolves true when something changed. */
@@ -1791,7 +1807,7 @@ async function loadProjectGit(project, { force = false } = {}) {
 function applyGitStatus(project) {
   for (const folder of project.folders || []) {
     const sel = `[data-path="${CSS.escape(folder.path)}"]`;
-    projectViewer.querySelectorAll(`.ws-chip${sel} .ws-chip-label`).forEach(el => { el.textContent = folderChipLabel(project, folder); });
+    projectViewer.querySelectorAll(`.ws-chip${sel} .ws-chip-label`).forEach(el => { el.innerHTML = folderChipLabelHtml(project, folder); });
     projectViewer.querySelectorAll(`.ws-frow${sel}[data-detail="mode"] .ws-card-meta`).forEach(el => { el.textContent = folderModeText(project, folder); });
     projectViewer.querySelectorAll(`.ws-frow${sel}[data-detail="settings"] .ws-frow-detail`).forEach(el => { el.textContent = folderSettingsText(project, folder); });
   }
@@ -1819,19 +1835,20 @@ function renderOverview() {
           <div class="ws-title-line">
             <span class="ws-title">${escapeHtml(project.name)}</span>
             ${projectStatusChip(project)}
-            ${state ? stateDot(state, 'proj-dot--lg') : ''}
+            <span class="ws-title-status">${state ? stateDot(state, 'proj-dot--lg') : ''}</span>
+            <span class="ws-flex"></span>
+            <div class="ws-actions">
+              <button type="button" class="ws-btn" id="ws-note" title="The project's notes (note.md), in a panel over the app">${PICONS.note(12)}<span>Note</span></button>
+              <button type="button" class="ws-btn project-task-btn" id="ws-tasks" data-project-id="${project.id}" data-project-path="${escapeHtml(project.root)}" data-project-paths="${escapeHtml(taskPseudoProject(project).projectPaths.join('\n'))}">${PICONS.play(12)}<span>Tasks</span><span class="project-task-count ws-badge" ${running ? '' : 'style="display:none"'}>${running || ''}</span></button>
+              ${scheduleButtonHtml(project, 'ws-schedules')}
+              <button type="button" class="ws-btn ws-btn--primary" id="ws-new">${PICONS.plus(12)}<span>New session</span>${PICONS.chevronDown(11)}</button>
+              <button type="button" class="ws-btn ws-btn--icon" id="ws-more" title="More">${PICONS.dots(14)}</button>
+            </div>
           </div>
           <div class="ws-chips">
-            ${(project.folders || []).map(f => folderChipHtml(project, f)).join('')}
             <button type="button" class="ws-chip ws-chip--add" id="ws-add-folder">${PICONS.plus(10)}<span>folder</span></button>
+            ${(project.folders || []).map(f => folderChipHtml(project, f)).join('')}
           </div>
-        </div>
-        <div class="ws-actions">
-          <button type="button" class="ws-btn" id="ws-note" title="The project's notes (note.md), in a panel over the app">${PICONS.note(12)}<span>Note</span></button>
-          <button type="button" class="ws-btn project-task-btn" id="ws-tasks" data-project-id="${project.id}" data-project-path="${escapeHtml(project.root)}" data-project-paths="${escapeHtml(taskPseudoProject(project).projectPaths.join('\n'))}">${PICONS.play(12)}<span>Tasks</span><span class="project-task-count ws-badge" ${running ? '' : 'style="display:none"'}>${running || ''}</span></button>
-          ${scheduleButtonHtml(project, 'ws-schedules')}
-          <button type="button" class="ws-btn ws-btn--primary" id="ws-new">${PICONS.plus(12)}<span>New session</span>${PICONS.chevronDown(11)}</button>
-          <button type="button" class="ws-btn ws-btn--icon" id="ws-more" title="More">${PICONS.dots(14)}</button>
         </div>
       </div>
       <div class="ws-tabs">
@@ -1940,7 +1957,7 @@ function projectWindowHeaderHtml(project, tabName) {
         <div class="ws-title-line">
           <span class="ws-title">${escapeHtml(project.name)}</span>
           ${tabs ? '' : `<span class="ws-window-tab">${escapeHtml(label)}</span>`}
-          ${state ? stateDot(state, 'proj-dot--lg') : ''}
+          <span class="ws-title-status">${state ? stateDot(state, 'proj-dot--lg') : ''}</span>
         </div>${tabStrip}
         <span class="ws-flex"></span>
         <button type="button" id="tool-window-pin" class="tool-window-btn" aria-pressed="false"></button>
@@ -2914,7 +2931,7 @@ function renderSettings(project, body) {
         </div>
         <div class="ws-row">
           <div class="ws-row-k"><b>Project folder</b><span>The brief, plan and todos live here.</span></div>
-          <div class="ws-row-v"><span class="mono ws-path ws-path--clip" title="${escapeHtml(project.root)}">${escapeHtml(shortPathLabel(project.root))}</span><button type="button" class="ws-ghost ws-ghost--sm" id="ws-set-open">${PICONS.open(12)}<span>Open</span></button></div>
+          <div class="ws-row-v"><span class="mono ws-path ws-path--clip" title="${escapeHtml(project.root)}">${escapeHtml(shortPathLabel(project.root))}</span><button type="button" class="ws-ghost ws-ghost--sm" id="ws-set-open" title="Open in ${escapeHtml(fileManagerName())}">${ICONS.folderOpen(12)}<span>Open</span></button></div>
         </div>
         <div class="ws-row">
           <div class="ws-row-k"><b>Sessions start in</b><span>A track can pick its own.</span></div>
@@ -2981,7 +2998,7 @@ function renderSettings(project, body) {
     row.innerHTML = `<span class="ws-frow-icon ${isWorktree ? 'is-worktree' : ''}">${isWorktree ? PICONS.branch(13) : PICONS.folder(13)}</span>` +
       `<span class="ws-frow-name">${escapeHtml(pathBasename(folder.path))}</span>` +
       `<span class="ws-card-meta mono ws-frow-detail">${escapeHtml(folderSettingsText(project, folder))}</span>` +
-      `<button type="button" class="ws-ghost ws-ghost--sm ws-item-open" title="Open in Finder">${PICONS.open(11)}<span>Open</span></button>` +
+      `<button type="button" class="ws-ghost ws-ghost--sm ws-item-open" title="Open in ${escapeHtml(fileManagerName())}">${ICONS.folderOpen(11)}<span>Open</span></button>` +
       `<button type="button" class="ws-ghost ws-ghost--sm ws-item-x" title="Detach">${PICONS.x(12)}</button>`;
     row.querySelector('.ws-item-open').onclick = () => window.api.openPath(folder.path);
     row.querySelector('.ws-item-x').onclick = () => detachFolderFlow(project, folder);
@@ -3489,7 +3506,7 @@ function projectTabMenuItem(project, tab, icon) {
 function projectMenuItems(project, { fromPage = false } = {}) {
   const isDone = project.status === 'done';
   return [
-    !fromPage && { label: 'Open overview', icon: PICONS.open(14), onClick: () => selectProject(project.id, { tab: 'overview' }) },
+    !fromPage && { label: 'Open overview', icon: PICONS.dashboard(14), onClick: () => selectProject(project.id, { tab: 'overview' }) },
     { label: 'New session', icon: PICONS.plus(14), submenu: newSessionItems(project, null) },
     { label: 'New track…', icon: PICONS.list(14), onClick: () => promptNewTrack(project) },
     { label: 'Note', icon: PICONS.note(14), onClick: () => openProjectNote(project) },
@@ -3500,7 +3517,7 @@ function projectMenuItems(project, { fromPage = false } = {}) {
     projectTabMenuItem(project, 'files', PICONS.file(14)),
     projectTabMenuItem(project, 'git', PICONS.branch(14)),
     projectTabMenuItem(project, 'settings', ICONS.gear(14)),
-    { label: 'Open project folder', icon: PICONS.open(14), onClick: () => window.api.openPath(project.root) },
+    { label: 'Open project folder', icon: ICONS.folderOpen(14), onClick: () => window.api.openPath(project.root) },
     { sep: true },
     { label: project.starred ? 'Unstar project' : 'Star project', icon: starIconSvg(!project.starred, 14), onClick: () => toggleProjectStar(project) },
     ...snoozeMenuItems(project),

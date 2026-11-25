@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useQueryClient } from '@tanstack/react-query';
 import { router, useFocusEffect } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
@@ -10,16 +11,17 @@ import { PullRequestFiles } from '@/components/pulls/PullRequestFiles';
 import { openInAppBrowser } from '@/components/pulls/PullRequestWebPage';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { useGitInfo } from '@/git/info-query';
-import { chooseRepo, historyRepos, type RepoRef } from '@/git/repo-choice';
+import { historyRepos, repoColors, repoLabel, type RepoRef } from '@/git/repo-choice';
 import type { Project } from '@/projects/model';
 import { useProjectUi } from '@/projects/ui-store';
 import {
   ACTION_COPY, badges, canEdit, DEFAULT_FILTER, emptyText, errorTitle, filterLabel, isDefaultFilter, mergeBlock,
-  inAppWebUrl, mergeLists, pagedWords, pageStates, PR_FILTERS, prStatus, rowMenu, summaryText, toggleFilter, webUrl, whenText,
-  type Badge, type ConfirmAction, type PrFilterKey, type PrStatus, type PullRequest, type PullRequestRepo,
+  inAppWebUrl, mergeRepoPullRequests, morePages, pagedWords, pageStates, PR_FILTERS, prStatus, rowMenu, summaryTextMany, toggleFilter, webUrl, whenText,
+  type Badge, type ConfirmAction, type OpenListing, type PrFilterKey, type PrStatus, type PullRequest, type PullRequestRepo, type RepoPullRequests,
 } from '@/pulls/model';
 import {
-  runPullRequestAction, setPullNotice, useOpenPullRequests, usePagedPullRequests, usePullNotice, type Notice,
+  pagesKey, reloadPullRequests, runPullRequestAction, setPullNotice, useOpenPullRequestsMany, usePagedPullRequestsMany, usePullNotice,
+  type Notice, type PullTarget,
 } from '@/pulls/queries';
 import { openPullRequestWindow, windowActionLabel } from '@/pulls/web';
 import { relativeTime } from '@/sessions/model';
@@ -27,6 +29,7 @@ import { useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import { useCanOpenWindows } from '@/windows/open';
 import { RepoChips } from '../RepoChips';
+import { useRepoSelection } from '../useRepoSelection';
 import { useTabScroll } from '../useTabScroll';
 
 const STATE_ICONS: Record<PrStatus, { name: keyof typeof Ionicons.glyphMap; color: string; label: string }> = {
@@ -43,17 +46,28 @@ const BADGE_COLORS: Record<Badge['tone'], { color: string; background: string }>
   warn: { color: colors.attention, background: 'rgba(224,160,80,0.14)' },
 };
 
-type Menu = { kind: 'filter' } | { kind: 'remote' } | { kind: 'row'; pr: PullRequest };
+/** A pull request and the folder of the repository it is in: with several repositories shown, a number alone names none. */
+type RepoPr = { folder: string; pr: PullRequest };
+
+type Menu = { kind: 'filter' } | { kind: 'remote' } | ({ kind: 'row' } & RepoPr);
 
 const STALE_MS = 60_000;
 
+/** The sentence for a repository whose pull requests could not be read. */
+function failureText(listing: OpenListing | undefined): string {
+  return listing?.code === 'no-github-remote'
+    ? 'Pull requests are listed for repositories on GitHub, and this one has no GitHub remote.'
+    : listing?.error || 'Not connected to the computer.';
+}
+
 /**
  * The Git tab's Pull Requests view, as on the desktop: the pull requests of
- * the chosen repository on GitHub, read by gh on the computer. Every open one
- * is listed, drafts too; Closed and Merged join 10 at a time from the filter.
- * Tapping a row shows its changed files and their diffs. Merge opens a screen
- * to choose how; the "…" has Convert to draft or Ready for review, and Close.
- * Each of them asks first.
+ * the chosen repositories on GitHub, read by gh on the computer, merged into
+ * one list when several are shown (each row then says which repository it is
+ * in, in the repository's color). Every open one is listed, drafts too;
+ * Closed and Merged join 10 at a time from the filter. Tapping a row shows its
+ * changed files and their diffs. Merge opens a screen to choose how; the "…"
+ * has Convert to draft or Ready for review, and Close. Each of them asks first.
  */
 export function PullRequestsTab({ project, active = true }: { project: Project; active?: boolean }) {
   const pid = project.id;
@@ -63,8 +77,7 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
   const editable = useCapability('edit-pull-request');
   const online = useConnection((s) => s.status.state === 'online');
   const scroll = useTabScroll(pid, 'pulls');
-  const [gitRepo, patchUi] = useProjectUi(pid, (ui) => ui.gitRepo);
-  const [pullRemotes] = useProjectUi(pid, (ui) => ui.pullRemotes);
+  const [pullRemotes, patchRemotes] = useProjectUi(pid, (ui) => ui.pullRemotes);
   // The repositories are read by Changes too: use what is cached. Until they arrive, the project's folders stand in.
   const info = useGitInfo(pid, false);
   const known = info.data?.repositories;
@@ -72,85 +85,128 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
     () => historyRepos(known ?? project.folders.map((folder): RepoRef => ({ path: folder.path }))),
     [known, project.folders],
   );
-  const repo = chooseRepo(repositories, gitRepo);
-  const folder = repo && repo.git !== false ? repo.path : undefined;
-  const remote = folder ? pullRemotes?.[folder] : undefined;
+  const { selection, only, toggle } = useRepoSelection(pid, repositories);
+  const colorOf = useMemo(() => repoColors(project), [project]);
+  const shown = useMemo(() => repositories.filter((repo) => selection.paths.includes(repo.path)), [repositories, selection.paths]);
+  const multi = shown.length > 1;
+  // Pull requests are on GitHub: a folder that is not a git repository has none.
+  const targets = useMemo<PullTarget[]>(
+    () => shown.filter((repo) => repo.git !== false).map((repo) => ({ folder: repo.path, remote: pullRemotes?.[repo.path] })),
+    [shown, pullRemotes],
+  );
+  const remoteOf = useCallback((folder: string) => pullRemotes?.[folder], [pullRemotes]);
   // Which pull requests to show, as the desktop's filter: not saved.
   const [filter, setFilter] = useState<PrFilterKey[]>([...DEFAULT_FILTER]);
   const states = useMemo(() => pageStates(filter), [filter]);
   const [menu, setMenu] = useState<Menu | null>(null);
   const notice = usePullNotice(pid);
 
-  const open = useOpenPullRequests(pid, folder, remote, supported);
-  const listing = open.data;
-  const paged = usePagedPullRequests(pid, folder, remote, states, supported && !!listing?.ok);
-  const pages = paged.data?.pages;
-  const lastPage = pages?.[pages.length - 1];
-  const pageItems = useMemo(() => (pages || []).flatMap((page) => page.items || []), [pages]);
-  const items = useMemo(() => mergeLists(listing?.items || [], states.length ? pageItems : [], filter), [listing?.items, pageItems, states.length, filter]);
-  const repoInfo = listing?.repo;
-  const remotes = listing?.remotes || [];
+  const opens = useOpenPullRequestsMany(pid, targets, supported);
+  const listings = useMemo(() => Object.fromEntries(opens.map((open) => [open.folder, open.listing])), [opens]);
+  // The closed and merged pages are read for the repositories whose open ones came.
+  const readable = useMemo(() => targets.filter((target) => listings[target.folder]?.ok), [targets, listings]);
+  // Each repository's pages after the first: where they start, as the page before said. They belong to one remote and one filter.
+  const [cursors, setCursors] = useState<Record<string, string[]>>({});
+  const paged = usePagedPullRequestsMany(pid, readable, states, cursors, supported);
+  const pagedBy = useMemo(() => Object.fromEntries(paged.map((state) => [state.folder, state])), [paged]);
 
-  // Shown again after a while (or back from the merge screen): read again.
-  const { refetch, dataUpdatedAt } = open;
+  const sides = useMemo<RepoPullRequests[]>(() => readable.map(({ folder }) => ({
+    key: folder,
+    open: listings[folder]?.items || [],
+    pages: states.length ? (pagedBy[folder]?.pages || []).flatMap((page) => page.items || []) : [],
+    hasMore: states.length > 0 && !!pagedBy[folder]?.next,
+  })), [readable, listings, pagedBy, states.length]);
+  const merged = useMemo(() => mergeRepoPullRequests(sides, filter), [sides, filter]);
+  const nextPages = useMemo(() => (states.length ? morePages(sides, merged) : []), [sides, merged, states.length]);
+  const tags = useMemo(
+    () => (multi ? Object.fromEntries(targets.map(({ folder }) => [folder, { name: repoLabel(folder), color: colorOf[folder] }])) : {}),
+    [multi, targets, colorOf],
+  );
+
+  // Shown again after a while (or back from the merge screen): read the stale ones again.
+  const queryClient = useQueryClient();
+  const folderList = targets.map((target) => target.folder).join('\n');
   useFocusEffect(useCallback(() => {
-    if (active && online && supported && folder && Date.now() - dataUpdatedAt > STALE_MS) refetch({ cancelRefetch: false });
-  }, [active, online, supported, folder, dataUpdatedAt, refetch]));
-  const pull = usePullRefresh(() => (online ? Promise.all([refetch(), states.length ? paged.refetch() : null]) : undefined));
+    if (!active || !online || !supported) return;
+    const folders = folderList.split('\n');
+    queryClient.invalidateQueries({
+      queryKey: ['pull-requests', pid],
+      predicate: (query) => folders.includes(query.queryKey[2] as string) && Date.now() - query.state.dataUpdatedAt > STALE_MS,
+    }, { cancelRefetch: false }).catch(() => {});
+  }, [active, online, supported, folderList, pid, queryClient]));
+  const reloadAll = useCallback(() => Promise.all(targets.map(({ folder }) => reloadPullRequests(pid, folder))), [pid, targets]);
+  const pull = usePullRefresh(() => (online ? reloadAll() : undefined));
+
+  const loadMore = () => {
+    setCursors((current) => {
+      const next = { ...current };
+      for (const folder of nextPages) {
+        const target = readable.find((item) => item.folder === folder);
+        const cursor = pagedBy[folder]?.next;
+        if (!target || !cursor) continue;
+        const key = pagesKey(target, states);
+        next[key] = [...(next[key] ?? []), cursor];
+      }
+      return next;
+    });
+  };
 
   // --- Actions ---
 
-  const run = async (pr: PullRequest, action: ConfirmAction) => {
-    if (!folder) return;
+  const run = async ({ folder, pr }: RepoPr, action: ConfirmAction) => {
     setPullNotice(pid, { kind: 'busy', text: `${ACTION_COPY[action].title}: #${pr.number}…` });
-    const answer = await runPullRequestAction(pid, folder, remote, { number: pr.number, action });
+    const answer = await runPullRequestAction(pid, folder, remoteOf(folder), { number: pr.number, action });
     setPullNotice(pid, answer.ok ? { kind: 'ok', text: answer.message || 'Done.' } : { kind: 'error', text: answer.error || 'GitHub did not do it.' });
   };
 
-  const confirm = (pr: PullRequest, action: ConfirmAction) => {
-    if (!canEdit(pr, repoInfo)) {
+  const confirm = (item: RepoPr, action: ConfirmAction) => {
+    const { pr } = item;
+    if (!canEdit(pr, listings[item.folder]?.repo)) {
       Alert.alert(ACTION_COPY[action].title, 'Your GitHub account cannot change this pull request.');
       return;
     }
     const copy = ACTION_COPY[action];
     Alert.alert(copy.title, `#${pr.number} ${pr.title}\n${pr.head} → ${pr.base}\n\n${copy.text}`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: copy.confirm, style: copy.destructive ? 'destructive' : 'default', onPress: () => run(pr, action) },
+      { text: copy.confirm, style: copy.destructive ? 'destructive' : 'default', onPress: () => run(item, action) },
     ]);
   };
 
-  const merge = (pr: PullRequest) => {
-    const block = mergeBlock(pr, repoInfo);
+  const merge = ({ folder, pr }: RepoPr) => {
+    const block = mergeBlock(pr, listings[folder]?.repo);
     if (block) { Alert.alert('Merge', block); return; }
-    if (!folder) return;
-    router.push({ pathname: '/pulls/merge', params: { projectId: pid, folder, number: String(pr.number), remote: remote ?? '' } });
+    router.push({ pathname: '/pulls/merge', params: { projectId: pid, folder, number: String(pr.number), remote: remoteOf(folder) ?? '' } });
   };
 
-  const openDetail = (pr: PullRequest) => {
-    if (!folder) return;
-    router.push({ pathname: '/pulls/[number]', params: { number: String(pr.number), projectId: pid, folder, remote: remote ?? '', title: pr.title } });
+  const openDetail = ({ folder, pr }: RepoPr) => {
+    router.push({ pathname: '/pulls/[number]', params: { number: String(pr.number), projectId: pid, folder, remote: remoteOf(folder) ?? '', title: pr.title } });
   };
 
-  const changeBase = (pr: PullRequest) => {
-    if (!folder) return;
-    if (!canEdit(pr, repoInfo)) { Alert.alert('Change base', 'Your GitHub account cannot change this pull request.'); return; }
-    router.push({ pathname: '/pulls/base', params: { projectId: pid, folder, remote: remote ?? '', number: String(pr.number), id: pr.id ?? '', head: pr.head, base: pr.base } });
+  const changeBase = ({ folder, pr }: RepoPr) => {
+    if (!canEdit(pr, listings[folder]?.repo)) { Alert.alert('Change base', 'Your GitHub account cannot change this pull request.'); return; }
+    router.push({ pathname: '/pulls/base', params: { projectId: pid, folder, remote: remoteOf(folder) ?? '', number: String(pr.number), id: pr.id ?? '', head: pr.head, base: pr.base } });
   };
+
+  // The repositories that have a choice of remote.
+  const remoteChoices = targets.filter(({ folder }) => (listings[folder]?.remotes || []).length > 1);
 
   const menuOptions = (): SheetOption[] => {
     if (menu?.kind === 'row') {
-      const pr = menu.pr;
-      return rowMenu(pr, { canChangeBase: editable && !!pr.id }).map((key) => (key === 'base'
-        ? { label: 'Change base…', onPress: () => changeBase(pr) }
-        : { label: ACTION_COPY[key].menu, destructive: ACTION_COPY[key].destructive, onPress: () => confirm(pr, key) }));
+      const item: RepoPr = { folder: menu.folder, pr: menu.pr };
+      return rowMenu(item.pr, { canChangeBase: editable && !!item.pr.id }).map((key) => (key === 'base'
+        ? { label: 'Change base…', onPress: () => changeBase(item) }
+        : { label: ACTION_COPY[key].menu, destructive: ACTION_COPY[key].destructive, onPress: () => confirm(item, key) }));
     }
-    if (menu?.kind === 'remote' && folder) {
-      const current = listing?.remote || remote;
-      return remotes.map((r) => ({
-        label: `${r.name} · ${r.slug}`,
-        hint: r.name === current ? 'chosen' : undefined,
-        onPress: () => patchUi({ pullRemotes: { ...(pullRemotes || {}), [folder]: r.name } }),
-      }));
+    if (menu?.kind === 'remote') {
+      return remoteChoices.flatMap(({ folder }) => {
+        const listing = listings[folder];
+        const current = listing?.remote || remoteOf(folder);
+        return (listing?.remotes || []).map((r) => ({
+          label: `${multi ? `${repoLabel(folder)}: ` : ''}${r.name} · ${r.slug}`,
+          hint: r.name === current ? 'chosen' : undefined,
+          onPress: () => patchRemotes({ pullRemotes: { ...(pullRemotes || {}), [folder]: r.name } }),
+        }));
+      });
     }
     return [];
   };
@@ -167,20 +223,22 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
     );
   }
 
-  const currentRemote = remotes.find((r) => r.name === (listing?.remote || remote));
+  const single = remoteChoices.length === 1 && !multi ? listings[remoteChoices[0].folder] : undefined;
+  const currentRemote = single?.remotes?.find((r) => r.name === (single.remote || remoteOf(remoteChoices[0].folder)));
+  const remoteLabel = multi ? 'Remotes' : currentRemote ? `${currentRemote.name} · ${currentRemote.slug}` : 'Remote';
   const header = (
     <View style={styles.header}>
       <View style={styles.toolbar}>
         <View style={styles.flex}>
           <Text style={styles.toolbarTitle}>Pull requests</Text>
-          <Text style={styles.summary} numberOfLines={1}>{summaryText(listing) || ' '}</Text>
+          <Text style={styles.summary} numberOfLines={1}>{summaryTextMany(targets.map(({ folder }) => listings[folder])) || ' '}</Text>
         </View>
       </View>
       <View style={styles.controls}>
-        {remotes.length > 1 ? (
-          <Pressable onPress={() => setMenu({ kind: 'remote' })} style={({ pressed }) => [styles.control, styles.flexShrink, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Remote: ${currentRemote ? `${currentRemote.name}, ${currentRemote.slug}` : 'choose'}`}>
+        {remoteChoices.length ? (
+          <Pressable onPress={() => setMenu({ kind: 'remote' })} style={({ pressed }) => [styles.control, styles.flexShrink, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={multi ? 'Remotes: choose per repository' : `Remote: ${currentRemote ? `${currentRemote.name}, ${currentRemote.slug}` : 'choose'}`}>
             <Ionicons name="cloud-outline" size={14} color={colors.textDim} />
-            <Text style={styles.controlText} numberOfLines={1}>{currentRemote ? `${currentRemote.name} · ${currentRemote.slug}` : 'Remote'}</Text>
+            <Text style={styles.controlText} numberOfLines={1}>{remoteLabel}</Text>
             <Ionicons name="chevron-down" size={13} color={colors.textFaint} />
           </Pressable>
         ) : null}
@@ -198,68 +256,83 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
     </View>
   );
 
+  // A repository that could not be read: told one line each above the others, or all of it when none could.
+  const failed = opens.filter((open) => open.listing && !open.listing.ok);
+  const waiting = opens.some((open) => open.loading || (!open.listing && online));
+  const answered = readable.length > 0;
+  const pageWords = pagedWords(states);
+  const pageLoading = paged.some((state) => state.loading);
+  const pageErrors = paged.filter((state) => state.error);
+  const pageTotal = paged.reduce((sum, state) => sum + (state.totalCount || 0), 0);
+  const moreLoading = paged.some((state) => state.loadingMore);
+
   let body;
-  if (!repo) {
+  if (!shown.length) {
     body = <View style={styles.emptyBox}><Text style={styles.emptyText}>No folder of this project is attached yet.</Text></View>;
-  } else if (!folder) {
-    body = <View style={styles.emptyBox}><Text style={styles.emptyTitle}>Not a Git repository</Text><Text style={styles.emptyText}>{repo.path}</Text></View>;
-  } else if (open.isLoading || (!listing && online)) {
+  } else if (!targets.length) {
+    body = <View style={styles.emptyBox}><Text style={styles.emptyTitle}>Not a Git repository</Text><Text style={styles.emptyText}>{shown[0].path}</Text></View>;
+  } else if (!answered && waiting) {
     body = <View style={styles.loading}><ActivityIndicator color={colors.accent} /><Text style={styles.emptyText}>Reading pull requests…</Text></View>;
-  } else if (!listing?.ok) {
+  } else if (!answered) {
     body = (
       <View style={styles.emptyBox}>
-        <Text style={styles.emptyTitle}>{errorTitle(listing?.code)}</Text>
-        <Text style={styles.emptyText}>
-          {listing?.code === 'no-github-remote'
-            ? 'Pull requests are listed for repositories on GitHub, and this one has no GitHub remote.'
-            : listing?.error || 'Not connected to the computer.'}
-        </Text>
-        <Pressable onPress={() => refetch()} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
+        {failed.length > 1 || multi ? <Text style={styles.emptyTitle}>The pull requests could not be read</Text> : <Text style={styles.emptyTitle}>{errorTitle(failed[0]?.listing?.code)}</Text>}
+        {failed.length ? failed.map((open) => (
+          <Text key={open.folder} style={styles.emptyText}>{multi ? `${repoLabel(open.folder)}: ` : ''}{failureText(open.listing)}</Text>
+        )) : <Text style={styles.emptyText}>{failureText(undefined)}</Text>}
+        <Pressable onPress={() => reloadAll()} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
       </View>
     );
   } else {
-    const waiting = states.length > 0 && paged.isLoading;
+    const loadingPages = states.length > 0 && pageLoading;
     body = (
       <>
-        {items.length ? (
+        {failed.map((open) => (
+          <View key={open.folder} style={styles.failed}>
+            <Text style={styles.failedText}>{repoLabel(open.folder)}: {failureText(open.listing)}</Text>
+            <Pressable onPress={() => reloadPullRequests(pid, open.folder)} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
+          </View>
+        ))}
+        {merged.items.length ? (
           <View style={styles.rows}>
-            {items.map((pr) => (
+            {merged.items.map(({ key: folder, pr }) => (
               <PullRequestRow
                 // Its open state belongs to one repository and remote: another one starts closed.
-                key={`${folder}|${remote ?? ''}#${pr.number}`}
+                key={`${folder}|${remoteOf(folder) ?? ''}#${pr.number}`}
                 pr={pr}
-                repo={repoInfo}
+                repo={listings[folder]?.repo}
+                repoTag={tags[folder]}
                 projectId={pid}
                 folder={folder}
-                remote={remote}
+                remote={remoteOf(folder)}
                 onMerge={merge}
-                onMore={(item) => setMenu({ kind: 'row', pr: item })}
+                onMore={(item) => setMenu({ kind: 'row', ...item })}
                 onOpen={detailed ? openDetail : undefined}
               />
             ))}
           </View>
-        ) : waiting ? null : <View style={styles.emptyBox}><Text style={styles.emptyTitle}>{emptyText(filter)}</Text></View>}
-        {listing.truncated ? <Text style={styles.footer}>Only the newest 1000 open pull requests are listed.</Text> : null}
+        ) : loadingPages ? null : <View style={styles.emptyBox}><Text style={styles.emptyTitle}>{emptyText(filter)}</Text></View>}
+        {readable.some(({ folder }) => listings[folder]?.truncated) ? <Text style={styles.footer}>Only the newest 1000 open pull requests are listed{multi ? ' in a repository' : ''}.</Text> : null}
         {states.length ? (
           <View style={styles.pageFooter}>
-            {paged.isLoading ? (
-              <><ActivityIndicator size="small" color={colors.accent} /><Text style={styles.footerText}>Reading {pagedWords(states)} pull requests…</Text></>
-            ) : paged.error ? (
+            {loadingPages ? (
+              <><ActivityIndicator size="small" color={colors.accent} /><Text style={styles.footerText}>Reading {pageWords} pull requests…</Text></>
+            ) : pageErrors.length ? (
               <>
-                <Text style={[styles.footerText, { color: colors.danger }]}>{(paged.error as Error).message}</Text>
-                <Pressable onPress={() => paged.refetch()} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
+                <Text style={[styles.footerText, { color: colors.danger }]}>{pageErrors.map((state) => (multi ? `${repoLabel(state.folder)}: ${state.error}` : state.error)).join('\n')}</Text>
+                <Pressable onPress={() => Promise.all(pageErrors.map((state) => reloadPullRequests(pid, state.folder)))} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
               </>
-            ) : lastPage ? (
+            ) : paged.some((state) => state.pages.length) ? (
               <>
-                <Text style={styles.footerText}>{pageItems.length} of {lastPage.totalCount || 0} {pagedWords(states)} shown</Text>
-                {paged.hasNextPage ? (
+                <Text style={styles.footerText}>{merged.pageShown} of {pageTotal} {pageWords} shown</Text>
+                {nextPages.length ? (
                   <Pressable
-                    onPress={() => paged.fetchNextPage()}
-                    disabled={paged.isFetchingNextPage}
-                    style={({ pressed }) => [styles.moreButton, pressed && styles.pressed, paged.isFetchingNextPage && { opacity: 0.5 }]}
+                    onPress={loadMore}
+                    disabled={moreLoading}
+                    style={({ pressed }) => [styles.moreButton, pressed && styles.pressed, moreLoading && { opacity: 0.5 }]}
                     accessibilityRole="button"
                   >
-                    <Text style={styles.moreText}>{paged.isFetchingNextPage ? 'Loading…' : 'Load 10 more'}</Text>
+                    <Text style={styles.moreText}>{moreLoading ? 'Loading…' : 'Load 10 more'}</Text>
                   </Pressable>
                 ) : null}
               </>
@@ -277,7 +350,7 @@ export function PullRequestsTab({ project, active = true }: { project: Project; 
 
   return (
     <View style={styles.screen}>
-      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => patchUi({ gitRepo: path })} />
+      <RepoChips repos={repositories} selected={selection.primary} onSelect={only} checked={selection.paths} onToggle={toggle} repoColors={colorOf} />
       {header}
       <ScrollView {...scroll} refreshControl={pull}>
         {body}
@@ -362,11 +435,14 @@ function PullRequestLinkTools({ pr }: { pr: PullRequest }) {
   );
 }
 
-const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folder, remote, onMerge, onMore, onOpen }: {
-  pr: PullRequest; repo: PullRequestRepo | undefined; projectId: string; folder: string; remote: string | undefined;
-  onMerge: (pr: PullRequest) => void; onMore: (pr: PullRequest) => void;
+const PullRequestRow = memo(function PullRequestRow({ pr, repo, repoTag, projectId, folder, remote, onMerge, onMore, onOpen }: {
+  pr: PullRequest; repo: PullRequestRepo | undefined;
+  /** With several repositories shown: the name of this one, in its color, right after the number. */
+  repoTag?: { name: string; color?: string };
+  projectId: string; folder: string; remote: string | undefined;
+  onMerge: (item: RepoPr) => void; onMore: (item: RepoPr) => void;
   /** Open it on a screen of its own (a newer desktop); without it the row opens on its files. */
-  onOpen?: (pr: PullRequest) => void;
+  onOpen?: (item: RepoPr) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const status = prStatus(pr);
@@ -376,7 +452,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
   return (
     <View style={styles.item}>
       <Pressable
-        onPress={() => (onOpen ? onOpen(pr) : setExpanded(!expanded))}
+        onPress={() => (onOpen ? onOpen({ folder, pr }) : setExpanded(!expanded))}
         style={({ pressed }) => [styles.row, expanded && styles.rowOpen, pressed && styles.pressed]}
         accessibilityRole="button"
         accessibilityState={onOpen ? undefined : { expanded }}
@@ -393,7 +469,11 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
               </View>
             ))}
           </View>
-          <Text style={styles.meta} numberOfLines={1}>#{pr.number} · {whenText(pr, (iso) => relativeTime(iso))} by {pr.author}</Text>
+          <Text style={styles.meta} numberOfLines={1}>
+            #{pr.number}
+            {repoTag ? <>{' · '}<Text style={[styles.repoName, repoTag.color ? { color: repoTag.color } : null]}>{repoTag.name}</Text></> : null}
+            {' · '}{whenText(pr, (iso) => relativeTime(iso))} by {pr.author}
+          </Text>
           <Text style={styles.branches} numberOfLines={1}>{pr.head} → {pr.base}</Text>
           <Text style={styles.meta}>
             <Text style={styles.add}>+{pr.additions}</Text> <Text style={styles.del}>−{pr.deletions}</Text> · {pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}
@@ -403,7 +483,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
           <View style={styles.rowActions}>
             {linkTools}
             <Pressable
-              onPress={() => onMerge(pr)}
+              onPress={() => onMerge({ folder, pr })}
               style={({ pressed }) => [styles.mergeButton, block && styles.mergeOff, pressed && styles.pressedButton]}
               accessibilityRole="button"
               accessibilityLabel={block ? `Merge is off: ${block}` : `Merge pull request ${pr.number}`}
@@ -411,7 +491,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
               <Ionicons name="git-merge" size={14} color={block ? colors.textFaint : colors.accent} />
               <Text style={[styles.mergeText, block && { color: colors.textFaint }]}>Merge</Text>
             </Pressable>
-            <Pressable onPress={() => onMore(pr)} hitSlop={4} style={({ pressed }) => [styles.moreIcon, pressed && styles.pressedButton]} accessibilityRole="button" accessibilityLabel={`More for pull request ${pr.number}`}>
+            <Pressable onPress={() => onMore({ folder, pr })} hitSlop={4} style={({ pressed }) => [styles.moreIcon, pressed && styles.pressedButton]} accessibilityRole="button" accessibilityLabel={`More for pull request ${pr.number}`}>
               <Ionicons name="ellipsis-horizontal" size={18} color={colors.textDim} />
             </Pressable>
           </View>
@@ -420,7 +500,7 @@ const PullRequestRow = memo(function PullRequestRow({ pr, repo, projectId, folde
             {linkTools}
             {/* A closed one can be reopened. */}
             {pr.state === 'CLOSED' ? (
-              <Pressable onPress={() => onMore(pr)} hitSlop={4} style={({ pressed }) => [styles.moreIcon, pressed && styles.pressedButton]} accessibilityRole="button" accessibilityLabel={`More for pull request ${pr.number}`}>
+              <Pressable onPress={() => onMore({ folder, pr })} hitSlop={4} style={({ pressed }) => [styles.moreIcon, pressed && styles.pressedButton]} accessibilityRole="button" accessibilityLabel={`More for pull request ${pr.number}`}>
                 <Ionicons name="ellipsis-horizontal" size={18} color={colors.textDim} />
               </Pressable>
             ) : null}
@@ -479,6 +559,9 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
   badgeText: { fontSize: 10.5, fontWeight: '600' },
   meta: { color: colors.textFaint, fontSize: 12, marginTop: 3 },
+  repoName: { fontWeight: '600' },
+  failed: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  failedText: { flexShrink: 1, color: colors.danger, fontSize: 12.5 },
   branches: { color: '#9aa0e0', fontSize: 11.5, fontFamily: mono, marginTop: 3 },
   add: { color: colors.running },
   del: { color: colors.danger },

@@ -15,6 +15,9 @@ Modules both apps use, written once here:
 - `donate.js`: the amounts of the donation box and the PayPal page each one opens.
 - `knowledge-model.js`: the Node Knowledge tab's view of codebase-memory-mcp's answers (tables, symbols, the trace tree and its layout, impact, architecture, comparison).
 - `actions-model.js`: the Git tab's Actions view (states and their words, what started a run, the run search, the job graph from the workflow file, the "Run workflow" fields, log lines).
+- `repo-colors.js`: the color of each repository of a project, the same in every view of the Git tab and on both apps.
+- `repo-selection.js`: which repositories the Git tab shows (one or several), and how their commits or pull requests merge into one list.
+- `action-icons.js`: the icons of the actions that open something (a folder in the app, the file manager, the default application, a window of its own).
 
 Each one runs as a classic browser script, a CommonJS module and an ES import, so for now the apps keep a copy:
 the desktop in `public/` (and `remote-protocol.js` at its root), the mobile app in `src/shared/vendor/` with the

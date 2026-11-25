@@ -17,6 +17,13 @@
 // gitGraphRowClasses, gitGraphDiffStatHtml, gitGraphFileStatusGlyph, gitGraphIcon),
 // and gitGraphCompareCall/gitGraphCompareFileDiff (git-graph-compare.js) to
 // read a file opened in a record.
+//
+// The History can show several repositories at once (git-repo-tabs.js: a
+// checkbox on each tab). Then it is one merged table: each repository keeps
+// its own slice of data (state.slices, keyed by path) and every row carries
+// the repository it belongs to; a row's key is "<tag>:<hash>" (see
+// gitGraphRepoKey in git-graph-render.js). With one repository shown, none of
+// that exists: the state holds the repository's data itself, as always.
 
 const GG_INITIAL_LOAD = 300;
 const GG_LOAD_MORE = 100;
@@ -27,7 +34,16 @@ function gitGraphState(projectId) {
   if (!gitGraphTabState.has(projectId)) {
     gitGraphTabState.set(projectId, {
       repositories: null,
+      // The primary repository: what the toolbar's actions, the settings drawer
+      // and every single-repository code path use.
       selectedRepo: null,
+      // Every repository shown, as paths; more than one makes it a merged History.
+      selectedRepos: [],
+      // path -> one repository's own data while several are shown (gitGraphNewSlice).
+      slices: new Map(),
+      // Rows each repository holds below the merge's frontier, for Load More's plan.
+      multiHeld: null,
+      multiLists: null,
       request: 0,
       detailsRequest: 0,
       error: '',
@@ -134,6 +150,7 @@ function gitGraphSaveUiPrefs(projectId, state) {
   try {
     localStorage.setItem(gitGraphUiKey(projectId), JSON.stringify({
       selectedRepo: state.selectedRepo,
+      selectedRepos: state.selectedRepos,
       columns: state.columns,
       columnWidths: state.columnWidths,
       branchSelection: state.branchSelection,
@@ -144,6 +161,157 @@ function gitGraphSaveUiPrefs(projectId, state) {
       findOpen: state.findOpen,
     }));
   } catch { /* private-browsing / disabled storage: ephemeral state only */ }
+}
+
+// --- The repositories shown ---
+
+/** The selection ({ primary, paths }) made valid for the repositories listed: git-repo-tabs.js's, or the primary alone when that file is not loaded. */
+function gitGraphSelection(state) {
+  const repos = state.repositories || [];
+  if (typeof gitRepoSelectionOf === 'function') return gitRepoSelectionOf(state, repos);
+  const primary = (repos.find(r => r.path === state.selectedRepo) || repos[0] || {}).path || null;
+  return { primary, paths: primary ? [primary] : [] };
+}
+
+/** The repositories the History shows, in the order of its tabs: the selected ones that are Git repositories, or else the primary alone. */
+function gitGraphShownRepos(state) {
+  const repos = state.repositories || [];
+  const selection = gitGraphSelection(state);
+  const shown = repos.filter(r => selection.paths.includes(r.path) && r.git !== false);
+  if (shown.length > 1) return shown;
+  const primary = repos.find(r => r.path === state.selectedRepo) || repos.find(r => r.path === selection.primary) || repos[0];
+  return primary ? [primary] : [];
+}
+
+/** True while several repositories are shown as one History. */
+function gitGraphIsMulti(state) {
+  return gitGraphShownRepos(state).length > 1;
+}
+
+/** What the shown repositories are, as a string: a History loaded for another selection has to be loaded again. */
+function gitGraphSelectionKey(state) {
+  return gitGraphShownRepos(state).map(r => r.path).join('\n');
+}
+
+/** "r<index>": the repository's position among the tabs, which names its rows (gitGraphRepoKey). */
+function gitGraphRepoTag(state, path) {
+  const index = (state.repositories || []).findIndex(r => r.path === path);
+  return index < 0 ? null : `r${index}`;
+}
+
+function gitGraphRepoByTag(state, tag) {
+  const match = /^r(\d+)$/.exec(tag || '');
+  return match ? (state.repositories || [])[Number(match[1])] || null : null;
+}
+
+function gitGraphPrimaryRepo(state) {
+  return (state.repositories || []).find(r => r.path === state.selectedRepo) || null;
+}
+
+/** The repository a row belongs to: the one its key names with several shown, the primary otherwise. */
+function gitGraphRowRepo(state, key) {
+  const { tag } = gitGraphSplitKey(key);
+  return (tag && gitGraphRepoByTag(state, tag)) || gitGraphPrimaryRepo(state);
+}
+
+/**
+ * The object holding the data of a row's repository (refs, stashes, remotes,
+ * repoConfig, headHash, branchSelection, …): its slice when the row is of a
+ * History of several repositories, the state itself otherwise. Both have the
+ * same field names, so what reads them does not care which it got.
+ */
+function gitGraphRowView(state, key) {
+  const { tag } = gitGraphSplitKey(key);
+  if (!tag) return state;
+  const repo = gitGraphRepoByTag(state, tag);
+  return (repo && state.slices && state.slices.get(repo.path)) || state;
+}
+
+/** The same for a repository by its path. */
+function gitGraphViewByPath(state, path) {
+  const slice = state.slices && state.slices.get(path);
+  return slice && gitGraphIsMulti(state) ? slice : state;
+}
+
+/** The repository the open record (commit or comparison) belongs to. */
+function gitGraphDetailsRepo(state) {
+  const path = state.detailsData && state.detailsData.repoPath;
+  return (path && (state.repositories || []).find(r => r.path === path)) || gitGraphPrimaryRepo(state);
+}
+
+function gitGraphDetailsRepoPath(state) {
+  const repo = gitGraphDetailsRepo(state);
+  return repo ? repo.path : state.selectedRepo;
+}
+
+function gitGraphDetailsView(state) {
+  return gitGraphViewByPath(state, gitGraphDetailsRepoPath(state));
+}
+
+/** Whether ticked or named commits are of different repositories. */
+function gitGraphMixedRepos(keys) {
+  return new Set((keys || []).map(key => gitGraphSplitKey(key).tag)).size > 1;
+}
+
+// --- Slices: one repository's data in a History of several ---
+
+// What every repository of the History keeps for itself (the primary's are
+// the state's own fields too: they move between the two, see gitGraphAdoptPrimary).
+const GG_SLICE_SETTINGS = ['branchSelection', 'tagSelection', 'showTags', 'showStashesPref', 'showUncommittedChangesPref', 'includeReflogCommits'];
+
+function gitGraphNewSlice(path) {
+  return {
+    path, tag: null,
+    rawCommits: [], refs: null, stashes: [], uncommitted: null, headHash: null, headBranchName: null,
+    remotes: [], repoConfig: null, configLoaded: false,
+    branchSelection: 'all', tagSelection: 'all', showTags: true, showStashesPref: true, showUncommittedChangesPref: true, includeReflogCommits: false,
+    hasMore: false, error: '', request: 0,
+  };
+}
+
+/** The primary's settings, as the state holds them, onto its slice (or the other way round). */
+function gitGraphCopySettings(from, to) {
+  for (const field of GG_SLICE_SETTINGS) to[field] = from[field];
+}
+
+/** The slices for the repositories shown: made for the new ones, dropped for those no longer shown, tagged for where the tabs are now. */
+function gitGraphSyncSlices(state, repos) {
+  if (!state.slices) state.slices = new Map();
+  const paths = new Set(repos.map(r => r.path));
+  for (const path of [...state.slices.keys()]) if (!paths.has(path)) state.slices.delete(path);
+  for (const repo of repos) {
+    let slice = state.slices.get(repo.path);
+    if (!slice) {
+      slice = gitGraphNewSlice(repo.path);
+      state.slices.set(repo.path, slice);
+      // The primary's config is the one the state already holds, when it holds one.
+      if (repo.path === state.selectedRepo && state.repoConfig) { slice.repoConfig = state.repoConfig; slice.configLoaded = true; }
+    }
+    slice.tag = gitGraphRepoTag(state, repo.path);
+    if (repo.path === state.selectedRepo) gitGraphCopySettings(state, slice);
+  }
+}
+
+/** A repository becomes the primary: the state takes its settings and data, as the state holds the primary's. */
+function gitGraphAdoptPrimary(state) {
+  const slice = state.slices && state.slices.get(state.selectedRepo);
+  if (!slice) return;
+  gitGraphCopySettings(slice, state);
+  gitGraphMirrorPrimary(state);
+}
+
+/** The primary's data from its slice onto the state, for what reads the state's own fields (the settings drawer, Fetch). */
+function gitGraphMirrorPrimary(state) {
+  const slice = state.slices && state.slices.get(state.selectedRepo);
+  if (!slice) return;
+  if (slice.repoConfig) state.repoConfig = slice.repoConfig;
+  if (slice.refs) state.refs = slice.refs;
+  state.remotes = slice.remotes || [];
+  state.stashes = slice.stashes;
+  state.uncommitted = slice.uncommitted;
+  state.headHash = slice.headHash;
+  state.headBranchName = slice.headBranchName;
+  state.rawCommits = slice.rawCommits;
 }
 
 // --- Pure helpers (unit-tested directly; no DOM) ---
@@ -161,7 +329,9 @@ function gitGraphFindMatches(rows, query, caseSensitive) {
       ...(row.refs?.remotes || []).map(r => r.name),
       ...(row.refs?.tags || []).map(refName),
     ];
-    const haystacks = [row.subject, row.authorDate, row.commitDate, row.authorName, row.hash, ...refNames];
+    // A History of several repositories: the repository's name and the hash git knows count too.
+    const repoName = row.repoPath ? (typeof pathBasename === 'function' ? pathBasename(row.repoPath) : row.repoPath) : '';
+    const haystacks = [row.subject, row.authorDate, row.commitDate, row.authorName, row.hash, row.sha, repoName, ...refNames];
     if (haystacks.some(h => norm(h).includes(q))) matches.push(index);
   });
   return matches;
@@ -232,6 +402,7 @@ function gitGraphDispatchContextMenu(el, ctx, position, target) {
   return true;
 }
 
+/** Every branch the dropdown lists for a repository: `state` is the state, or a slice. */
 function gitGraphAllBranchKeys(state) {
   const heads = ((state.refs && state.refs.heads) || []).map(h => h.name);
   const visibleRemotes = gitGraphVisibleRemotes((state.refs && state.refs.remotes) || [], state.repoConfig && state.repoConfig.perRemoteVisibility);
@@ -239,13 +410,39 @@ function gitGraphAllBranchKeys(state) {
   return [...heads, ...remotes];
 }
 
-function gitGraphToggleBranchKey(project, state, body, key, select) {
-  const current = state.branchSelection === 'all' ? new Set(gitGraphAllBranchKeys(state)) : new Set(state.branchSelection);
+/** `path`: the repository the branch is of, when several are shown (its slice holds the selection). */
+function gitGraphToggleBranchKey(project, state, body, key, select, path) {
+  const slice = path && gitGraphIsMulti(state) ? state.slices.get(path) : null;
+  const view = slice || state;
+  const current = view.branchSelection === 'all' ? new Set(gitGraphAllBranchKeys(view)) : new Set(view.branchSelection);
   if (select) current.add(key); else current.delete(key);
+  if (slice) {
+    gitGraphCommitSelections(project, state, body, 'branches', [{ path, next: [...current] }]);
+    return;
+  }
   state.branchSelection = [...current];
   gitGraphSaveUiPrefs(project.id, state);
   gitGraphPatchRepoConfig(project, state, { branchDropdownSelection: state.branchSelection });
   gitGraphLoadGraph(project, state, body, { reset: true });
+}
+
+/**
+ * New branch or tag selections for repositories of a History of several: each
+ * lands on its slice (and on the state's own fields for the primary), is
+ * remembered, and the repositories that changed are read again.
+ * tab: 'branches' | 'tags'; changes: [{ path, next }].
+ */
+function gitGraphCommitSelections(project, state, body, tab, changes) {
+  const field = tab === 'tags' ? 'tagSelection' : 'branchSelection';
+  for (const { path, next } of changes) {
+    const slice = state.slices.get(path);
+    if (slice) slice[field] = next;
+    if (path === state.selectedRepo) state[field] = next;
+    if (field === 'branchSelection') gitGraphPatchRepoConfigFor(project, state, path, { branchDropdownSelection: next });
+  }
+  gitGraphSaveUiPrefs(project.id, state);
+  if (changes.length === 1) return gitGraphReloadSlice(project, state, body, changes[0].path, {});
+  return gitGraphLoadGraph(project, state, body, { reset: true });
 }
 
 function gitGraphDefaultRemoteName(remotes) {
@@ -266,8 +463,8 @@ function gitGraphRemoteBranchesByLocalName(refs) {
 function gitGraphBuildFileCtx(state, filePath) {
   const data = state.detailsData || {};
   const file = (data.files || []).find(f => f.path === filePath) || { path: filePath, status: 'modified' };
-  const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
-  const isUncommittedSide = (data.mode === 'single' && data.kind === 'uncommitted') || (data.mode === 'compare' && data.toHash === '#uncommitted');
+  const repo = gitGraphDetailsRepo(state);
+  const isUncommittedSide = (data.mode === 'single' && data.kind === 'uncommitted') || (data.mode === 'compare' && gitGraphPlainHash(data.toHash) === '#uncommitted');
   const isSingleHistorical = data.mode === 'single' && data.kind !== 'uncommitted';
   return {
     path: file.path,
@@ -277,27 +474,36 @@ function gitGraphBuildFileCtx(state, filePath) {
     existsOnDisk: file.status !== 'deleted',
     isWorkingTreeSide: isUncommittedSide,
     isHistoricalSingleCommit: isSingleHistorical,
-    revisionHash: isSingleHistorical ? data.hash : null,
+    revisionHash: isSingleHistorical ? gitGraphPlainHash(data.hash) : null,
     revisionShortHash: isSingleHistorical ? (data.commit && data.commit.shortHash) : null,
   };
 }
 
-/** Fills in the one target-specific field (commit/localBranch/remoteBranch/tag/stash/file/columnHeader/link) git-graph-menus.js's ctx contract expects, from the frozen data-gg-* attributes. */
-function gitGraphPopulateTargetField(ctx, state, target) {
+/**
+ * Fills in the one target-specific field (commit/localBranch/remoteBranch/tag/stash/file/columnHeader/link) git-graph-menus.js's ctx contract expects, from the frozen data-gg-* attributes.
+ * The menus and git speak plain hashes: with several repositories shown the
+ * rows' keys are turned back into them, and `view` is the repository's data
+ * (its slice) the refs and stashes are read from.
+ */
+function gitGraphPopulateTargetField(ctx, state, target, view = state) {
   if (!target) return;
+  const plain = gitGraphPlainHash;
   if (target.kind === 'commit' || target.kind === 'uncommitted') {
     const row = state.rows.find(r => r.hash === target.hash);
-    if (row) ctx.commit = { hash: row.hash, shortHash: row.shortHash, subject: row.subject, parents: row.parents || [], children: (state.childrenByHash && state.childrenByHash.get(row.hash)) || [] };
+    if (row) {
+      const children = ((state.childrenByHash && state.childrenByHash.get(row.hash)) || []).map(c => ({ hash: plain(c.hash), parents: (c.parents || []).map(plain) }));
+      ctx.commit = { hash: plain(row.hash), shortHash: row.shortHash, subject: row.subject, parents: (row.parents || []).map(plain), children };
+    }
   } else if (target.kind === 'branch' && target.refType !== 'remote') {
-    ctx.localBranch = { name: target.refName, hash: target.hash };
+    ctx.localBranch = { name: target.refName, hash: plain(target.hash) };
   } else if (target.kind === 'remote-branch' || (target.kind === 'branch' && target.refType === 'remote')) {
-    ctx.remoteBranch = { remote: target.remote, name: target.refName, hash: target.hash };
+    ctx.remoteBranch = { remote: target.remote, name: target.refName, hash: plain(target.hash) };
   } else if (target.kind === 'tag') {
-    const known = ((state.refs && state.refs.tags) || []).find(t => t.name === target.refName);
-    ctx.tag = { name: target.refName, hash: target.hash, annotated: !!(known && known.annotated) };
+    const known = ((view.refs && view.refs.tags) || []).find(t => t.name === target.refName);
+    ctx.tag = { name: target.refName, hash: plain(target.hash), annotated: !!(known && known.annotated) };
   } else if (target.kind === 'stash') {
-    const stash = (state.stashes || []).find(s => s.hash === target.hash);
-    ctx.stash = stash ? { hash: stash.hash, index: stash.index, branch: stash.branch, message: stash.message } : { hash: target.hash };
+    const stash = (view.stashes || []).find(s => s.hash === plain(target.hash));
+    ctx.stash = stash ? { hash: stash.hash, index: stash.index, branch: stash.branch, message: stash.message } : { hash: plain(target.hash) };
   } else if (target.kind === 'file') {
     ctx.file = gitGraphBuildFileCtx(state, target.filePath);
   } else if (target.kind === 'column-header') {
@@ -309,25 +515,39 @@ function gitGraphPopulateTargetField(ctx, state, target) {
 
 /** Assembles the full ctx object git-graph-menus.js's gitGraphBuild*Menu functions read (see that file's own header comment for the contract). */
 function gitGraphBuildMenuCtx(project, state, body, repo, target) {
+  // With several repositories shown, everything about the repository (refs,
+  // remotes, config, HEAD) is its slice's, and the menus get plain hashes.
+  const view = gitGraphViewByPath(state, repo.path);
+  const multi = view !== state;
+  const tag = multi ? gitGraphRepoTag(state, repo.path) : null;
+  const keyOf = (hash) => (tag ? gitGraphRepoKey(tag, hash) : hash);
+  // Compare with the open or ticked commit: only one of this repository.
+  let compareBase = gitGraphCompareBase(state);
+  if (compareBase) {
+    const split = gitGraphSplitKey(compareBase.hash);
+    compareBase = (split.tag || null) === (tag || null) ? { ...compareBase, hash: split.sha } : null;
+  }
   const ctx = {
     projectId: project.id,
     folderPath: repo.path,
-    refresh: () => gitGraphLoadGraph(project, state, body, { reset: true }),
+    refresh: multi
+      ? () => gitGraphReloadSlice(project, state, body, repo.path, { keepScroll: true })
+      : () => gitGraphLoadGraph(project, state, body, { reset: true }),
     onActionError: (message) => { state.error = message; gitGraphPaint(project, state, body); },
-    head: { hash: state.headHash || null, branch: state.headBranchName || null },
-    remotes: state.remotes || [],
-    localBranches: ((state.refs && state.refs.heads) || []).map(h => ({ name: h.name, hash: h.hash })),
-    selectedBranchKeys: state.branchSelection,
-    onSelectBranch: (key) => gitGraphToggleBranchKey(project, state, body, key, true),
-    onUnselectBranch: (key) => gitGraphToggleBranchKey(project, state, body, key, false),
-    issueLinking: (state.repoConfig && state.repoConfig.issueLinking) || null,
-    pullRequestProvider: (state.repoConfig && state.repoConfig.pullRequestProvider) || null,
-    defaultBranch: state.headBranchName || 'main',
-    defaultRemoteName: gitGraphDefaultRemoteName(state.remotes),
+    head: { hash: view.headHash || null, branch: view.headBranchName || null },
+    remotes: view.remotes || [],
+    localBranches: ((view.refs && view.refs.heads) || []).map(h => ({ name: h.name, hash: h.hash })),
+    selectedBranchKeys: view.branchSelection,
+    onSelectBranch: (key) => gitGraphToggleBranchKey(project, state, body, key, true, multi ? repo.path : null),
+    onUnselectBranch: (key) => gitGraphToggleBranchKey(project, state, body, key, false, multi ? repo.path : null),
+    issueLinking: (view.repoConfig && view.repoConfig.issueLinking) || null,
+    pullRequestProvider: (view.repoConfig && view.repoConfig.pullRequestProvider) || null,
+    defaultBranch: view.headBranchName || 'main',
+    defaultRemoteName: gitGraphDefaultRemoteName(view.remotes),
     dialogDefaults: (state.globalPrefs && state.globalPrefs.dialogDefaults) || {},
     contextMenuActionsVisibility: (state.globalPrefs && state.globalPrefs.contextMenuActionsVisibility) || {},
-    remoteBranchesByLocalName: gitGraphRemoteBranchesByLocalName(state.refs),
-    tags: ((state.refs && state.refs.tags) || []).map(t => (typeof t === 'string' ? t : t && t.name)).filter(Boolean),
+    remoteBranchesByLocalName: gitGraphRemoteBranchesByLocalName(view.refs),
+    tags: ((view.refs && view.refs.tags) || []).map(t => (typeof t === 'string' ? t : t && t.name)).filter(Boolean),
     onColumnVisibilityChange: (col, visible) => {
       state.columns[col] = visible;
       gitGraphPatchGlobalPrefs(state, { columnVisibility: { ...state.columns } });
@@ -338,17 +558,17 @@ function gitGraphBuildMenuCtx(project, state, body, repo, target) {
       gitGraphPatchRepoConfig(project, state, { commitsOrder: order });
       gitGraphLoadGraph(project, state, body, { reset: true });
     },
-    onOpenSourceControlView: () => { if (typeof setProjectTab === 'function') setProjectTab(project, 'git'); if (typeof renderOverview === 'function') renderOverview(); },
-    hasUntrackedFiles: !!(state.uncommitted && (state.uncommitted.changes || []).some(f => f.status === 'untracked')),
+    onOpenSourceControlView: () => { if (typeof setProjectGitView === 'function') setProjectGitView(project, 'changes'); if (typeof setProjectTab === 'function') setProjectTab(project, 'git'); if (typeof renderOverview === 'function') renderOverview(); },
+    hasUntrackedFiles: !!(view.uncommitted && (view.uncommitted.changes || []).some(f => f.status === 'untracked')),
     codeReview: state.codeReview ? { key: state.codeReview.key, reviewedPaths: state.codeReview.reviewedPaths } : null,
-    compareBase: gitGraphCompareBase(state),
-    isChecked: (hash) => state.checkedHashes.has(hash),
+    compareBase,
+    isChecked: (hash) => state.checkedHashes.has(keyOf(hash)),
     // Ticking from the menu turns the selection on, so the tick is in sight.
     onSelectForCompare: (hash) => {
       if (!state.selecting) gitGraphSetSelecting(project, state, body, true);
-      gitGraphToggleChecked(project, state, body, hash);
+      gitGraphToggleChecked(project, state, body, keyOf(hash));
     },
-    onCompare: (hash) => gitGraphCompareWithSelected(project, state, body, hash),
+    onCompare: (hash) => gitGraphCompareWithSelected(project, state, body, keyOf(hash)),
     onMarkFileReviewed: (path, reviewed) => gitGraphSetFileReviewed(project, state, body, path, reviewed),
     onViewDiff: (file) => gitGraphOpenFileDiff(project, state, body, repo, file.path),
     onViewFileAtRevision: (file) => gitGraphViewFileAtRevision(project, state, body, repo, file),
@@ -359,17 +579,24 @@ function gitGraphBuildMenuCtx(project, state, body, repo, target) {
     // file externally" call in the app uses.
     onOpenFile: (file) => { gitGraphMarkFileReviewedIfActive(project, state, body, file.path); return gitGraphApi('openFileExternally', file.absolutePath || file.path, repo.path); },
   };
-  gitGraphPopulateTargetField(ctx, state, target);
+  gitGraphPopulateTargetField(ctx, state, target, view);
   return ctx;
+}
+
+/** The repository a right-click is about: the row's for what sits on a row, the open record's for its files and links, the primary's otherwise (the header). */
+function gitGraphTargetRepo(state, target) {
+  if (target.kind === 'file' || target.kind === 'link') return gitGraphDetailsRepo(state);
+  const onRow = ['commit', 'uncommitted', 'branch', 'remote-branch', 'tag', 'stash'].includes(target.kind);
+  return onRow && target.hash ? gitGraphRowRepo(state, target.hash) : gitGraphPrimaryRepo(state);
 }
 
 /** One call site for every right-click: prefers git-graph-menus.js's real dispatcher, falls back to this file's own when it is not loaded (pre-integration/tests). */
 function gitGraphOpenContextMenu(project, state, body, el, position) {
-  const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
-  if (!repo) return;
   const attrReader = typeof gitGraphReadTargetAttrs === 'function' ? gitGraphReadTargetAttrs : null;
   const target = attrReader ? { ...attrReader(el), el } : gitGraphReadTargetData(el);
   if (!target || !target.kind) return;
+  const repo = gitGraphTargetRepo(state, target);
+  if (!repo) return;
   const ctx = gitGraphBuildMenuCtx(project, state, body, repo, target);
   if (typeof gitGraphShowContextMenu === 'function') gitGraphShowContextMenu(el, ctx, position);
   else gitGraphDispatchContextMenu(el, ctx, position, target);
@@ -385,24 +612,35 @@ function gitGraphOpenContextMenu(project, state, body, el, position) {
 function gitGraphHandleDoubleClick(project, state, body, target, ctx) {
   const data = gitGraphReadTargetData(target);
   if (!data) return null;
-  const refresh = () => gitGraphLoadGraph(project, state, body, { reset: true });
+  // A row of a History of several repositories acts on its own repository,
+  // with the plain hash git knows (the key's tag says which it is).
+  const multiRow = !!gitGraphSplitKey(data.hash).tag;
+  const rowRepo = multiRow ? gitGraphRowRepo(state, data.hash) : null;
+  const repoPath = rowRepo ? rowRepo.path : ctx.repoPath;
+  const refresh = rowRepo
+    ? () => gitGraphReloadSlice(project, state, body, repoPath, { keepScroll: true })
+    : () => gitGraphLoadGraph(project, state, body, { reset: true });
   const onActionError = (message) => { state.error = message; gitGraphPaint(project, state, body); };
+  const plainHash = gitGraphPlainHash(data.hash);
+  const localBranchNames = rowRepo
+    ? new Set((((gitGraphRowView(state, data.hash).refs) || {}).heads || []).map(h => h.name))
+    : ctx.localBranchNames;
   if (data.kind === 'commit' && data.hash) {
     if (typeof gitGraphShowCheckoutCommitDialog === 'function') {
       const row = state.rows.find(r => r.hash === data.hash);
-      gitGraphShowCheckoutCommitDialog({ projectId: ctx.projectId, folderPath: ctx.repoPath, refresh, commitHash: data.hash, commitShortHash: row && row.shortHash });
+      gitGraphShowCheckoutCommitDialog({ projectId: ctx.projectId, folderPath: repoPath, refresh, commitHash: plainHash, commitShortHash: row && row.shortHash });
     }
     return 'checkoutCommit';
   }
   if (data.kind === 'branch' && data.refName) {
-    if (typeof gitGraphRunImmediateAction === 'function') gitGraphRunImmediateAction({ projectId: ctx.projectId, folderPath: ctx.repoPath, refresh, onActionError }, 'checkoutBranchImmediate', { name: data.refName });
+    if (typeof gitGraphRunImmediateAction === 'function') gitGraphRunImmediateAction({ projectId: ctx.projectId, folderPath: repoPath, refresh, onActionError }, 'checkoutBranchImmediate', { name: data.refName });
     return 'checkoutBranchImmediate';
   }
   // Either half of a combined local+remote pill checks out the local branch
   // (the remote half carries data-gg-kind="remote-branch"); a standalone
   // remote pill with no matching local branch has nothing to check out.
-  if (data.kind === 'remote-branch' && data.refName && ctx.localBranchNames && ctx.localBranchNames.has(data.refName)) {
-    if (typeof gitGraphRunImmediateAction === 'function') gitGraphRunImmediateAction({ projectId: ctx.projectId, folderPath: ctx.repoPath, refresh, onActionError }, 'checkoutBranchImmediate', { name: data.refName });
+  if (data.kind === 'remote-branch' && data.refName && localBranchNames && localBranchNames.has(data.refName)) {
+    if (typeof gitGraphRunImmediateAction === 'function') gitGraphRunImmediateAction({ projectId: ctx.projectId, folderPath: repoPath, refresh, onActionError }, 'checkoutBranchImmediate', { name: data.refName });
     return 'checkoutBranchImmediate';
   }
   return null;
@@ -414,8 +652,25 @@ function gitGraphMergedRows(state) {
   return gitGraphBuildLayoutInput(state.rawCommits || [], state.stashes || [], state.uncommitted, state.headHash);
 }
 
+/** The rows of the repositories shown, merged into one list (gitGraphMergeSlices), in the order of the tabs. */
+function gitGraphMultiRows(state) {
+  const slices = gitGraphShownRepos(state).map(repo => state.slices.get(repo.path)).filter(Boolean);
+  for (const slice of slices) slice.tag = gitGraphRepoTag(state, slice.path);
+  return { slices, merged: gitGraphMergeSlices(slices, state.order) };
+}
+
 function gitGraphRecomputeLayout(state) {
-  state.rows = gitGraphMergedRows(state);
+  if (gitGraphIsMulti(state) && state.slices && state.slices.size) {
+    // Each repository's lanes side by side: the layout reads only hashes and parents, which are keys here.
+    const { slices, merged } = gitGraphMultiRows(state);
+    state.rows = merged.rows;
+    state.multiHeld = merged.held;
+    state.multiLists = merged.lists;
+    state.hasMore = merged.hasMore;
+    state.childrenByHash = gitGraphComputeChildren(slices.flatMap(slice => gitGraphNamespaceRows(slice.rawCommits, slice.tag, slice.path)));
+  } else {
+    state.rows = gitGraphMergedRows(state);
+  }
   const layoutFn = gitGraphResolveLayoutFn();
   state.layout = layoutFn(state.rows, state.order, { firstParentOnly: state.firstParentOnly });
 }
@@ -456,7 +711,10 @@ function gitGraphLoadGraph(project, state, body, opts = {}) {
   const repo = (state.repositories || []).find(r => r.path === state.selectedRepo) || (state.repositories || [])[0];
   if (!repo) return Promise.resolve();
   state.selectedRepo = repo.path;
+  if (gitGraphIsMulti(state)) return gitGraphLoadMultiGraph(project, state, body, opts);
+  if (state.slices && state.slices.size) state.slices.clear();
   const reset = opts.reset !== false;
+  if (reset) state.loadedKey = gitGraphSelectionKey(state);
   // A quiet reload (the working tree changed under an open graph) keeps the
   // rows on screen until the new ones arrive and reloads as many as were
   // loaded, so the table neither blanks nor jumps.
@@ -547,7 +805,11 @@ function gitGraphLoadGraph(project, state, body, opts = {}) {
 function gitGraphFocusPending(project, state, body) {
   const hash = state.pendingFocusHash;
   if (!hash) return;
-  const row = (state.rows || []).find(r => r.hash === hash);
+  // Asked for by its plain hash and the repository's path: with several
+  // repositories shown the row is "<tag>:<hash>".
+  const tag = state.pendingFocusRepo && gitGraphIsMulti(state) ? gitGraphRepoTag(state, state.pendingFocusRepo) : null;
+  const key = tag ? gitGraphRepoKey(tag, hash) : hash;
+  const row = (state.rows || []).find(r => r.hash === key);
   if (row) {
     state.pendingFocusHash = null;
     state.focusTries = 0;
@@ -563,6 +825,193 @@ function gitGraphFocusPending(project, state, body) {
   state.focusTries = 0;
 }
 
+// --- Loading several repositories at once ---
+
+/** What the shown repositories are asked for besides what they all share (order, first parent, Show Remote). */
+function gitGraphSliceQuery(state, slice, { skip, limit, refsUnchanged }) {
+  return {
+    branches: slice.branchSelection,
+    tags: slice.tagSelection,
+    order: state.order,
+    limit,
+    skip,
+    firstParentOnly: state.firstParentOnly,
+    includeReflogCommits: slice.includeReflogCommits,
+    showRemote: state.showRemoteBranches,
+    showTags: slice.showTags,
+    showStashes: slice.showStashesPref,
+    refsUnchanged,
+  };
+}
+
+/** One repository's commits, asked for; the answer says which request it is, so a stale one is told apart. */
+function gitGraphFetchSlice(project, state, slice, params) {
+  const request = ++slice.request;
+  return gitGraphApi('getProjectGitGraph', project.id, slice.path, gitGraphSliceQuery(state, slice, params))
+    .then(result => ({ slice, request, result }), err => ({ slice, request, result: { error: (err && err.message) || '' } }));
+}
+
+/** An answer onto its slice. False when a newer request of that repository has been made since (this one is stale). */
+function gitGraphApplySliceResult(slice, request, result, reset) {
+  if (request !== slice.request) return false;
+  if (!result || !result.ok) {
+    slice.error = (result && result.error) || 'Could not load the commit graph.';
+    return true;
+  }
+  slice.error = '';
+  const incoming = result.commits || [];
+  slice.rawCommits = reset ? incoming : [...(slice.rawCommits || []), ...incoming];
+  if (result.refs) slice.refs = result.refs;
+  slice.stashes = result.stashes || [];
+  slice.uncommitted = slice.showUncommittedChangesPref !== false ? (result.uncommitted || null) : null;
+  slice.headHash = (slice.rawCommits.find(c => c.isHead) || {}).hash || slice.headHash;
+  slice.headBranchName = ((slice.refs && slice.refs.heads || []).find(h => h.isHead) || {}).name || null;
+  slice.hasMore = !!result.hasMore;
+  return true;
+}
+
+/** Commits asked for each repository the first time: enough that together they fill the table, at least 100 each. */
+function gitGraphPerRepoLimit(state, count) {
+  return Math.max(100, Math.ceil((state.initialLoad || GG_INITIAL_LOAD) / Math.max(1, count)));
+}
+
+/**
+ * The repository's own config, read once when it joins the History (a
+ * repository's saved branches, what it shows). The primary's is the state's:
+ * it is read only when the state has none yet.
+ */
+function gitGraphReadSliceConfig(project, state, body, slice) {
+  const primary = slice.path === state.selectedRepo;
+  return gitGraphApi('getGitGraphRepoConfig', project.id, slice.path).then((r) => {
+    slice.configLoaded = true;
+    if (!(r && r.ok)) return;
+    if (primary) {
+      gitGraphApplyRepoConfigToState(state, r.config);
+      gitGraphApplyRepoConfigToSlice(slice, r.config);
+      const repo = gitGraphPrimaryRepo(state);
+      if (repo) gitGraphMaybePromptTrust(project, state, body, repo);
+    } else {
+      gitGraphApplyRepoConfigToSlice(slice, r.config);
+      gitGraphApplyOnLoadSelection(slice, r.config, null);
+    }
+  }, () => { slice.configLoaded = true; });
+}
+
+/** What every load of a History of several ends with: the merge, the layout, the paint. */
+function gitGraphFinishMulti(project, state, body, opts = {}) {
+  const slices = [...state.slices.values()];
+  const failed = slices.filter(slice => slice.error);
+  state.loading = false;
+  state.loadingMore = false;
+  if (slices.length && failed.length === slices.length) {
+    state.error = failed.map(slice => `${pathBasename(slice.path) || slice.path}: ${slice.error}`).join('; ');
+    gitGraphPaint(project, state, body);
+    return;
+  }
+  gitGraphRecomputeLayout(state);
+  gitGraphMirrorPrimary(state);
+  gitGraphPaint(project, state, body, { preserveScroll: !!opts.preserveScroll });
+  if (state.pendingFocusHash) gitGraphFocusPending(project, state, body);
+}
+
+function gitGraphLoadMultiGraph(project, state, body, opts = {}) {
+  const repos = gitGraphShownRepos(state);
+  const reset = opts.reset !== false;
+  // A quiet reload (a working tree changed under an open History) keeps the
+  // rows on screen until the new ones arrive and reloads as many as were loaded.
+  const quiet = reset && !!opts.keepScroll && (state.rows || []).length > 0;
+  if (!repos.some(r => r.path === state.selectedRepo)) {
+    // The primary is not one that can be shown (not a Git repository): the first one takes over.
+    state.selectedRepo = repos[0].path;
+    gitGraphAdoptPrimary(state);
+  }
+  gitGraphSyncSlices(state, repos);
+  const slices = repos.map(r => state.slices.get(r.path));
+  const request = ++state.request;
+  if (reset) state.loadedKey = gitGraphSelectionKey(state);
+
+  if (!reset) return gitGraphLoadMoreMulti(project, state, body, slices, request);
+
+  if (!quiet) {
+    for (const slice of slices) { slice.rawCommits = []; slice.error = ''; }
+    state.loading = true;
+    state.error = '';
+    gitGraphPaint(project, state, body);
+  }
+  const perRepo = gitGraphPerRepoLimit(state, slices.length);
+  return Promise.all(slices.filter(slice => !slice.configLoaded).map(slice => gitGraphReadSliceConfig(project, state, body, slice)))
+    .then(() => {
+      if (request !== state.request) return null;
+      if (state.selectedRepo && state.slices.has(state.selectedRepo)) gitGraphCopySettings(state, state.slices.get(state.selectedRepo));
+      return Promise.all(slices.map(slice => gitGraphFetchSlice(project, state, slice, {
+        skip: 0,
+        limit: quiet ? Math.min(5000, Math.max(perRepo, slice.rawCommits.length)) : perRepo,
+        refsUnchanged: false,
+      })));
+    })
+    .then((answers) => {
+      if (!answers || request !== state.request) return;
+      for (const { slice, request: asked, result } of answers) gitGraphApplySliceResult(slice, asked, result, true);
+      gitGraphFinishMulti(project, state, body, { preserveScroll: quiet });
+      // Remotes and preferences don't change with the working tree.
+      if (quiet) return;
+      Promise.all(slices.map(slice => gitGraphApi('getGitGraphRemotes', project.id, slice.path).then((r) => { slice.remotes = (r && r.ok && r.remotes) || []; })))
+        .then(() => {
+          gitGraphMirrorPrimary(state);
+          if (body.isConnected && gitGraphStillActive(project)) gitGraphPaint(project, state, body, { preserveScroll: true });
+        });
+      gitGraphApi('getGitGraphGlobalPreferences').then((r) => {
+        if (r && r.ok) gitGraphApplyGlobalPrefsToState(state, r.preferences);
+      });
+    })
+    .catch((err) => {
+      if (request !== state.request) return;
+      state.loading = false;
+      state.loadingMore = false;
+      state.error = (err && err.message) || 'Could not load the commit graph.';
+      gitGraphPaint(project, state, body);
+    });
+}
+
+/** Load More: only the repositories the merge needs more of (RepoSelection.repoPagePlan), each from the commits it holds. */
+function gitGraphLoadMoreMulti(project, state, body, slices, request) {
+  const want = state.loadMore || GG_LOAD_MORE;
+  const plan = RepoSelection.repoPagePlan(state.multiLists || [], state.multiHeld || {}, want);
+  const chosen = slices.filter(slice => plan.includes(slice.tag));
+  if (!chosen.length) {
+    state.hasMore = false;
+    gitGraphPaint(project, state, body, { preserveScroll: true });
+    return Promise.resolve();
+  }
+  state.loadingMore = true;
+  gitGraphPaint(project, state, body, { preserveScroll: true });
+  return Promise.all(chosen.map(slice => gitGraphFetchSlice(project, state, slice, { skip: slice.rawCommits.length, limit: want, refsUnchanged: true })))
+    .then((answers) => {
+      if (request !== state.request) return;
+      for (const { slice, request: asked, result } of answers) gitGraphApplySliceResult(slice, asked, result, false);
+      gitGraphFinishMulti(project, state, body, { preserveScroll: true });
+    });
+}
+
+/**
+ * One repository read again, the others left as they are: a working tree
+ * that changed, a branch picked, an action that ran. keepScroll reloads as
+ * many commits as were loaded and leaves the table where it was.
+ */
+function gitGraphReloadSlice(project, state, body, path, opts = {}) {
+  const slice = state.slices && state.slices.get(path);
+  if (!slice || !gitGraphIsMulti(state)) return gitGraphLoadGraph(project, state, body, { reset: true, keepScroll: !!opts.keepScroll });
+  if (path === state.selectedRepo) gitGraphCopySettings(state, slice);
+  const perRepo = gitGraphPerRepoLimit(state, gitGraphShownRepos(state).length);
+  const limit = opts.keepScroll ? Math.min(5000, Math.max(perRepo, slice.rawCommits.length)) : perRepo;
+  return gitGraphFetchSlice(project, state, slice, { skip: 0, limit, refsUnchanged: false }).then(({ request, result }) => {
+    if (!gitGraphApplySliceResult(slice, request, result, true)) return;
+    if (!body.isConnected || !gitGraphStillActive(project)) return;
+    state.error = '';
+    gitGraphFinishMulti(project, state, body, { preserveScroll: !!opts.keepScroll });
+  });
+}
+
 function gitGraphStillActive(project) {
   return typeof selectedProject === 'function' && selectedProject()?.id === project.id &&
     typeof projectTab === 'function' && projectTab(project) === 'git' &&
@@ -576,6 +1025,7 @@ function renderProjectGitGraphTab(project, body) {
   const prefs = gitGraphLoadUiPrefs(project.id);
   Object.assign(state, {
     selectedRepo: state.selectedRepo || prefs.selectedRepo || null,
+    selectedRepos: (state.selectedRepos && state.selectedRepos.length) ? state.selectedRepos : (Array.isArray(prefs.selectedRepos) ? prefs.selectedRepos : []),
     columns: prefs.columns || state.columns,
     columnWidths: prefs.columnWidths || state.columnWidths,
     branchSelection: prefs.branchSelection || state.branchSelection,
@@ -596,7 +1046,17 @@ function renderProjectGitGraphTab(project, body) {
   const cachedPaths = (state.repositories || []).map(r => r.path);
   const repositoriesStale = !!state.repositories && !gitGraphSameStringSet(cachedPaths, freshPaths);
 
-  if (state.repositories && !repositoriesStale) { gitGraphPaint(project, state, body); return; }
+  if (state.repositories && !repositoriesStale) {
+    // Another view handed over other repositories (Pull Requests, Worktrees):
+    // what is loaded is of the ones it showed before.
+    if (state.loadedKey && state.loadedKey !== gitGraphSelectionKey(state)) {
+      gitGraphClearForSelection(state);
+      gitGraphLoadGraph(project, state, body, { reset: true });
+      return;
+    }
+    gitGraphPaint(project, state, body);
+    return;
+  }
   const firstLoad = !state.repositories;
   if (firstLoad) body.innerHTML = '<div class="gg-loading"><span class="gg-loading-dot"></span>Reading repository…</div>';
   gitGraphLoadRepositories(project, state).then(() => {
@@ -608,6 +1068,13 @@ function renderProjectGitGraphTab(project, body) {
       // than re-running the whole first-load sequence (preferences + graph)
       // and losing the user's place.
       state.repositories = gitGraphSortRepositories(state.repositories, state.repositoryDropdownOrder);
+      // The rows' tags are positions among the tabs: with several repositories
+      // shown, a changed list means loading again.
+      if (gitGraphIsMulti(state) || (state.loadedKey && state.loadedKey.includes('\n'))) {
+        gitGraphClearForSelection(state);
+        gitGraphLoadGraph(project, state, body, { reset: true });
+        return;
+      }
       gitGraphPaint(project, state, body);
       return;
     }
@@ -643,35 +1110,41 @@ function gitGraphPaint(project, state, body, opts = {}) {
     body.innerHTML = '<div class="gg-empty-state"><div class="gg-empty-title">No folders attached</div><div>Attach a repository to this project to see its history here.</div></div>';
     return;
   }
-  const repo = repos.find(r => r.path === state.selectedRepo) || repos[0];
+  const shown = gitGraphShownRepos(state);
+  const multi = shown.length > 1;
+  const repo = (multi ? shown.find(r => r.path === state.selectedRepo) : null) || repos.find(r => r.path === state.selectedRepo) || repos[0];
   state.selectedRepo = repo.path;
+  const tabs = gitGraphHistoryTabsHtml(project, state, repo);
 
-  if (repo.git === false) {
-    body.innerHTML = `<div class="gg-tab-shell">${gitGraphRepoPickerHtml(repos, repo)}<div class="gg-empty-state"><div class="gg-empty-title">Not a Git repository</div><div>${escapeHtml(repo.path)}</div></div></div>`;
+  if (!multi && repo.git === false) {
+    body.innerHTML = `<div class="gg-tab-shell">${tabs}<div class="gg-empty-state"><div class="gg-empty-title">Not a Git repository</div><div>${escapeHtml(repo.path)}</div></div></div>`;
     gitGraphWireRepoPicker(project, state, body);
     return;
   }
 
   if (state.error) {
-    body.innerHTML = `<div class="gg-tab-shell">${gitGraphRepoPickerHtml(repos, repo)}<div class="gg-error-state"><div class="gg-empty-title">Git Graph could not load this repository</div><div>${escapeHtml(state.error)}</div><button type="button" class="ws-btn" id="gg-retry">Retry</button></div></div>`;
+    const title = multi ? 'Git Graph could not load these repositories' : 'Git Graph could not load this repository';
+    body.innerHTML = `<div class="gg-tab-shell">${tabs}<div class="gg-error-state"><div class="gg-empty-title">${title}</div><div>${escapeHtml(state.error)}</div><button type="button" class="ws-btn" id="gg-retry">Retry</button></div></div>`;
     body.querySelector('#gg-retry').onclick = () => gitGraphLoadGraph(project, state, body, { reset: true });
     gitGraphWireRepoPicker(project, state, body);
     return;
   }
 
   if (state.loading && !state.rows.length) {
-    body.innerHTML = `<div class="gg-tab-shell">${gitGraphRepoPickerHtml(repos, repo)}<div class="gg-loading"><span class="gg-loading-dot"></span>Loading commits…</div></div>`;
+    body.innerHTML = `<div class="gg-tab-shell">${tabs}<div class="gg-loading"><span class="gg-loading-dot"></span>Loading commits…</div></div>`;
     gitGraphWireRepoPicker(project, state, body);
     return;
   }
 
   gitGraphKeepFileView(body, state);
+  const repoWidth = multi ? ` style="--gg-repo-col:${gitGraphRepoColumnWidth(state)}px"` : '';
   body.innerHTML = `
     <div class="gg-tab-shell gg-ref-align-${escapeHtml(state.referenceLabelAlignment || 'normal')}">
-      ${gitGraphRepoPickerHtml(repos, repo)}
+      ${tabs}
       ${gitGraphControlBarHtml(project, state)}
+      ${multi ? gitGraphSliceErrorsHtml(state) : ''}
       ${gitGraphFindWidgetHtml(state)}
-      <div class="gg-table-wrap${state.selecting ? '' : ' gg-no-select'}">
+      <div class="gg-table-wrap${state.selecting ? '' : ' gg-no-select'}${multi ? ' gg-multi-repo' : ''}"${repoWidth}>
         ${gitGraphHeaderHtml(state)}
         <div class="gg-tbody" id="gg-tbody">${gitGraphRowsHtml(project, state)}</div>
         ${state.hasMore ? '<button type="button" class="gg-load-more" id="gg-load-more">Load More Commits</button>' : ''}
@@ -682,6 +1155,7 @@ function gitGraphPaint(project, state, body, opts = {}) {
 
   gitGraphFitDetailsHeight(state, body.querySelector('.gg-table-wrap'));
   gitGraphWireRepoPicker(project, state, body);
+  gitGraphWireSliceErrors(project, state, body);
   gitGraphWireControlBar(project, state, body);
   gitGraphWireFindWidget(project, state, body);
   gitGraphWireHeader(project, state, body);
@@ -752,17 +1226,89 @@ function gitGraphRestoreInlineScrolls(body, state, saved) {
   }
 }
 
+/**
+ * The Repository column's width: the one the user dragged it to, else enough
+ * for the longest name shown (names of one project often share a prefix, so
+ * cutting them early would make them look alike), within reason.
+ */
+function gitGraphRepoColumnWidth(state) {
+  const dragged = state.columnWidths && Number(state.columnWidths.repo);
+  if (dragged) return dragged;
+  const names = gitGraphShownRepos(state).map((repo) => pathBasename(repo.path) || repo.path);
+  const longest = names.reduce((max, name) => Math.max(max, String(name).length), 0);
+  return Math.max(90, Math.min(220, Math.round(longest * 6.6) + 22));
+}
+
+/** The repository tabs of a view that shows one repository at a time (Actions): git-repo-tabs.js without checkboxes. */
 function gitGraphRepoPickerHtml(repos, active) {
-  if (repos.length <= 1) return '';
-  return `<div class="gg-repo-picker" role="tablist" aria-label="Repositories">${repos.map((r, i) => `<button type="button" class="gg-repo-option ${r.path === active.path ? 'active' : ''}" data-index="${i}" title="${escapeAttr(r.path)}">${escapeHtml(pathBasename(r.path) || r.path)}</button>`).join('')}</div>`;
+  if (typeof gitRepoTabsHtml !== 'function') return '';
+  return gitRepoTabsHtml(repos, { primary: active && active.path, paths: active ? [active.path] : [] }, { multi: false });
+}
+
+/** The History's repository tabs: a name shows that repository alone, the checkbox on hover adds or takes away one (git-repo-tabs.js). */
+function gitGraphHistoryTabsHtml(project, state, repo) {
+  const repos = state.repositories || [];
+  if (typeof gitRepoTabsHtml !== 'function') return gitGraphRepoPickerHtml(repos, repo);
+  const colors = typeof gitRepoColors === 'function' ? gitRepoColors(project, repos) : {};
+  return gitRepoTabsHtml(repos, gitGraphSelection(state), { multi: true, colors });
+}
+
+/**
+ * What a change of the repositories shown does: the open record, the ticks,
+ * the search and (when it turns the table into or out of a merged one) the
+ * rows belong to the old selection. The old primary's settings go back to its
+ * slice before the new primary's come in.
+ */
+function gitGraphClearForSelection(state) {
+  state.selectedHash = null;
+  state.compareHash = null;
+  state.detailsData = null;
+  state.openFile = null;
+  state.keptFileView = null;
+  state.codeReview = null;
+  state.lastViewedFilePath = null;
+  state.checkedHashes.clear();
+  state.findMatches = [];
+  state.findIndex = -1;
+  state.rows = [];
+  state.layout = [];
+}
+
+/** Applies a change to the repositories shown (mutate() changes the state's selection, true when it did) and loads again. */
+function gitGraphChangeSelection(project, state, body, mutate) {
+  const wasMulti = gitGraphIsMulti(state);
+  const before = state.selectedRepo;
+  const oldSlice = state.slices && state.slices.get(before);
+  if (oldSlice) gitGraphCopySettings(state, oldSlice);
+  if (!mutate()) return false;
+  const isMulti = gitGraphIsMulti(state);
+  if (wasMulti || isMulti) gitGraphClearForSelection(state);
+  else {
+    state.selectedHash = null;
+    state.detailsData = null;
+    state.checkedHashes.clear();
+  }
+  if (state.selectedRepo !== before) gitGraphAdoptPrimary(state);
+  gitGraphSaveUiPrefs(project.id, state);
+  gitGraphLoadGraph(project, state, body, { reset: true });
+  return true;
 }
 
 function gitGraphWireRepoPicker(project, state, body) {
+  const repos = state.repositories || [];
+  if (typeof gitWireRepoTabs === 'function') {
+    gitWireRepoTabs(body, repos, {
+      onOnly: (repo) => gitGraphChangeSelection(project, state, body, () => gitRepoSelectOnly(state, repos, repo)),
+      onToggle: (repo) => gitGraphChangeSelection(project, state, body, () => gitRepoToggle(state, repos, repo)),
+    });
+    return;
+  }
   body.querySelectorAll('.gg-repo-option').forEach((btn) => {
-    const repo = (state.repositories || [])[Number(btn.dataset.index)];
+    const repo = repos[Number(btn.dataset.index)];
     if (!repo) return;
     btn.onclick = () => {
       state.selectedRepo = repo.path;
+      state.selectedRepos = [repo.path];
       state.selectedHash = null;
       state.detailsData = null;
       state.checkedHashes.clear();
@@ -772,23 +1318,87 @@ function gitGraphWireRepoPicker(project, state, body) {
   });
 }
 
+/** A repository that could not be read, over the table that shows the others: one line each, with Retry. */
+function gitGraphSliceErrorsHtml(state) {
+  const failed = [...(state.slices ? state.slices.values() : [])].filter(slice => slice.error);
+  if (!failed.length) return '';
+  const lines = failed.map(slice => {
+    const name = pathBasename(slice.path) || slice.path;
+    return `<div class="gg-slice-error"><span class="gg-slice-error-text"><strong>${escapeHtml(name)}</strong> could not be read: ${escapeHtml(slice.error)}</span><button type="button" class="ws-btn gg-slice-retry" data-path="${escapeAttr(slice.path)}">Retry</button></div>`;
+  }).join('');
+  return `<div class="gg-slice-errors">${lines}</div>`;
+}
+
+function gitGraphWireSliceErrors(project, state, body) {
+  body.querySelectorAll('.gg-slice-retry').forEach((button) => {
+    button.onclick = () => gitGraphReloadSlice(project, state, body, button.dataset.path, {});
+  });
+}
+
 // --- Control bar ---
 
-function gitGraphControlBarHtml(project, state) {
-  const branchCount = (state.refs?.heads?.length || 0) + (state.refs?.remotes?.length || 0);
+/** The Branches button's text: what is selected, over one repository or over all the ones shown. */
+function gitGraphBranchesLabel(state) {
+  if (gitGraphIsMulti(state)) {
+    const slices = gitGraphShownRepos(state).map(r => state.slices && state.slices.get(r.path)).filter(Boolean);
+    const filtered = slices.some(slice => Array.isArray(slice.branchSelection));
+    const tagged = slices.filter(slice => Array.isArray(slice.tagSelection));
+    const repoCount = gitGraphShownRepos(state).length;
+    const branchCount = slices.reduce((sum, slice) => sum + (Array.isArray(slice.branchSelection) ? slice.branchSelection.length : gitGraphAllBranchKeys(slice).length), 0);
+    const branches = filtered ? `${branchCount} branch${branchCount === 1 ? '' : 'es'} · ${repoCount} repos` : 'Show All';
+    if (!tagged.length) return branches;
+    const tagCount = tagged.reduce((sum, slice) => sum + slice.tagSelection.length, 0);
+    return `${branches} · ${tagCount} tag${tagCount === 1 ? '' : 's'}`;
+  }
   const branchLabel = !Array.isArray(state.branchSelection) ? 'Show All'
     : state.branchSelection.length
       ? `${state.branchSelection.length} branch${state.branchSelection.length === 1 ? '' : 'es'}`
       : 'None';
   const tagCount = Array.isArray(state.tagSelection) ? state.tagSelection.length : null;
   const tagLabel = tagCount === null ? '' : ` · ${tagCount} tag${tagCount === 1 ? '' : 's'}`;
+  return branchLabel + tagLabel;
+}
+
+/** The checked-out branch of a repository: its name, "detached at <hash>", or null while it is not known. */
+function gitGraphHeadName(view, repo) {
+  const name = view.headBranchName || (repo && !repo.detached && repo.branch) || null;
+  if (name) return name;
+  const hash = view.headHash || (repo && repo.head) || null;
+  if (!hash) return null;
+  const commit = (view.rawCommits || []).find(c => c.hash === hash);
+  return `detached at ${(commit && commit.shortHash) || String(hash).slice(0, 8)}`;
+}
+
+/**
+ * Where the toolbar shows the checked-out branch (HEAD) of the repository, so
+ * it is in sight: one chip with one repository, one chip per repository shown
+ * with several, each in that repository's color (the one of its Repository
+ * column), with the repository's name as the tooltip.
+ */
+function gitGraphHeadBranchesHtml(project, state) {
+  const shown = gitGraphShownRepos(state);
+  const multi = shown.length > 1;
+  const colors = multi && typeof gitRepoColors === 'function' ? gitRepoColors(project, state.repositories || []) : {};
+  const chips = shown.map((repo) => {
+    const view = multi ? (state.slices && state.slices.get(repo.path)) || {} : state;
+    const name = gitGraphHeadName(view, repo);
+    if (!name) return '';
+    const repoName = (typeof gitRepoTabLabel === 'function' ? gitRepoTabLabel(repo) : pathBasename(repo.path)) || repo.path;
+    const style = multi && colors[repo.colorKey || repo.path] ? ` style="--repo-color:${escapeAttr(colors[repo.colorKey || repo.path])}"` : '';
+    const title = multi ? `${repoName}: ${name}` : `Checked out: ${name}`;
+    return `<span class="gg-head-branch" title="${escapeAttr(title)}"${style}>${gitGraphIcon('branch', 12)}<span>${escapeHtml(name)}</span></span>`;
+  }).join('');
+  return chips ? `<div class="gg-head-branches" id="gg-head-branches">${chips}</div>` : '';
+}
+
+function gitGraphControlBarHtml(project, state) {
   return `
     <div class="gg-toolbar">
       <div class="gg-toolbar-left">
         <div class="gg-branches-dropdown">
-          <button type="button" class="gg-toolbar-btn" id="gg-branches-btn">${gitGraphIcon('branch', 13)}<span>Branches: ${escapeHtml(branchLabel + tagLabel)}</span>${gitGraphIcon('chevronDown', 10)}</button>
+          <button type="button" class="gg-toolbar-btn" id="gg-branches-btn">${gitGraphIcon('branch', 13)}<span>Branches: ${escapeHtml(gitGraphBranchesLabel(state))}</span>${gitGraphIcon('chevronDown', 10)}</button>
         </div>
-        <label class="gg-checkbox"><input type="checkbox" id="gg-show-remote" ${state.showRemoteBranches ? 'checked' : ''}> Show Remote</label>
+        ${gitGraphHeadBranchesHtml(project, state)}
       </div>
       <div class="gg-toolbar-right">
         <span class="gg-compare-slot" id="gg-compare-slot">${gitGraphCompareSlotHtml(state)}</span>
@@ -806,12 +1416,6 @@ function gitGraphControlBarHtml(project, state) {
 
 function gitGraphWireControlBar(project, state, body) {
   const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
-  body.querySelector('#gg-show-remote').onchange = (e) => {
-    state.showRemoteBranches = e.target.checked;
-    gitGraphSaveUiPrefs(project.id, state);
-    gitGraphPatchRepoConfig(project, state, { showRemoteBranches: e.target.checked });
-    gitGraphLoadGraph(project, state, body, { reset: true });
-  };
   body.querySelector('#gg-find-btn').onclick = () => { state.findOpen = !state.findOpen; gitGraphPaint(project, state, body); };
   const selectBtn = body.querySelector('#gg-select-menu-btn');
   selectBtn.onclick = () => showContextMenu(gitGraphSelectionMenuItems(project, state, body), { anchor: selectBtn });
@@ -852,6 +1456,47 @@ function gitGraphToggleBranchesMenu(project, state, body, anchor) {
   gitGraphOpenBranchesMenu(project, state, body, anchor);
 }
 
+/**
+ * The branches (or tags) the dropdown lists, one section per repository
+ * shown: a History of one repository has a single section without a header.
+ * Each: { path, label, color, view, names (sorted), selected (Set) }.
+ */
+function gitGraphBranchesSections(project, state, tab, sortDir) {
+  const shown = gitGraphShownRepos(state);
+  const multi = shown.length > 1;
+  const colors = multi && typeof gitRepoColors === 'function' ? gitRepoColors(project, state.repositories || []) : {};
+  const selKey = tab === 'tags' ? 'tagSelection' : 'branchSelection';
+  return shown.map((repo) => {
+    const view = multi ? (state.slices && state.slices.get(repo.path)) || state : state;
+    let names;
+    if (tab === 'tags') {
+      names = (view.refs?.tags || []).map(t => t.name);
+    } else {
+      const heads = view.refs?.heads || [];
+      const remotes = state.showRemoteBranches ? gitGraphVisibleRemotes(view.refs?.remotes || [], view.repoConfig && view.repoConfig.perRemoteVisibility) : [];
+      names = [...heads.map(h => h.name), ...remotes.map(r => `${r.remote}/${r.name}`)];
+    }
+    // Natural order, so v1.10 sorts after v1.9.
+    names.sort((a, b) => sortDir * a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    const selection = view[selKey] || 'all';
+    return {
+      path: repo.path, view, names, selected: selection === 'all' ? new Set(names) : new Set(selection),
+      label: (typeof gitRepoTabLabel === 'function' ? gitRepoTabLabel(repo) : pathBasename(repo.path)) || repo.path,
+      color: colors[repo.colorKey || repo.path] || '',
+    };
+  });
+}
+
+function gitGraphBranchesSectionHtml(section, tab, multi) {
+  const rows = section.names.length
+    ? section.names.map(name => `<label class="gg-branches-row" data-name="${escapeAttr(name)}"><input type="checkbox" data-name="${escapeAttr(name)}"${multi ? ` data-repo="${escapeAttr(section.path)}"` : ''} ${section.selected.has(name) ? 'checked' : ''}> ${escapeHtml(name)}</label>`).join('')
+    : `<div class="gg-empty-row">No ${tab}.</div>`;
+  if (!multi) return rows;
+  const style = section.color ? ` style="--repo-color:${escapeAttr(section.color)}"` : '';
+  return `<div class="gg-branches-section" data-repo="${escapeAttr(section.path)}"${style}>
+    <div class="gg-branches-section-head"><span class="gg-branches-section-name" title="${escapeAttr(section.path)}">${escapeHtml(section.label)}</span><span class="gg-branches-section-actions"><button type="button" data-section-act="all" data-repo="${escapeAttr(section.path)}">All</button><button type="button" data-section-act="none" data-repo="${escapeAttr(section.path)}">None</button></span></div>${rows}</div>`;
+}
+
 function gitGraphOpenBranchesMenu(project, state, body, anchor) {
   const menu = body.querySelector('#gg-branches-menu');
   if (!menu) return;
@@ -859,23 +1504,15 @@ function gitGraphOpenBranchesMenu(project, state, body, anchor) {
   state.branchesMenuOpen = true;
   const tab = state.branchesMenuTab === 'tags' ? 'tags' : 'branches';
   const selKey = tab === 'tags' ? 'tagSelection' : 'branchSelection';
-  let allNames;
-  if (tab === 'tags') {
-    allNames = (state.refs?.tags || []).map(t => t.name);
-  } else {
-    const heads = state.refs?.heads || [];
-    const remotes = state.showRemoteBranches ? gitGraphVisibleRemotes(state.refs?.remotes || [], state.repoConfig && state.repoConfig.perRemoteVisibility) : [];
-    allNames = [...heads.map(h => h.name), ...remotes.map(r => `${r.remote}/${r.name}`)];
-  }
-  // Natural order, so v1.10 sorts after v1.9.
   const sortDir = state.refSort === 'desc' ? -1 : 1;
-  allNames.sort((a, b) => sortDir * a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-  const selection = state[selKey] || 'all';
-  const selected = selection === 'all' ? new Set(allNames) : new Set(selection);
+  const sections = gitGraphBranchesSections(project, state, tab, sortDir);
+  const multi = sections.length > 1;
+  // Show Remote lives here, in the row of the tabs before the sort button.
   menu.innerHTML = `
     <div class="gg-branches-tabs">
       <button type="button" class="gg-branches-tab ${tab === 'branches' ? 'active' : ''}" data-tab="branches">Branches</button>
       <button type="button" class="gg-branches-tab ${tab === 'tags' ? 'active' : ''}" data-tab="tags">Tags</button>
+      <label class="gg-checkbox gg-branches-remote" title="${multi ? 'Show remote branches in every repository shown' : 'Show remote branches'}"><input type="checkbox" id="gg-show-remote" ${state.showRemoteBranches ? 'checked' : ''}> Show Remote</label>
       <button type="button" class="gg-branches-sort" id="gg-branches-sort" title="${sortDir === 1 ? 'Sorted A to Z — click for Z to A' : 'Sorted Z to A — click for A to Z'}">${sortDir === 1 ? 'A→Z' : 'Z→A'}</button>
     </div>
     <div class="gg-branches-search"><input type="text" id="gg-branches-filter" placeholder="Filter ${tab}…"></div>
@@ -884,7 +1521,7 @@ function gitGraphOpenBranchesMenu(project, state, body, anchor) {
       <button type="button" data-act="none">Deselect All</button>
       <button type="button" data-act="invert">Invert Selection</button>
     </div>
-    <div class="gg-branches-list">${allNames.length ? allNames.map(name => `<label class="gg-branches-row" data-name="${escapeAttr(name)}"><input type="checkbox" data-name="${escapeAttr(name)}" ${selected.has(name) ? 'checked' : ''}> ${escapeHtml(name)}</label>`).join('') : `<div class="gg-empty-row">No ${tab}.</div>`}</div>`;
+    <div class="gg-branches-list">${sections.map(section => gitGraphBranchesSectionHtml(section, tab, multi)).join('')}</div>`;
   menu.style.display = 'block';
   // Fixed to the button so it floats above the graph instead of sitting in the page flow.
   const rect = anchor.getBoundingClientRect();
@@ -905,6 +1542,17 @@ function gitGraphOpenBranchesMenu(project, state, body, anchor) {
   menu.querySelectorAll('.gg-branches-tab').forEach((btn) => {
     btn.onclick = () => { state.branchesMenuTab = btn.dataset.tab; state.branchesFilter = ''; gitGraphOpenBranchesMenu(project, state, body, anchor); };
   });
+  // Show Remote applies to every repository shown: the primary's config and
+  // the others', then everything is read again.
+  menu.querySelector('#gg-show-remote').onchange = (e) => {
+    state.showRemoteBranches = e.target.checked;
+    gitGraphSaveUiPrefs(project.id, state);
+    gitGraphPatchRepoConfig(project, state, { showRemoteBranches: e.target.checked });
+    for (const section of sections) {
+      if (section.path !== state.selectedRepo) gitGraphPatchRepoConfigFor(project, state, section.path, { showRemoteBranches: e.target.checked });
+    }
+    gitGraphLoadGraph(project, state, body, { reset: true });
+  };
   menu.querySelector('#gg-branches-sort').onclick = () => {
     state.refSort = sortDir === 1 ? 'desc' : 'asc';
     gitGraphSaveUiPrefs(project.id, state);
@@ -919,7 +1567,14 @@ function gitGraphOpenBranchesMenu(project, state, body, anchor) {
     });
   };
   applyFilter();
-  const commit = (next) => {
+  const currentOf = (section) => {
+    const selection = section.view[selKey] || 'all';
+    return selection === 'all' ? new Set(section.names) : new Set(selection);
+  };
+  // One repository: as it always was. Several: each section's own selection.
+  const commit = (changes) => {
+    if (multi) { gitGraphCommitSelections(project, state, body, tab, changes.map(({ section, next }) => ({ path: section.path, next }))); return; }
+    const { next } = changes[0];
     state[selKey] = next;
     gitGraphSaveUiPrefs(project.id, state);
     if (selKey === 'branchSelection') gitGraphPatchRepoConfig(project, state, { branchDropdownSelection: next });
@@ -927,17 +1582,27 @@ function gitGraphOpenBranchesMenu(project, state, body, anchor) {
   };
   menu.querySelectorAll('.gg-branches-actions button').forEach((btn) => {
     btn.onclick = () => {
-      if (btn.dataset.act === 'all') return commit('all');
-      if (btn.dataset.act === 'none') return commit([]);
-      const current = state[selKey] === 'all' ? new Set(allNames) : new Set(state[selKey]);
-      commit(allNames.filter(name => !current.has(name)));
+      commit(sections.map((section) => {
+        if (btn.dataset.act === 'all') return { section, next: 'all' };
+        if (btn.dataset.act === 'none') return { section, next: [] };
+        const current = currentOf(section);
+        return { section, next: section.names.filter(name => !current.has(name)) };
+      }));
+    };
+  });
+  menu.querySelectorAll('.gg-branches-section-actions button').forEach((btn) => {
+    btn.onclick = () => {
+      const section = sections.find(sec => sec.path === btn.dataset.repo);
+      if (section) commit([{ section, next: btn.dataset.sectionAct === 'all' ? 'all' : [] }]);
     };
   });
   menu.querySelectorAll('.gg-branches-list input[type="checkbox"]').forEach((cb) => {
     cb.onchange = () => {
-      const current = state[selKey] === 'all' ? new Set(allNames) : new Set(state[selKey]);
+      const section = multi ? sections.find(sec => sec.path === cb.dataset.repo) : sections[0];
+      if (!section) return;
+      const current = currentOf(section);
       if (cb.checked) current.add(cb.dataset.name); else current.delete(cb.dataset.name);
-      commit([...current]);
+      commit([{ section, next: [...current] }]);
     };
   });
   filter.oninput = () => { state.branchesFilter = filter.value; applyFilter(); };
@@ -946,7 +1611,8 @@ function gitGraphOpenBranchesMenu(project, state, body, anchor) {
 function gitGraphRunNetworkAction(project, state, body, actionId, params) {
   const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
   if (!repo) return;
-  state.progress = { actionId, text: `Running ${actionId}…` };
+  // The progress events name the folder: with several repositories shown, the primary's.
+  state.progress = { actionId, text: `Running ${actionId}…`, folderPath: repo.path };
   state.error = '';
   gitGraphPaint(project, state, body);
   gitGraphApi('runGitGraphAction', project.id, repo.path, actionId, params).then((result) => {
@@ -960,7 +1626,9 @@ function gitGraphRunNetworkAction(project, state, body, actionId, params) {
       gitGraphPaint(project, state, body);
       return;
     }
-    gitGraphLoadGraph(project, state, body, { reset: true });
+    // Only the primary changed (a fetch): the others are left as they are.
+    if (gitGraphIsMulti(state)) gitGraphReloadSlice(project, state, body, repo.path, { keepScroll: true });
+    else gitGraphLoadGraph(project, state, body, { reset: true });
   });
 }
 
@@ -969,7 +1637,8 @@ function gitGraphRenderProgress(project, state, body) {
   bar.className = 'gg-progress';
   bar.innerHTML = `<span class="gg-progress-text">${escapeHtml(state.progress.text)}</span><button type="button" class="gg-progress-cancel">Cancel</button>`;
   bar.querySelector('.gg-progress-cancel').onclick = () => {
-    const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
+    const path = state.progress.folderPath || state.selectedRepo;
+    const repo = (state.repositories || []).find(r => r.path === path);
     if (repo) gitGraphApi('cancelGitGraphAction', project.id, repo.path, state.progress.actionId);
   };
   body.querySelector('.gg-tab-shell').prepend(bar);
@@ -978,6 +1647,8 @@ function gitGraphRenderProgress(project, state, body) {
 // --- Table header ---
 
 const GG_COLUMNS = [
+  // Only while several repositories are shown: the name of each row's repository, in its color.
+  { key: 'repo', label: 'Repository', hideable: false, multiOnly: true },
   { key: 'graph', label: 'Graph', hideable: false },
   { key: 'description', label: 'Description', hideable: false },
   { key: 'date', label: 'Date', hideable: true },
@@ -986,7 +1657,8 @@ const GG_COLUMNS = [
 ];
 
 function gitGraphHeaderHtml(state) {
-  const cells = GG_COLUMNS.filter(col => !col.hideable || state.columns[col.key]).map((col) => {
+  const multi = gitGraphIsMulti(state);
+  const cells = GG_COLUMNS.filter(col => (!col.multiOnly || multi) && (!col.hideable || state.columns[col.key])).map((col) => {
     const width = state.columnWidths[col.key] ? ` style="width:${state.columnWidths[col.key]}px"` : '';
     return `<div class="gg-th" data-col="${col.key}"${width}>${escapeHtml(col.label)}<span class="gg-col-resizer" data-col="${col.key}"></span></div>`;
   }).join('');
@@ -1012,6 +1684,7 @@ function gitGraphWireHeader(project, state, body) {
         cell.style.width = `${next}px`;
         state.columnWidths[col] = next;
         if (col === 'graph') thead.closest('.gg-table-wrap')?.style.setProperty('--gg-graph-width', `${next}px`);
+        if (col === 'repo') thead.closest('.gg-table-wrap')?.style.setProperty('--gg-repo-col', `${next}px`);
       };
       const onUp = () => {
         document.removeEventListener('pointermove', onMove);
@@ -1033,6 +1706,7 @@ function gitGraphWireHeader(project, state, body) {
 function gitGraphRowsHtml(project, state) {
   if (!state.rows.length) return '<div class="gg-empty-row">No commits yet.</div>';
   const showCols = { date: state.columns.date, author: state.columns.author, commit: state.columns.commit };
+  if (gitGraphIsMulti(state)) showCols.repoMeta = gitGraphRepoMeta(project, state);
   const data = state.detailsLocation === 'inline' ? state.detailsData : null;
   const anchor = data ? (data.mode === 'compare' ? state.selectedHash : data.hash) : null;
   let placed = false;
@@ -1045,23 +1719,48 @@ function gitGraphRowsHtml(project, state) {
   return html + (data && !placed ? gitGraphInlineDetailsHtml(state) : '');
 }
 
+/** { path: { name, color, title } } for the repositories of the History: what its Repository column shows. */
+function gitGraphRepoMeta(project, state) {
+  const repos = state.repositories || [];
+  const colors = typeof gitRepoColors === 'function' ? gitRepoColors(project, repos) : {};
+  const meta = {};
+  for (const repo of repos) {
+    meta[repo.path] = {
+      name: (typeof gitRepoTabLabel === 'function' ? gitRepoTabLabel(repo) : pathBasename(repo.path)) || repo.path,
+      color: colors[repo.colorKey || repo.path] || '',
+      title: repo.path,
+    };
+  }
+  return meta;
+}
+
+/** A row's repository, by name: long names are cut, the color is what tells the repositories apart. */
+function gitGraphRepoCellHtml(meta) {
+  if (!meta) return '<div class="gg-cell gg-cell-repo"></div>';
+  const style = meta.color ? ` style="--repo-color:${escapeAttr(meta.color)}"` : '';
+  return `<div class="gg-cell gg-cell-repo" title="${escapeAttr(meta.title || meta.name)}"${style}>${escapeHtml(meta.name)}</div>`;
+}
+
 function gitGraphRowHtml(row, layoutEntry, state, showCols, index) {
+  // The row's own repository: its data is the state's with one shown, its slice with several.
+  const view = gitGraphRowView(state, row.hash);
   const kind = row.kind === 'uncommitted' ? 'uncommitted' : (row.kind === 'stash' ? 'stash' : 'commit');
   const selected = row.hash === state.selectedHash || row.hash === state.compareHash;
   const checked = !!(state.checkedHashes && state.checkedHashes.has(row.hash));
   const classes = gitGraphRowClasses({ ...row, selected }, state) + (checked ? ' gg-row-checked' : '');
   const dateValue = state.dateType === 'commit' ? row.commitDate : row.authorDate;
   const dateText = kind === 'uncommitted' ? gitGraphFormatDate(new Date().toISOString(), state.dateFormat) : gitGraphFormatDate(dateValue, state.dateFormat);
-  const avatarHtml = (kind === 'commit' && gitGraphAvatarsEnabled(state)) ? gitGraphAvatarHtml(row.authorEmail, gitGraphAvatarUrlFor(state, row.authorEmail)) : '';
+  const avatarHtml = (kind === 'commit' && gitGraphAvatarsEnabled(state, view)) ? gitGraphAvatarHtml(row.authorEmail, gitGraphAvatarUrlFor(state, row.authorEmail)) : '';
   const authorText = kind === 'uncommitted' ? '*' : `${avatarHtml}${escapeHtml(row.authorName || '')}`;
   const commitText = kind === 'uncommitted' ? '*' : escapeHtml(row.shortHash || (row.hash || '').slice(0, 8));
-  const pills = kind === 'commit' || kind === 'stash' ? gitGraphRenderRefPills(row, { combineLocalAndRemote: state.combineLocalAndRemote, headBranchName: state.headBranchName }) : '';
+  const pills = kind === 'commit' || kind === 'stash' ? gitGraphRenderRefPills(row, { combineLocalAndRemote: state.combineLocalAndRemote, headBranchName: view.headBranchName }) : '';
   const stashBadge = kind === 'stash' ? `<span class="gg-stash-badge" data-gg-kind="stash" data-gg-hash="${escapeAttr(row.hash)}" title="Stash">stash@{${row.stashIndex}}</span>` : '';
   return `
     <div class="${classes}" data-gg-kind="${kind}" data-gg-hash="${escapeAttr(row.hash)}" data-row-index="${index}">
       <div class="gg-cell gg-cell-select" title="Select for Compare"><input type="checkbox" class="gg-select-box" tabindex="-1" aria-label="Select for Compare" ${checked ? 'checked' : ''}></div>
+      ${showCols.repoMeta ? gitGraphRepoCellHtml(showCols.repoMeta[row.repoPath]) : ''}
       <div class="gg-cell gg-cell-graph"></div>
-      <div class="gg-cell gg-cell-description">${pills}${stashBadge}<span class="gg-subject">${gitGraphLinkifySubject(row.subject || '', state.repoConfig && state.repoConfig.issueLinking)}</span></div>
+      <div class="gg-cell gg-cell-description">${pills}${stashBadge}<span class="gg-subject">${gitGraphLinkifySubject(row.subject || '', view.repoConfig && view.repoConfig.issueLinking)}</span></div>
       ${showCols.date ? `<div class="gg-cell gg-cell-date">${escapeHtml(dateText)}</div>` : ''}
       ${showCols.author ? `<div class="gg-cell gg-cell-author">${authorText}</div>` : ''}
       ${showCols.commit ? `<div class="gg-cell gg-cell-commit mono">${commitText}</div>` : ''}
@@ -1138,10 +1837,13 @@ function gitGraphWireRows(project, state, body) {
   if (loadMoreBtn) loadMoreBtn.onclick = () => gitGraphLoadGraph(project, state, body, { reset: false });
   gitGraphBindScrollAutoLoad(project, state, body);
 
-  if (gitGraphAvatarsEnabled(state)) {
-    const emails = new Set(state.rows.filter(r => r.kind === 'commit' && r.authorEmail).map(r => r.authorEmail));
-    emails.forEach(email => gitGraphQueueAvatarFetch(project, state, body, email));
+  // Each avatar is asked for through a repository that has a commit of that author.
+  const avatars = new Map();
+  for (const row of state.rows) {
+    if (row.kind !== 'commit' || !row.authorEmail || avatars.has(row.authorEmail)) continue;
+    if (gitGraphAvatarsEnabled(state, gitGraphRowView(state, row.hash))) avatars.set(row.authorEmail, row.repoPath);
   }
+  avatars.forEach((repoPath, email) => gitGraphQueueAvatarFetch(project, state, body, email, repoPath));
 }
 
 function gitGraphBindScrollAutoLoad(project, state, body) {
@@ -1162,8 +1864,9 @@ function gitGraphBindScrollAutoLoad(project, state, body) {
 // (gitGraphAvatarHtml); this file owns the actual fetch-and-cache, exactly
 // like every other window.api call in this file.
 
-function gitGraphAvatarsEnabled(state) {
-  const repoOverride = state.repoConfig && state.repoConfig.fetchAvatars;
+/** `view`: the data of the repository the avatar is for (its slice), the state's own by default. */
+function gitGraphAvatarsEnabled(state, view = state) {
+  const repoOverride = view.repoConfig && view.repoConfig.fetchAvatars;
   if (repoOverride === true || repoOverride === false) return repoOverride;
   return !!state.globalFetchAvatars;
 }
@@ -1179,13 +1882,13 @@ function gitGraphAvatarUrlFor(state, email) {
  * less disruptive than a full gitGraphPaint() for what's normally a handful
  * of small image loads trickling in after the row/detail markup is already
  * on screen. */
-function gitGraphQueueAvatarFetch(project, state, body, email) {
+function gitGraphQueueAvatarFetch(project, state, body, email, repoPath) {
   if (!email) return;
   const key = email.trim().toLowerCase();
   if (!state.avatarCache) state.avatarCache = new Map();
   if (!state.avatarPending) state.avatarPending = new Set();
   if (state.avatarCache.has(key) || state.avatarPending.has(key)) return;
-  const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
+  const repo = (state.repositories || []).find(r => r.path === (repoPath || state.selectedRepo));
   if (!repo) return;
   state.avatarPending.add(key);
   gitGraphApi('getGitGraphAvatarUrl', project.id, repo.path, email).then((r) => {
@@ -1256,8 +1959,11 @@ function gitGraphCompareWithSelected(project, state, body, hash) {
   if (!base || base.hash === hash) return false;
   const hashes = gitGraphCompareOrder(state.rows, [base.hash, hash]);
   if (hashes.length !== 2) return false;
+  // Compare works within one repository.
+  if (gitGraphMixedRepos(hashes)) return false;
   if (state.detailsData || state.selectedHash) gitGraphCloseDetails(project, state, body);
-  gitGraphShowComparePopup(gitGraphCompareSpecFor(project.id, state.selectedRepo, state.rows, hashes));
+  const repo = gitGraphRowRepo(state, hashes[0]);
+  gitGraphShowComparePopup(gitGraphCompareSpecFor(project.id, repo ? repo.path : state.selectedRepo, state.rows, hashes));
   return true;
 }
 
@@ -1270,9 +1976,9 @@ function gitGraphCompareBase(state) {
     if (ticked.length !== 1) return null;
     hash = ticked[0];
   }
-  if (hash === '#uncommitted') return { hash, label: 'Uncommitted Changes' };
+  if (gitGraphPlainHash(hash) === '#uncommitted') return { hash, label: 'Uncommitted Changes' };
   const row = (state.rows || []).find(r => r.hash === hash);
-  return { hash, label: (row && row.shortHash) || hash.slice(0, 8) };
+  return { hash, label: (row && row.shortHash) || gitGraphPlainHash(hash).slice(0, 8) };
 }
 
 // --- The first column: commits ticked for Compare (git-graph-compare.js) ---
@@ -1329,7 +2035,8 @@ function gitGraphCheckedCount(state) {
 }
 
 function gitGraphCompareSlotHtml(state) {
-  return gitGraphCompareButtonsHtml(gitGraphCheckedCount(state));
+  const ticked = gitGraphCompareOrder(state.rows, state.checkedHashes || []);
+  return gitGraphCompareButtonsHtml(ticked.length, { mixed: gitGraphMixedRepos(ticked) });
 }
 
 /** Ticks `hash` (or unticks it), without repainting the table. */
@@ -1365,7 +2072,10 @@ function gitGraphWireCompareSlot(project, state, body) {
 function gitGraphCompareSpec(project, state) {
   const hashes = gitGraphCompareOrder(state.rows, state.checkedHashes || []);
   if (hashes.length < 2 || hashes.length > GG_COMPARE_MAX) return null;
-  return gitGraphCompareSpecFor(project.id, state.selectedRepo, state.rows, hashes);
+  // Commits of several repositories cannot be compared.
+  if (gitGraphMixedRepos(hashes)) return null;
+  const repo = gitGraphRowRepo(state, hashes[0]);
+  return gitGraphCompareSpecFor(project.id, repo ? repo.path : state.selectedRepo, state.rows, hashes);
 }
 
 function gitGraphOpenCompare(project, state, { inWindow }) {
@@ -1396,10 +2106,14 @@ function gitGraphDefaultFileView(state) {
 
 function gitGraphOpenDetails(project, state, body, row) {
   if (!row) return;
-  const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
+  // The record of a row of a History of several repositories remembers its
+  // repository; git is asked with the plain hash and that repository's HEAD.
+  const repo = gitGraphRowRepo(state, row.hash);
+  const view = gitGraphRowView(state, row.hash);
+  const own = gitGraphSplitKey(row.hash).tag ? { repoPath: repo.path } : {};
   const request = ++state.detailsRequest;
   state.detailsLoading = true;
-  state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind };
+  state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind, ...own };
   state.fileViewType = gitGraphDefaultFileView(state);
   state.lastViewedFilePath = null;
   state.openFile = null;
@@ -1407,39 +2121,42 @@ function gitGraphOpenDetails(project, state, body, row) {
   gitGraphHydrateCodeReviewForDetails(state);
   gitGraphPaintDetailsOnly(project, state, body);
   const fetch = row.kind === 'uncommitted'
-    ? gitGraphApi('getGitGraphCompareDetail', project.id, repo.path, state.headHash, null)
-    : gitGraphApi('getGitGraphCommitDetail', project.id, repo.path, row.hash);
+    ? gitGraphApi('getGitGraphCompareDetail', project.id, repo.path, view.headHash, null)
+    : gitGraphApi('getGitGraphCommitDetail', project.id, repo.path, gitGraphPlainHash(row.hash));
   fetch.then((result) => {
     if (request !== state.detailsRequest) return;
     state.detailsLoading = false;
     if (result && result.ok) {
-      state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind, commit: result.commit, files: result.files || [] };
-      if (result.commit && result.commit.authorEmail) gitGraphQueueAvatarFetch(project, state, body, result.commit.authorEmail);
+      state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind, ...own, commit: result.commit, files: result.files || [] };
+      if (result.commit && result.commit.authorEmail) gitGraphQueueAvatarFetch(project, state, body, result.commit.authorEmail, repo.path);
     } else {
-      state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind, error: (result && result.error) || 'Could not load commit details.' };
+      state.detailsData = { mode: 'single', hash: row.hash, kind: row.kind, ...own, error: (result && result.error) || 'Could not load commit details.' };
     }
     gitGraphPaintDetailsOnly(project, state, body);
   });
 }
 
 function gitGraphOpenComparison(project, state, body, fromHash, toHash) {
-  const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
+  const repo = gitGraphRowRepo(state, fromHash);
+  const own = gitGraphSplitKey(fromHash).tag ? { repoPath: repo.path } : {};
   const request = ++state.detailsRequest;
   state.detailsLoading = true;
-  state.detailsData = { mode: 'compare', fromHash, toHash };
+  state.detailsData = { mode: 'compare', fromHash, toHash, ...own };
   state.fileViewType = gitGraphDefaultFileView(state);
   state.lastViewedFilePath = null;
   state.openFile = null;
   state.detailsJustOpened = true;
   gitGraphHydrateCodeReviewForDetails(state);
   gitGraphPaintDetailsOnly(project, state, body);
-  const toArg = toHash === '#uncommitted' ? null : toHash;
-  gitGraphApi('getGitGraphCompareDetail', project.id, repo.path, fromHash === '#uncommitted' ? toHash : fromHash, fromHash === '#uncommitted' ? null : toArg)
+  const from = gitGraphPlainHash(fromHash);
+  const to = gitGraphPlainHash(toHash);
+  const toArg = to === '#uncommitted' ? null : to;
+  gitGraphApi('getGitGraphCompareDetail', project.id, repo.path, from === '#uncommitted' ? to : from, from === '#uncommitted' ? null : toArg)
     .then((result) => {
       if (request !== state.detailsRequest) return;
       state.detailsLoading = false;
-      if (result && result.ok) state.detailsData = { mode: 'compare', fromHash, toHash, files: result.files || [] };
-      else state.detailsData = { mode: 'compare', fromHash, toHash, error: (result && result.error) || 'Could not load comparison.' };
+      if (result && result.ok) state.detailsData = { mode: 'compare', fromHash, toHash, ...own, files: result.files || [] };
+      else state.detailsData = { mode: 'compare', fromHash, toHash, ...own, error: (result && result.error) || 'Could not load comparison.' };
       gitGraphPaintDetailsOnly(project, state, body);
     });
 }
@@ -1506,7 +2223,7 @@ function gitGraphDetailsBodyHtml(state) {
   if (state.detailsLoading) return '<div class="gg-loading"><span class="gg-loading-dot"></span>Loading…</div>';
   if (data.error) return `<div class="gg-error-state">${escapeHtml(data.error)}</div>`;
   const header = data.mode === 'compare'
-    ? `<div class="gg-details-header">Displaying all changes from <span class="mono">${escapeHtml((data.fromHash || '').replace('#uncommitted', 'the working tree'))}</span> to <span class="mono">${escapeHtml((data.toHash || '').replace('#uncommitted', 'the working tree'))}</span>.</div>`
+    ? `<div class="gg-details-header">Displaying all changes from <span class="mono">${escapeHtml(String(gitGraphPlainHash(data.fromHash) || '').replace('#uncommitted', 'the working tree'))}</span> to <span class="mono">${escapeHtml(String(gitGraphPlainHash(data.toHash) || '').replace('#uncommitted', 'the working tree'))}</span>.</div>`
     : gitGraphSingleCommitHeaderHtml(data.commit, data.kind, state);
   const files = data.files || [];
   const reviewControls = gitGraphCodeReviewControlsHtml(state);
@@ -1571,12 +2288,14 @@ function gitGraphSingleCommitHeaderHtml(commit, kind, state) {
   const authorDate = gitGraphFormatFullDate(commit.authorDate);
   const commitDate = gitGraphFormatFullDate(commit.commitDate);
   const bothDates = commit.authorDate !== commit.commitDate;
-  const avatarsOn = state && gitGraphAvatarsEnabled(state);
+  // The repository the record is of: its config says about signatures, issues, avatars.
+  const view = state ? gitGraphDetailsView(state) : null;
+  const avatarsOn = state && gitGraphAvatarsEnabled(state, view);
   const avatarHtml = avatarsOn ? gitGraphAvatarHtml(commit.authorEmail, gitGraphAvatarUrlFor(state, commit.authorEmail), { size: 18 }) : '';
-  const showSignature = state && state.repoConfig && state.repoConfig.showSignatureStatus;
+  const showSignature = view && view.repoConfig && view.repoConfig.showSignatureStatus;
   const signatureHtml = showSignature ? gitGraphSignatureBadgeHtml(commit.signature) : '';
   const markdownOn = !state || state.markdownRendering !== false;
-  const issueLinking = state && state.repoConfig && state.repoConfig.issueLinking;
+  const issueLinking = view && view.repoConfig && view.repoConfig.issueLinking;
   return `
     <div class="gg-detail-field"><span class="gg-detail-label">Commit:</span> <span class="mono">${escapeHtml(commit.hash)}</span></div>
     <div class="gg-detail-field"><span class="gg-detail-label">Subject:</span> ${gitGraphLinkifySubject(commit.subject || '', issueLinking)}</div>
@@ -1689,7 +2408,7 @@ function gitGraphWireDetailsPanel(project, state, body, container) {
     };
   });
   gitGraphWireCodeReviewControls(project, state, body, container);
-  const repo = (state.repositories || []).find(r => r.path === state.selectedRepo);
+  const repo = gitGraphDetailsRepo(state);
   container.querySelectorAll('[data-gg-kind="file"]').forEach((row) => {
     row.onclick = () => gitGraphOpenFileDiff(project, state, body, repo, row.dataset.ggFilePath);
     row.oncontextmenu = (e) => {
@@ -1706,7 +2425,10 @@ function gitGraphWireDetailsPanel(project, state, body, container) {
   container.querySelectorAll('[data-gg-kind="link"][data-gg-hash]').forEach((link) => {
     link.onclick = (e) => {
       e.preventDefault();
-      const target = state.rows.find(r => r.hash === link.dataset.ggHash);
+      // The record names its parents by plain hash: with several repositories shown, the row is of the record's own.
+      const tag = gitGraphSplitKey(state.detailsData && (state.detailsData.hash || state.detailsData.fromHash)).tag;
+      const key = tag ? gitGraphRepoKey(tag, link.dataset.ggHash) : link.dataset.ggHash;
+      const target = state.rows.find(r => r.hash === key);
       if (target) { state.selectedHash = target.hash; gitGraphOpenDetails(project, state, body, target); }
     };
   });
@@ -1764,18 +2486,20 @@ function gitGraphViewFileAtRevision(project, state, body, repo, file) {
  */
 function gitGraphFileRevs(state, kind) {
   const data = state.detailsData || {};
+  // git is asked with plain hashes and the HEAD of the record's own repository.
+  const plain = gitGraphPlainHash;
   if (kind === 'revision') {
-    const rev = data.mode === 'single' ? data.hash : data.toHash;
+    const rev = data.mode === 'single' ? plain(data.hash) : plain(data.toHash);
     return rev && rev !== '#uncommitted' ? { fromRev: null, toRev: rev } : null;
   }
   const fromRev = data.mode === 'compare'
-    ? (data.fromHash === '#uncommitted' ? null : data.fromHash)
-    : (data.kind === 'uncommitted' ? (state.headHash || 'HEAD') : `${data.hash}^`);
+    ? (plain(data.fromHash) === '#uncommitted' ? null : plain(data.fromHash))
+    : (data.kind === 'uncommitted' ? (gitGraphDetailsView(state).headHash || 'HEAD') : `${plain(data.hash)}^`);
   let toRev = null;
   if (kind !== 'working') {
     toRev = data.mode === 'compare'
-      ? (data.toHash === '#uncommitted' ? null : data.toHash)
-      : (data.kind === 'uncommitted' ? null : data.hash);
+      ? (plain(data.toHash) === '#uncommitted' ? null : plain(data.toHash))
+      : (data.kind === 'uncommitted' ? null : plain(data.hash));
   }
   return { fromRev, toRev };
 }
@@ -1879,8 +2603,9 @@ function gitGraphExpandOpenFile(state) {
  * revisions it is read at, and the commit's short hash and title for its header. */
 function gitGraphFileWindowSpec(state, file) {
   const data = state.detailsData || {};
-  const hash = data.mode === 'single' ? data.hash : data.toHash;
-  const row = (state.rows || []).find(r => r.hash === hash);
+  const key = data.mode === 'single' ? data.hash : data.toHash;
+  const row = (state.rows || []).find(r => r.hash === key);
+  const hash = gitGraphPlainHash(key);
   const uncommitted = hash === '#uncommitted';
   const label = uncommitted ? 'Uncommitted' : ((row && row.shortHash) || (data.commit && data.commit.shortHash) || String(hash || '').slice(0, 8));
   const subject = uncommitted ? 'Uncommitted Changes' : ((data.commit && data.commit.subject) || (row && row.subject) || '');
@@ -2209,12 +2934,15 @@ function gitGraphEnsureWatcherBound() {
       const project = typeof selectedProject === 'function' ? selectedProject() : null;
       if (!project || !gitGraphStillActive(project)) return;
       const state = gitGraphTabState.get(project.id);
-      if (!state || state.selectedRepo !== folderPath) return;
+      // Any repository shown counts; the others are left as they are.
+      if (!state || !gitGraphShownRepos(state).some(r => r.path === folderPath)) return;
       const body = typeof document !== 'undefined' ? document.getElementById('git-workspace-view') : null;
       if (!body) return;
       // Only the working tree moved: refresh the Uncommitted Changes row in
       // place, without scrolling back to the top or dropping loaded commits.
-      gitGraphLoadGraph(project, state, body, { reset: true, keepScroll: !!(info && info.workingTree) });
+      const keepScroll = !!(info && info.workingTree);
+      if (gitGraphIsMulti(state)) gitGraphReloadSlice(project, state, body, folderPath, { keepScroll });
+      else gitGraphLoadGraph(project, state, body, { reset: true, keepScroll });
     });
   }
 
@@ -2228,7 +2956,7 @@ function gitGraphEnsureWatcherBound() {
       const project = typeof selectedProject === 'function' ? selectedProject() : null;
       if (!project || !gitGraphStillActive(project)) return;
       const state = gitGraphTabState.get(project.id);
-      if (!state || !state.progress || folderPath !== state.selectedRepo || actionId !== state.progress.actionId) return;
+      if (!state || !state.progress || folderPath !== (state.progress.folderPath || state.selectedRepo) || actionId !== state.progress.actionId) return;
       state.progress.text = text;
       const body = typeof document !== 'undefined' ? document.getElementById('git-workspace-view') : null;
       const el = body && body.querySelector('.gg-progress-text');
@@ -2258,5 +2986,13 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphIsOpenRecord, gitGraphOpenFileFor, gitGraphOpenFilePaneHtml, gitGraphFileRevs, gitGraphOpenFileIn,
     gitGraphKeepFileView, gitGraphPlaceFileView, gitGraphExpandOpenFile, gitGraphFileWindowSpec, gitGraphOpenFileWindow,
     gitGraphCloseOpenFile, gitGraphRenderFileWindow,
+    gitGraphSelection, gitGraphShownRepos, gitGraphIsMulti, gitGraphSelectionKey, gitGraphRepoTag, gitGraphRepoByTag,
+    gitGraphRowRepo, gitGraphRowView, gitGraphViewByPath, gitGraphDetailsRepo, gitGraphDetailsRepoPath, gitGraphDetailsView,
+    gitGraphMixedRepos, gitGraphNewSlice, gitGraphSyncSlices, gitGraphAdoptPrimary, gitGraphMirrorPrimary, gitGraphCopySettings,
+    gitGraphMultiRows, gitGraphLoadMultiGraph, gitGraphLoadMoreMulti, gitGraphReloadSlice, gitGraphApplySliceResult,
+    gitGraphSliceErrorsHtml, gitGraphHistoryTabsHtml, gitGraphChangeSelection, gitGraphClearForSelection, gitGraphWireRepoPicker,
+    gitGraphBranchesLabel, gitGraphHeadName, gitGraphHeadBranchesHtml, gitGraphBranchesSections, gitGraphBranchesSectionHtml,
+    gitGraphOpenBranchesMenu, gitGraphCommitSelections, gitGraphRepoMeta, gitGraphRepoCellHtml, gitGraphTargetRepo,
+    gitGraphFocusPending, gitGraphRepoPickerHtml, gitGraphRecomputeLayout, gitGraphSaveUiPrefs,
   };
 }

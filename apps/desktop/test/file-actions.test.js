@@ -12,6 +12,7 @@ function setup(platform = 'darwin') {
       manageProjectEntry: async (...args) => { calls.push(['manage', ...args]); return { ok: true, cancelled: true }; },
     } },
     PICONS: new Proxy({}, { get: () => () => '' }),
+    ICONS: new Proxy({}, { get: () => () => '' }),
     showPromptDialog: async () => null,
     applyProjectFileAction: () => calls.push(['refresh-project']),
     applyBrowserFileAction: () => calls.push(['refresh-browser']),

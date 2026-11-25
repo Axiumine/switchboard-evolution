@@ -63,42 +63,55 @@ function gitGraphSelectAllHashes(state) {
   return rows.map(row => row.hash);
 }
 
+/** The hash git knows, from a row's key (the History of several repositories names its rows "<tag>:<hash>") or a plain hash. */
+function gitGraphCmpPlain(hash) {
+  return typeof gitGraphPlainHash === 'function' ? gitGraphPlainHash(hash) : hash;
+}
+
 /** A commit as the comparison names it. */
 function gitGraphCompareLabel(rows, hash) {
-  if (hash === GG_UNCOMMITTED_HASH) return 'Uncommitted';
+  const plain = gitGraphCmpPlain(hash);
+  if (plain === GG_UNCOMMITTED_HASH) return 'Uncommitted';
   const row = (rows || []).find(r => r.hash === hash);
   if (row && row.kind === 'stash' && row.stashIndex != null) return `stash@{${row.stashIndex}}`;
-  return (row && row.shortHash) || String(hash).slice(0, 8);
+  return (row && row.shortHash) || String(plain).slice(0, 8);
 }
 
 /** A commit's title, so the commits compared are told apart by more than a hash. */
 function gitGraphCompareSubject(rows, hash) {
-  if (hash === GG_UNCOMMITTED_HASH) return 'Uncommitted Changes';
+  if (gitGraphCmpPlain(hash) === GG_UNCOMMITTED_HASH) return 'Uncommitted Changes';
   const row = (rows || []).find(r => r.hash === hash);
   return (row && row.subject) || '';
 }
 
-/** What the comparison of `hashes` (oldest first) shows and asks for: the repository, each commit's name and title. */
+/** What the comparison of `hashes` (oldest first) shows and asks for: the repository, each commit's name and title. The hashes are the rows' (keys, with several repositories shown); the spec carries the plain ones, as git is asked for them. */
 function gitGraphCompareSpecFor(projectId, repoPath, rows, hashes) {
   return {
-    projectId, repoPath, hashes,
+    projectId, repoPath, hashes: hashes.map(gitGraphCmpPlain),
     labels: hashes.map(hash => gitGraphCompareLabel(rows, hash)),
     subjects: hashes.map(hash => gitGraphCompareSubject(rows, hash)),
   };
 }
 
-/** The Compare button and the one beside it for a window of its own, once two or more commits are ticked. */
-function gitGraphCompareButtonsHtml(count) {
+/**
+ * The Compare button and the one beside it for a window of its own, once two or
+ * more commits are ticked. opts.mixed: the ticked commits are of different
+ * repositories (the History showing several), which cannot be compared.
+ */
+function gitGraphCompareButtonsHtml(count, opts = {}) {
   if (count < 2) return '';
+  const mixed = !!opts.mixed;
   const tooMany = count > GG_COMPARE_MAX;
-  const title = tooMany
-    ? `Compare up to ${GG_COMPARE_MAX} commits: ${count} are selected`
-    : 'Compare the selected commits step by step, from the oldest';
+  const title = mixed
+    ? 'Compare works within one repository: the selected commits are from several'
+    : tooMany
+      ? `Compare up to ${GG_COMPARE_MAX} commits: ${count} are selected`
+      : 'Compare the selected commits step by step, from the oldest';
   const icon = typeof gitGraphIcon === 'function' ? gitGraphIcon('compare', 13) : '';
   const windowIcon = typeof gitGraphIcon === 'function' ? gitGraphIcon('popOut', 13) : '';
-  const disabled = tooMany ? ' disabled' : '';
+  const disabled = tooMany || mixed ? ' disabled' : '';
   return `<button type="button" class="gg-toolbar-btn gg-compare-btn" id="gg-compare-btn" title="${escapeAttr(title)}"${disabled}>${icon}<span>Compare ${count}</span></button>`
-    + `<button type="button" class="gg-icon-btn" id="gg-compare-window-btn" title="${escapeAttr(tooMany ? title : 'Compare the selected commits in a window of their own')}"${disabled}>${windowIcon}</button>`;
+    + `<button type="button" class="gg-icon-btn" id="gg-compare-window-btn" title="${escapeAttr(tooMany || mixed ? title : 'Compare the selected commits in a window of their own')}"${disabled}>${windowIcon}</button>`;
 }
 
 // --- The view: popup or window ---
@@ -369,7 +382,7 @@ function gitGraphShowComparePopup(spec) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     GG_COMPARE_MAX, gitGraphCompareOrder, gitGraphCompareSteps, gitGraphCompareStepArgs, gitGraphCompareMatrix,
-    gitGraphSelectAllHashes, gitGraphCompareLabel, gitGraphCompareSubject, gitGraphCompareSpecFor, gitGraphCompareButtonsHtml,
+    gitGraphSelectAllHashes, gitGraphCmpPlain, gitGraphCompareLabel, gitGraphCompareSubject, gitGraphCompareSpecFor, gitGraphCompareButtonsHtml,
     gitGraphCompareTableHtml, gitGraphCompareTitleHtml, gitGraphCompareDisplayRows, gitGraphCompareFirstPath,
     gitGraphCompareFileDiff, gitGraphRenderCompareView, gitGraphShowComparePopup, gitGraphCloseComparePopup, gitGraphCompareCall,
   };

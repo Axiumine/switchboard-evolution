@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { appendMention, chatMention, filesRoots, foldersToList, pasteTarget, remapExpanded, treeRows, type FileEntry } from '../model';
+import { appendMention, chatMention, filesRoots, folderChips, folderParts, foldersToList, pasteTarget, remapExpanded, treeRows, type FileEntry } from '../model';
 
 const entry = (relativePath: string, type: FileEntry['type'] = 'file'): FileEntry => ({
   name: relativePath.split('/').pop()!, relativePath, type, size: 1, viewable: type === 'file', previewType: type === 'file' ? 'text' : null,
@@ -18,9 +18,46 @@ describe('files roots', () => {
     });
     expect(roots).toEqual([
       { path: '/work/demo', label: 'Project', kind: 'project' },
-      { path: '/code/app', label: 'app · main', kind: 'folder' },
-      { path: '/code/app.worktrees/feature', label: 'feature', kind: 'worktree' },
+      { path: '/code/app', label: 'app · main', kind: 'folder', name: 'app', branch: 'main' },
+      { path: '/code/app.worktrees/feature', label: 'feature', kind: 'worktree', name: 'feature' },
     ]);
+  });
+});
+
+describe('folder chips', () => {
+  const project = {
+    folders: [
+      { path: '/code/app', mode: 'in-place' as const, branch: 'main' },
+      { path: '/code/app.worktrees/feature', mode: 'worktree' as const, branch: 'feature' },
+      { path: '/code/docs', mode: 'in-place' as const },
+      { path: '/code/app', mode: 'in-place' as const },
+    ],
+  };
+
+  it('names each attached folder once, with its branch unless that only repeats the name', () => {
+    expect(folderChips(project)).toEqual([
+      { path: '/code/app', name: 'app', branch: 'main', kind: 'folder' },
+      { path: '/code/app.worktrees/feature', name: 'feature', kind: 'worktree' },
+      { path: '/code/docs', name: 'docs', kind: 'folder' },
+    ]);
+  });
+
+  it('takes the branch git reports now over the one the project stored, and a worktree keeps its own', () => {
+    const chips = folderChips(project, [{ path: '/code/app', branch: 'dev' }, { path: '/code/app.worktrees/feature', branch: 'feature/login' }, { path: '/code/docs', branch: 'trunk' }]);
+    expect(chips.map((chip) => [chip.name, chip.branch])).toEqual([['app', 'dev'], ['feature', 'feature/login'], ['docs', 'trunk']]);
+  });
+
+  it('keeps the stored branch for a folder git does not report on', () => {
+    expect(folderChips(project, [{ path: '/code/other', branch: 'x' }])[0].branch).toBe('main');
+  });
+
+  it('is empty for a project with no folder', () => {
+    expect(folderChips({ folders: [] })).toEqual([]);
+  });
+
+  it('leaves out a branch that repeats the name', () => {
+    expect(folderParts('/code/main', 'main')).toEqual({ name: 'main' });
+    expect(folderParts('/code/app', null)).toEqual({ name: 'app' });
   });
 });
 

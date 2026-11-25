@@ -159,6 +159,25 @@ function gitGraphApplyRepoConfigToState(state, config) {
   state.showTags = config.showTags !== undefined ? config.showTags : true;
   state.showStashesPref = config.showStashes !== undefined ? config.showStashes : true;
   state.showUncommittedChangesPref = config.showUncommittedChanges !== undefined ? config.showUncommittedChanges : true;
+  // With several repositories shown, the primary's own slice follows it.
+  const slice = state.slices && state.slices.get(state.selectedRepo);
+  if (slice) gitGraphApplyRepoConfigToSlice(slice, config);
+}
+
+/**
+ * The part of a repository's config that decides what its slice of a History
+ * of several repositories asks git for. Order, first parent, Show Remote and
+ * the column widths are shared by all the repositories shown, and stay the
+ * primary's (gitGraphApplyRepoConfigToState).
+ */
+function gitGraphApplyRepoConfigToSlice(slice, config) {
+  if (!config) return;
+  slice.repoConfig = config;
+  slice.branchSelection = config.branchDropdownSelection || slice.branchSelection;
+  slice.showTags = config.showTags !== undefined ? config.showTags : true;
+  slice.showStashesPref = config.showStashes !== undefined ? config.showStashes : true;
+  slice.showUncommittedChangesPref = config.showUncommittedChanges !== undefined ? config.showUncommittedChanges : true;
+  slice.includeReflogCommits = !!config.includeCommitsMentionedByReflogs;
 }
 
 function gitGraphApplyGlobalPrefsToState(state, prefs) {
@@ -216,6 +235,15 @@ async function gitGraphPatchRepoConfig(project, state, patch) {
   return result;
 }
 
+/** A patch to the config of any repository shown: the primary's goes through gitGraphPatchRepoConfig, another one's lands on its slice. */
+async function gitGraphPatchRepoConfigFor(project, state, path, patch) {
+  if (!path || path === state.selectedRepo) return gitGraphPatchRepoConfig(project, state, patch);
+  const result = await gitGraphApi('setGitGraphRepoConfig', project.id, path, patch);
+  const slice = state.slices && state.slices.get(path);
+  if (result && result.ok && slice) gitGraphApplyRepoConfigToSlice(slice, result.config);
+  return result;
+}
+
 async function gitGraphPatchGlobalPrefs(state, patch) {
   const result = await gitGraphApi('setGitGraphGlobalPreferences', patch);
   if (result && result.ok) gitGraphApplyGlobalPrefsToState(state, result.preferences);
@@ -250,25 +278,35 @@ async function gitGraphExportRepoConfig(project, state, body) {
 
 function gitGraphCodeReviewKeyFor(data) {
   if (!data) return null;
-  if (data.mode === 'compare' && data.fromHash && data.toHash) return `${data.fromHash}..${data.toHash}`;
-  if (data.mode === 'single' && data.kind !== 'uncommitted' && data.hash) return data.hash;
+  // The repository's own config holds the record, under the hashes git knows.
+  const plain = (hash) => (typeof gitGraphPlainHash === 'function' ? gitGraphPlainHash(hash) : hash);
+  if (data.mode === 'compare' && data.fromHash && data.toHash) return `${plain(data.fromHash)}..${plain(data.toHash)}`;
+  if (data.mode === 'single' && data.kind !== 'uncommitted' && data.hash) return plain(data.hash);
   return null;
+}
+
+/** The repository the open record belongs to (in a History of several, the row's), as the state-like view holding its config. */
+function gitGraphCodeReviewView(state) {
+  return typeof gitGraphDetailsView === 'function' ? gitGraphDetailsView(state) : state;
 }
 
 function gitGraphHydrateCodeReviewForDetails(state) {
   const key = gitGraphCodeReviewKeyFor(state.detailsData);
   if (!key) { state.codeReview = null; return; }
-  const record = state.repoConfig && state.repoConfig.codeReview && state.repoConfig.codeReview[key];
+  const config = gitGraphCodeReviewView(state).repoConfig;
+  const record = config && config.codeReview && config.codeReview[key];
   state.codeReview = record
     ? { key, reviewedPaths: new Set(record.reviewedPaths || []), startedAt: record.startedAt }
     : null;
 }
 
 async function gitGraphPersistCodeReview(project, state, key, record) {
-  const current = (state.repoConfig && state.repoConfig.codeReview) || {};
+  const config = gitGraphCodeReviewView(state).repoConfig;
+  const current = (config && config.codeReview) || {};
   const next = { ...current };
   if (record) next[key] = record; else delete next[key];
-  return gitGraphPatchRepoConfig(project, state, { codeReview: next });
+  const path = typeof gitGraphDetailsRepoPath === 'function' ? gitGraphDetailsRepoPath(state) : state.selectedRepo;
+  return gitGraphPatchRepoConfigFor(project, state, path, { codeReview: next });
 }
 
 async function gitGraphStartCodeReview(project, state, body) {
@@ -353,8 +391,11 @@ const GG_FETCH_AVATARS_OPTIONS = [
 
 function gitGraphSettingsHeaderHtml(state) {
   const tab = state.settingsTab || 'repository';
+  // These settings are the primary repository's: with several shown, the title says which.
+  const repo = typeof gitGraphIsMulti === 'function' && gitGraphIsMulti(state) ? gitGraphSelectedRepo(state) : null;
+  const title = repo ? `Repository Settings: ${pathBasename(repo.path) || repo.path}` : 'Repository Settings';
   return `
-    <div class="gg-settings-header">Repository Settings<button type="button" id="gg-settings-close">×</button></div>
+    <div class="gg-settings-header">${escapeHtml(title)}<button type="button" id="gg-settings-close">×</button></div>
     <div class="gg-settings-tabs">
       <button type="button" class="gg-settings-tab${tab === 'repository' ? ' active' : ''}" data-tab="repository">This Repository</button>
       <button type="button" class="gg-settings-tab${tab === 'global' ? ' active' : ''}" data-tab="global">Global Preferences</button>
@@ -706,12 +747,12 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphOptionalDialog, gitGraphSortRepositories, gitGraphVisibleRemotes,
     gitGraphApplyOnLoadSelection, gitGraphSummarizeExternalConfig, gitGraphDetectExternalConfigSummary,
     gitGraphMaybePromptTrust, gitGraphApplyRepoConfigToState, gitGraphApplyGlobalPrefsToState,
-    gitGraphLoadInitialPreferences, gitGraphPatchRepoConfig, gitGraphPatchGlobalPrefs,
+    gitGraphLoadInitialPreferences, gitGraphPatchRepoConfig, gitGraphPatchRepoConfigFor, gitGraphApplyRepoConfigToSlice, gitGraphPatchGlobalPrefs,
     gitGraphClearAvatarCache, gitGraphExportRepoConfig,
     gitGraphCodeReviewKeyFor, gitGraphHydrateCodeReviewForDetails, gitGraphPersistCodeReview,
     gitGraphStartCodeReview, gitGraphEndCodeReview, gitGraphSetFileReviewed, gitGraphMarkFileReviewedIfActive,
     gitGraphCodeReviewControlsHtml, gitGraphWireCodeReviewControls,
     gitGraphRenderSettingsDrawer, gitGraphWireSettingsDrawer, gitGraphAdvancedPrefsJson,
-    gitGraphSelectedRepo,
+    gitGraphSelectedRepo, gitGraphSettingsHeaderHtml,
   };
 }

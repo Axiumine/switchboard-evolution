@@ -4,7 +4,7 @@ import type { LiveState, Session } from '@/sessions/model';
 import {
   baseChoices, createSpec, createdText, existingChoices, FILTERS, filterMatches, findWorktree, folderFor, formRef, mergedChoices, parentFolder, patternsList, patternsText,
   previewTemplate, prunedText, refFolderName, remoteLocalName, removeReady, rowPath, runningSessionChoices, sessionActivity, sessionsByWorktree, shortPath, sortWorktrees, startPointChoices,
-  SORT_ORDERS, START_OPTIONS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches, worktreeTime,
+  selectedGroups, selectOnlyGroup, SORT_ORDERS, START_OPTIONS, summaryText, toggleGroup, toggleGroupSelection, groupKey, groupSelected, visibleRepositories, worktreeBadges, worktreeLabel, worktreeMatches, worktreeTime,
   type Branches, type CreateForm, type Worktree, type WorktreeRepository,
 } from '../model';
 
@@ -283,4 +283,53 @@ test('the sessions running in a worktree, the ones that need you first, with the
 test('a new worktree can start an OpenCode session, listed after Codex', () => {
   expect(START_OPTIONS.map((o) => o.key)).toEqual(['none', 'claude', 'codex', 'opencode', 'terminal']);
   expect(START_OPTIONS.find((o) => o.key === 'opencode')?.label).toBe('An OpenCode session');
+});
+
+// --- Which repositories the Git tab's folder selection shows ---
+
+const appRepo = repository('app', '/w/app', [main], { attachedFolders: ['/w/app'] });
+// Found through two attached folders: the repository's own, and a worktree of it.
+const libRepo = repository('lib', '/w/lib', [wt('/w/lib', { isMain: true })], { attachedFolders: ['/w/lib', '/w/lib.worktrees/dev'] });
+const nestedRepo = repository('tools', '/w/mono/tools', [wt('/w/mono/tools', { isMain: true })], { nested: true, attachedFolders: ['/w/mono'], id: '/w/mono/tools/.git' });
+const repos = [appRepo, libRepo, nestedRepo];
+
+test('a repository is known in the folder selection by its first attached folder, or its id when nested', () => {
+  expect(groupKey(appRepo)).toBe('/w/app');
+  expect(groupKey(libRepo)).toBe('/w/lib');
+  expect(groupKey(nestedRepo)).toBe('/w/mono/tools/.git');
+  // An older desktop does not send attachedFolders: the repository's own folder.
+  expect(groupKey(repository('old', '/w/old', []))).toBe('/w/old');
+});
+
+test('a repository is shown while any of its folders is selected', () => {
+  expect(groupSelected(libRepo, ['/w/lib.worktrees/dev'])).toBe(true);
+  expect(groupSelected(libRepo, ['/w/app'])).toBe(false);
+  expect(groupSelected(repository('old', '/w/old', []), ['/w/old'])).toBe(true);
+  expect(selectedGroups(repos, ['/w/lib.worktrees/dev', '/w/app']).map((r) => r.name)).toEqual(['app', 'lib']);
+});
+
+test('the first repository is shown when the selection names none of them', () => {
+  expect(selectedGroups(repos, ['/w/docs']).map((r) => r.name)).toEqual(['app']);
+  expect(selectedGroups(repos, []).map((r) => r.name)).toEqual(['app']);
+  expect(selectedGroups([], ['/w/app'])).toEqual([]);
+});
+
+test('a tap on a name selects that repository only', () => {
+  expect(selectOnlyGroup(libRepo)).toEqual({ primary: '/w/lib', paths: ['/w/lib'] });
+});
+
+test('ticking adds a repository in the project order, and unticking takes all its folders away', () => {
+  const both = toggleGroupSelection(repos, { primary: '/w/app', paths: ['/w/app'] }, libRepo);
+  expect(both).toEqual({ primary: '/w/app', paths: ['/w/app', '/w/lib'] });
+  const all = toggleGroupSelection(repos, both, nestedRepo);
+  expect(all.paths).toEqual(['/w/app', '/w/lib', '/w/mono/tools/.git']);
+  // Selected through its worktree folder: unticking it removes it all the same.
+  const viaWorktree = { primary: '/w/app', paths: ['/w/app', '/w/lib.worktrees/dev'] };
+  expect(toggleGroupSelection(repos, viaWorktree, libRepo)).toEqual({ primary: '/w/app', paths: ['/w/app'] });
+  // The primary goes: the first left becomes it.
+  expect(toggleGroupSelection(repos, both, appRepo)).toEqual({ primary: '/w/lib', paths: ['/w/lib'] });
+});
+
+test('the last repository shown stays', () => {
+  expect(toggleGroupSelection(repos, { primary: '/w/lib', paths: ['/w/lib'] }, libRepo)).toEqual({ primary: '/w/lib', paths: ['/w/lib'] });
 });

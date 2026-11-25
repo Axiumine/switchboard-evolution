@@ -693,7 +693,7 @@ function openWithItems(project, root, entry) {
   const rel = entry.relativePath;
   const items = [
     { label: 'Switchboard Editor', icon: PICONS.file(14), disabled: !entry.viewable, hint: entry.viewable ? '' : 'no preview', onClick: () => openFileInProjectEditor(project, rel, { root }) },
-    { label: 'Default Application', icon: PICONS.open(14), onClick: () => openWithDefaultApp(root, rel) },
+    { label: 'Default Application', icon: ICONS.fileOutput(14), onClick: () => openWithDefaultApp(root, rel) },
   ];
   if (isMacPlatform()) {
     const recent = recentOpenWithApps();
@@ -802,13 +802,13 @@ function explorerMenuItems(project, root, entry) {
   } else {
     items.push(
       { label: 'Open to the Side', icon: FICONS.side(14), hint: filesKeyHint('⌃↩', 'Ctrl+Enter'), disabled: entry.type !== 'file' || !entry.viewable, onClick: () => openFileToSide(project, root, rel) },
-      { label: 'Open With…', icon: PICONS.open(14), disabled: entry.type !== 'file', submenu: entry.type === 'file' ? openWithItems(project, root, entry) : null },
+      { label: 'Open With…', icon: ICONS.fileOutput(14), disabled: entry.type !== 'file', submenu: entry.type === 'file' ? openWithItems(project, root, entry) : null },
     );
   }
   items.push(
     entry
-      ? { label: `Reveal in ${manager}`, icon: PICONS.folder(14), hint: filesKeyHint('⌥⌘R', 'Shift+Alt+R'), onClick: () => explorerManage(project, root, entry, 'reveal') }
-      : { label: `Open in ${manager}`, icon: PICONS.folder(14), onClick: async () => { const r = await window.api.openPath(root); if (r?.error) alert(r.error); } },
+      ? { label: `Reveal in ${manager}`, icon: ICONS.folderOpen(14), hint: filesKeyHint('⌥⌘R', 'Shift+Alt+R'), onClick: () => explorerManage(project, root, entry, 'reveal') }
+      : { label: `Open in ${manager}`, icon: ICONS.folderOpen(14), onClick: async () => { const r = await window.api.openPath(root); if (r?.error) alert(r.error); } },
     { label: 'Open in Integrated Terminal', icon: PICONS.terminal(14), onClick: () => launchTerminalSession({ ...launchTargetFor(project), projectPath: projectEntryPath(root, folderRel) }) },
     { sep: true },
   );
@@ -964,16 +964,27 @@ function showCommitInGitGraph(project, repoRoot, hash) {
   const folder = gitGraphFolderFor(project, repoRoot);
   if (!folder || typeof gitGraphState !== 'function') return;
   const state = gitGraphState(project.id);
-  if (state.selectedRepo !== folder.path) {
-    state.selectedRepo = folder.path;
-    state.selectedHash = null;
-    state.detailsData = null;
-    state.repositories = null;
-    if (typeof gitGraphSaveUiPrefs === 'function') gitGraphSaveUiPrefs(project.id, state);
+  // The view first: switching to History hands it the repositories of the one
+  // left, and the choice below has to come after that.
+  setProjectGitView(project, 'history');
+  // A History already showing several repositories, this one among them, keeps
+  // them (the commit is focused in its own row); otherwise it shows this one.
+  const shown = Array.isArray(state.selectedRepos) ? state.selectedRepos : [];
+  const keeps = shown.length > 1 && shown.includes(folder.path);
+  if (!keeps) {
+    const alreadyShown = state.selectedRepo === folder.path && shown.length <= 1;
+    state.selectedRepos = [folder.path];
+    if (!alreadyShown) {
+      state.selectedRepo = folder.path;
+      state.selectedHash = null;
+      state.detailsData = null;
+      state.repositories = null;
+      if (typeof gitGraphSaveUiPrefs === 'function') gitGraphSaveUiPrefs(project.id, state);
+    }
   }
   state.pendingFocusHash = hash;
+  state.pendingFocusRepo = folder.path;
   state.focusTries = 0;
-  setProjectGitView(project, 'history');
   showProjectTab(project, 'git');
   // Already loaded: the commit can be picked right away.
   const body = projectViewer?.querySelector('#git-workspace-view');
@@ -1079,7 +1090,7 @@ function filesHeadActions(view) {
     { act: 'new-folder', label: 'New Folder…', icon: FICONS.newFolder(14) },
     { act: 'refresh', label: 'Refresh Explorer', icon: PICONS.refresh(14), fold: true },
     { act: 'collapse', label: 'Collapse Folders', icon: FICONS.collapse(14), fold: true },
-    { act: 'open', label: 'Open Folder', icon: PICONS.open(14), fold: true },
+    { act: 'open', label: 'Open Folder', icon: ICONS.folderOpen(14), fold: true },
   ];
 }
 

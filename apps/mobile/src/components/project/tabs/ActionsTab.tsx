@@ -14,7 +14,7 @@ import { usePullRefresh } from '@/components/PullRefresh';
 import { openInAppBrowser } from '@/components/pulls/PullRequestWebPage';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { useGitInfo } from '@/git/info-query';
-import { chooseRepo, historyRepos, type RepoRef } from '@/git/repo-choice';
+import { carryRepoPatch, chooseRepo, historyRepos, type RepoRef } from '@/git/repo-choice';
 import type { Project } from '@/projects/model';
 import { useProjectUi } from '@/projects/ui-store';
 import { useCapability, useConnection } from '@/store/connection';
@@ -38,6 +38,7 @@ export function ActionsTab({ project, active = true }: { project: Project; activ
   const online = useConnection((s) => s.status.state === 'online');
   const scroll = useTabScroll(pid, 'actions');
   const [gitRepo, patchUi] = useProjectUi(pid, (ui) => ui.gitRepo);
+  const [gitRepos] = useProjectUi(pid, (ui) => ui.gitRepos);
   const [pullRemotes] = useProjectUi(pid, (ui) => ui.pullRemotes);
   const info = useGitInfo(pid, false);
   const known = info.data?.repositories;
@@ -307,7 +308,7 @@ export function ActionsTab({ project, active = true }: { project: Project; activ
 
   return (
     <View style={actionStyles.screen}>
-      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => { patchUi({ gitRepo: path }); chooseWorkflow(null); }} />
+      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => { patchUi(carryRepoPatch({ gitRepo, gitRepos }, path)); chooseWorkflow(null); }} />
       {header}
       <ScrollView {...scroll} refreshControl={pull} keyboardShouldPersistTaps="handled">
         {workflowHead}

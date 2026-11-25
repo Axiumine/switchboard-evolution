@@ -5,6 +5,7 @@
 // lets a phone call; this file only shapes what comes back and what goes out.
 
 import { cliLabel, relativeTime, sessionTitle, type LiveState, type Session } from '@/sessions/model';
+import { selectOnlyRepo, toggleRepoInSelection, type RepoSelection } from '@/shared/vendor/repo-selection';
 
 export type WorktreeKind = 'main' | 'switchboard' | 'claude' | 'codex' | 'classic' | 'other';
 
@@ -45,6 +46,11 @@ export type WorktreeRepository = {
   bare: boolean;
   /** Found inside an attached folder that is not itself the repository. */
   nested: boolean;
+  /**
+   * The project's attached folders that lead to this repository (a folder can be a worktree of it or hold it),
+   * which is how its chip maps to the Git tab's folder selection. Missing from an older desktop.
+   */
+  attachedFolders?: string[];
   error?: string;
   worktrees: Worktree[];
 };
@@ -296,6 +302,66 @@ export function visibleRepositories(
       .filter((wt) => !filtering || filterMatches(wt, filter, running));
     return { repo, worktrees: sortWorktrees(worktrees, order) };
   }).filter((group) => group.worktrees.length > 0 || (!filtering && (!q || group.repo.name.toLowerCase().includes(q))));
+}
+
+// --- Which repositories to show ---
+//
+// The Git tab remembers its selection as attached folder paths (the same for
+// History, Pull Requests and Worktrees). A repository here is a group of
+// worktrees, found through one or more attached folders, so its chip stands
+// for those folders: ticking it ticks the first of them, and it counts as
+// selected while any of them is.
+
+type Group = Pick<WorktreeRepository, 'id' | 'mainPath' | 'nested' | 'attachedFolders'>;
+
+/** The path a repository's chip is known by in the folder selection: its first attached folder, or its id when it was found inside one (nested). */
+export function groupKey(repo: Group): string {
+  if (repo.nested) return repo.id;
+  // A desktop that does not say which folders lead here: the repository's own folder.
+  return repo.attachedFolders?.[0] ?? repo.mainPath;
+}
+
+/** Every path of the folder selection that stands for the repository. */
+function groupPaths(repo: Group): string[] {
+  return [...new Set([groupKey(repo), repo.id, ...(repo.attachedFolders ?? [])])];
+}
+
+/** Whether the selection (folder paths) shows the repository. */
+export function groupSelected(repo: Group, paths: readonly string[]): boolean {
+  const own = groupPaths(repo);
+  return paths.some((path) => own.includes(path));
+}
+
+/** The repositories the selection shows, in their order; when it names none of them, the first one. */
+export function selectedGroups<T extends Group>(repos: readonly T[], paths: readonly string[]): T[] {
+  const shown = repos.filter((repo) => groupSelected(repo, paths));
+  return shown.length || !repos.length ? shown : [repos[0]];
+}
+
+/** The selection as one key per shown repository, its primary among them (the first when the primary is not shown). */
+export function groupSelection<T extends Group>(repos: readonly T[], selection: RepoSelection): { shown: T[]; keys: RepoSelection } {
+  const shown = selectedGroups(repos, selection.paths);
+  const paths = shown.map(groupKey);
+  const primary = shown.find((repo) => !!selection.primary && groupPaths(repo).includes(selection.primary));
+  return { shown, keys: { primary: primary ? groupKey(primary) : paths[0] ?? null, paths } };
+}
+
+/** The selection made of one repository, as a tap on its name does. */
+export function selectOnlyGroup(repo: Group): RepoSelection {
+  return selectOnlyRepo(groupKey(repo));
+}
+
+/**
+ * The selection with the repository added, or taken away (all the folders that
+ * stand for it); the last one shown stays. `repos` is every repository, for
+ * the order.
+ */
+export function toggleGroupSelection<T extends Group>(repos: readonly T[], selection: RepoSelection, repo: T): RepoSelection {
+  const { shown, keys } = groupSelection(repos, selection);
+  if (!shown.includes(repo)) return toggleRepoInSelection(keys, groupKey(repo), repos.map(groupKey));
+  if (shown.length <= 1) return keys;
+  const paths = keys.paths.filter((path) => path !== groupKey(repo));
+  return { primary: keys.primary && paths.includes(keys.primary) ? keys.primary : paths[0], paths };
 }
 
 /** "2 repositories · 5 worktrees". */

@@ -269,7 +269,7 @@ function showFileMenu(file, { opened, pinned, missing }, position) {
       { label: 'Move down', icon: FILES_ICONS.down(14), disabled: down === null, onClick: () => moveFilePinned(file.filePath, down) },
     );
   }
-  items.push({ sep: true }, { label: revealLabel, icon: FILES_ICONS.folder(14), disabled: missing, onClick: () => window.api.revealFile(file.filePath) });
+  items.push({ sep: true }, { label: revealLabel, icon: ICONS.folderOpen(14), disabled: missing, onClick: () => window.api.revealFile(file.filePath) });
   if (opened) items.push({ label: 'Remove from list', icon: FILES_ICONS.x(14), danger: true, onClick: () => removeFileFromList(file.filePath) });
   showContextMenu(items, position);
 }

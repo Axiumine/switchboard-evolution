@@ -2,8 +2,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ActionIcon } from '@/components/ActionIcon';
 import { toolKind, type ToolItem, type ToolKind } from '@/sessions/chat-groups';
-import { toolFilePath } from '@/sessions/file-refs';
+import { isFolderPath, toolFilePath } from '@/sessions/file-refs';
 import { commandOf, diffLines } from '@/sessions/tool-details';
 import type { ChatItem } from '@/sessions/transcript';
 import { colors, spacing } from '@/theme';
@@ -58,7 +59,9 @@ function Details({ tool, width }: { tool: ToolItem; width: number }) {
       {!tool.result && !command && !diff?.lines.length && !tool.images ? <Text style={styles.faint}>{tool.summary || 'No details'}</Text> : null}
       {file && openFile ? (
         <Pressable onPress={() => openFile(file)} hitSlop={{ top: 6, bottom: 6 }} style={({ pressed }) => [styles.open, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Open ${file}`}>
-          <Ionicons name="open-outline" size={14} color={colors.accent} />
+          {isFolderPath(file)
+            ? <ActionIcon name="folderSearch" size={14} color={colors.accent} />
+            : <Ionicons name="document-text-outline" size={14} color={colors.accent} />}
           <Text style={styles.openText} numberOfLines={1}>Open {file.split('/').pop()}</Text>
         </Pressable>
       ) : null}

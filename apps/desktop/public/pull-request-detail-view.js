@@ -640,9 +640,9 @@ function prdPaint(project, state, repoPath, item, pr) {
 /** Paint the pull request again where it is now on the page, if it is still open there. */
 function prdRefresh(ctx) {
   const { project, state, repoPath, data, pr } = ctx;
-  if (state.repos.get(repoPath) !== data || state.selectedRepo !== repoPath || !data.expanded.has(pr.number)) return;
+  if (state.repos.get(repoPath) !== data || !prIsShown(state, repoPath) || !data.expanded.has(pr.number)) return;
   const body = prActiveBody(project);
-  const item = body?.querySelector(`.pr-item[data-pr="${pr.number}"]`);
+  const item = body?.querySelector(prItemSelectorFor(state, repoPath, pr.number));
   if (item) prdPaint(project, state, repoPath, item, prFindPr(data, pr.number) || pr);
 }
 
@@ -651,18 +651,22 @@ function prFlushPending(project, state) {
   const body = prActiveBody(project);
   const repo = prSelectedRepo(state);
   if (!body || !repo) return;
-  const data = prRepoState(project.id, state, repo.path);
   const list = body.querySelector('#pr-list');
-  if (data.listPending && !prTypingIn(list)) {
-    data.listPending = false;
+  // The repaint of the list waits on the primary repository's data, whatever else is shown.
+  const primary = prRepoState(project.id, state, repo.path);
+  if (primary.listPending && !prTypingIn(list)) {
+    primary.listPending = false;
     prPaintList(project, state, body);
     return;
   }
-  for (const [number, d] of data.detail || []) {
-    if (!d.pending) continue;
-    const item = body.querySelector(`.pr-item[data-pr="${number}"]`);
-    const pr = prFindPr(data, number);
-    if (item && pr && !prTypingIn(item.querySelector('.pr-detail'))) prdPaint(project, state, repo.path, item, pr);
+  for (const shown of prShownRepos(state)) {
+    const data = prRepoState(project.id, state, shown.path);
+    for (const [number, d] of data.detail || []) {
+      if (!d.pending) continue;
+      const item = body.querySelector(prItemSelectorFor(state, shown.path, number));
+      const pr = prFindPr(data, number);
+      if (item && pr && !prTypingIn(item.querySelector('.pr-detail'))) prdPaint(project, state, shown.path, item, pr);
+    }
   }
 }
 
@@ -796,7 +800,7 @@ function prdPaintConversation(ctx, slot) {
 /** Focus an editor once painted (after a repaint opened it). */
 function prdFocusEditor(ctx, key) {
   const body = prActiveBody(ctx.project);
-  const item = body?.querySelector(`.pr-item[data-pr="${ctx.pr.number}"]`);
+  const item = body?.querySelector(prItemSelectorFor(ctx.state, ctx.repoPath, ctx.pr.number));
   const input = item ? [...item.querySelectorAll('.pr-editor')].find(e => e.dataset.editor === key)?.querySelector('textarea') : null;
   if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 }
