@@ -543,6 +543,7 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 - [ ] Search projects by name and sessions by content or title, with leave-out and Stop — `(tabs)/projects.tsx`
 - [ ] "New" creates a project from a name — `(tabs)/projects.tsx` (`TextPrompt`)
 - [ ] Tap a project to open it; tap a session row to open it in its project; "More" and archived toggles per list — `(tabs)/projects.tsx`
+- [ ] Long-press a project for its actions, the same as the ⋯ of its page (New session, Rename, New track, Note, Attach a folder, Star, Snooze or Wake now, Mark as done or Reopen, Settings, Remove project) — `(tabs)/projects.tsx`, `components/project/ProjectActions.tsx`, `projects/menu.ts`
 
 ## `project/[id]/index.tsx` (Project)
 

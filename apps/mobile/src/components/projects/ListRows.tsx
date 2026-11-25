@@ -53,9 +53,10 @@ export function ProjectMark({ project, size = 30 }: { project: Pick<Project, 'id
  * A project row: the chevron that opens its drawer, its mark, its name over
  * its numbers (tap one to see what it counts), and on the right its + (a new
  * session in the project) over how many of its sessions run and its state
- * dot. The rest of the row opens the project.
+ * dot. The rest of the row opens the project, and a long press on it shows
+ * the project's actions.
  */
-export const ProjectListRow = memo(function ProjectListRow({ project, open, dim, state, running, stats, tail, onToggle, onOpen, onNewSession, onLeaveOut }: {
+export const ProjectListRow = memo(function ProjectListRow({ project, open, dim, state, running, stats, tail, onToggle, onOpen, onLongPress, onNewSession, onLeaveOut }: {
   project: Project;
   open: boolean;
   /** Snoozed or done: quieter, as on the desktop. */
@@ -66,6 +67,7 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
   tail: string;
   onToggle: () => void;
   onOpen: () => void;
+  onLongPress?: () => void;
   onNewSession?: () => void;
   onLeaveOut?: () => void;
 }) {
@@ -85,6 +87,7 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
       </Pressable>
       <Pressable
         onPress={onOpen}
+        onLongPress={onLongPress}
         style={({ pressed }) => [styles.projectRow, dim && styles.dim, pressed && styles.pressed]}
         accessibilityRole="button"
         accessibilityLabel={`${project.name}${project.starred ? ', starred' : ''}, ${spoken}`}
@@ -101,6 +104,8 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
                 {i ? <Text style={styles.sep}> · </Text> : null}
                 <Pressable
                   onPress={() => setNamed((current) => (current === stat.key ? null : stat.key))}
+                  // The numbers are part of the row: a long press there too shows the actions.
+                  onLongPress={onLongPress}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                   accessibilityRole="button"
                   accessibilityLabel={`${stat.label} ${stat.value}`}

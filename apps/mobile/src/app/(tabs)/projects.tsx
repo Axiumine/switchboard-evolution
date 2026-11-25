@@ -7,6 +7,7 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextIn
 import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { DonateBox } from '@/components/DonateBox';
 import { HeaderButton } from '@/components/HeaderButton';
+import { ProjectActions } from '@/components/project/ProjectActions';
 import {
   ArchivedToggle, CardEnd, DrawerSessionRow, FolderHead, GroupHead, MoreRow, NoneRow, ProjectListRow, SectionLabel, SectionToggle,
 } from '@/components/projects/ListRows';
@@ -35,7 +36,8 @@ import { colors, spacing } from '@/theme';
  * a drawer under it with its sessions, grouped by time, track or state (the
  * combo beside the search); a session there opens on the project's Session
  * tab. On a Surface Duo the list stays on the left and the project opens on
- * the right.
+ * the right. A long press on a project shows its actions, the ones the ⋯ of
+ * its page shows.
  */
 export default function ProjectsScreen() {
   const loaded = useConnection((s) => s.loaded);
@@ -50,6 +52,7 @@ export default function ProjectsScreen() {
   const [creating, setCreating] = useState(false);
   const [grouping, setGrouping] = useState(false);
   const [actionsFor, setActionsFor] = useState<Session | null>(null);
+  const [projectActionsFor, setProjectActionsFor] = useState<Project | null>(null);
   const donateDue = useDonateBoxDue();
   const closeDonate = useDonate((s) => s.close);
 
@@ -139,6 +142,7 @@ export default function ProjectsScreen() {
             now={now}
             onToggle={() => ui.toggleDrawer(item.project.id, searching)}
             onOpen={openProject}
+            onLongPress={setProjectActionsFor}
             onNewSession={() => newSession(`p:${item.project.id}`)}
             onLeaveOut={searching ? () => leaveOut({ projectId: item.project.id }) : undefined}
           />
@@ -262,17 +266,19 @@ export default function ProjectsScreen() {
         onClose={() => setGrouping(false)}
       />
       <SessionActions session={actionsFor} onClose={() => setActionsFor(null)} />
+      <ProjectActions project={projectActionsFor} now={now} onClose={() => setProjectActionsFor(null)} />
     </View>
   );
 }
 
 /** A project row with what it needs read: its plan's numbers, its state and running sessions. */
-function ProjectRow({ project, open, now, onToggle, onOpen, onNewSession, onLeaveOut }: {
+function ProjectRow({ project, open, now, onToggle, onOpen, onLongPress, onNewSession, onLeaveOut }: {
   project: Project;
   open: boolean;
   now: number;
   onToggle: () => void;
   onOpen: (project: Project) => void;
+  onLongPress: (project: Project) => void;
   onNewSession: () => void;
   onLeaveOut?: () => void;
 }) {
@@ -296,6 +302,7 @@ function ProjectRow({ project, open, now, onToggle, onOpen, onNewSession, onLeav
       tail={tail}
       onToggle={onToggle}
       onOpen={() => onOpen(project)}
+      onLongPress={() => onLongPress(project)}
       onNewSession={onNewSession}
       onLeaveOut={onLeaveOut}
     />

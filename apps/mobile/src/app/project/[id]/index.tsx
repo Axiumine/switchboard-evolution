@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import { HeaderButton } from '@/components/HeaderButton';
 import { FolderChips } from '@/components/project/FolderChips';
 import type { Rename } from '@/components/project/actions';
+import { ProjectActions } from '@/components/project/ProjectActions';
 import { ProjectTabBar } from '@/components/project/ProjectTabBar';
 import { SwipeTabs } from '@/components/project/SwipeTabs';
 import { FilesTab } from '@/components/project/tabs/FilesTab';
@@ -20,16 +21,13 @@ import { SessionTab } from '@/components/project/tabs/SessionTab';
 import { SettingsTab } from '@/components/project/tabs/SettingsTab';
 import { STATE_COLORS } from '@/components/SessionRow';
 import { useProjectTab } from '@/components/project/useProjectTab';
-import { Sheet, type SheetOption } from '@/components/Sheet';
-import { RemoveProjectPrompt } from '@/components/project/RemoveProjectPrompt';
-import { TextPrompt } from '@/components/TextPrompt';
+import { RenamePrompt } from '@/components/project/RenamePrompt';
+import { Sheet } from '@/components/Sheet';
 import { openNote } from '@/notes/panel';
 import { PROJECT_TABS, planTabMeta, type ProjectTab } from '@/projects/tabs';
-import { toggleProjectDone } from '@/projects/flows';
 import { ProjectSessionContext } from '@/projects/open-session';
 import { act, useMinute, useProject, useProjectPlan } from '@/projects/queries';
 import { rowState } from '@/sessions/model';
-import { projectSnoozed, resolveSnoozePresets } from '@/shared/vendor/snooze';
 import { useConnection } from '@/store/connection';
 import { colors } from '@/theme';
 import { openWindow, useCanOpenWindows } from '@/windows/open';
@@ -58,9 +56,8 @@ export default function ProjectScreen() {
   const [folderSheet, setFolderSheet] = useState(false);
   // The header's ⋯ on the Session tab: the session's actions (Split screen among them).
   const [sessionActions, setSessionActions] = useState(false);
-  const [snoozing, setSnoozing] = useState(false);
+  // A track's name, from the Overview tab's track sheet.
   const [rename, setRename] = useState<Rename | null>(null);
-  const [removing, setRemoving] = useState(false);
 
   const refresh = useCallback(() => Promise.all([refetch(), plan.refetch()]), [refetch, plan]);
   // Node Knowledge only when the computer offers it (a desktop older than it does not).
@@ -78,26 +75,9 @@ export default function ProjectScreen() {
     return <View style={styles.center}>{isLoading ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.empty}>This project is gone.</Text>}</View>;
   }
 
-  const snoozed = projectSnoozed(project, now);
   const meta = planTabMeta(plan.data);
 
   const attachFolder = () => router.push({ pathname: '/folders', params: { projectId: project.id } });
-
-  const projectOptions: SheetOption[] = [
-    { label: 'New session…', onPress: () => router.push({ pathname: '/new', params: { target: `p:${project.id}` } }) },
-    { label: 'Rename…', onPress: () => setRename({ kind: 'project', id: project.id, name: project.name }) },
-    { label: 'New track…', onPress: () => setRename({ kind: 'new-track', id: project.id, name: '' }) },
-    { label: 'Note', onPress: () => { openNote(project.id); } },
-    { label: 'Attach a folder…', onPress: attachFolder },
-    { label: project.starred ? 'Unstar' : 'Star', onPress: () => run('update-project', [project.id, { starred: !project.starred }]) },
-    ...(project.status === 'done' ? [] : snoozed
-      ? [{ label: 'Wake now', onPress: () => run('update-project', [project.id, { snoozedUntil: null }]) }]
-      : [{ label: 'Snooze…', onPress: () => setSnoozing(true) }]),
-    // As on the desktop: marking done asks about running work, schedules and worktrees first.
-    { label: project.status === 'done' ? 'Reopen' : 'Mark as done', onPress: () => { toggleProjectDone(project); } },
-    { label: 'Settings', onPress: () => selectTab('settings') },
-    { label: 'Remove project…', destructive: true, onPress: () => setRemoving(true) },
-  ];
 
   const bodies: Record<ProjectTab, ReactNode> = {
     overview: <OverviewTab project={project} now={now} run={run} onRename={setRename} onRefresh={refresh} />,
@@ -170,30 +150,11 @@ export default function ProjectScreen() {
         </SwipeTabs>
       </ProjectSessionContext.Provider>
 
-      <Sheet visible={actions} title={project.name} options={projectOptions} onClose={() => setActions(false)} />
+      <ProjectActions project={actions ? project : null} now={now} onClose={() => setActions(false)} onSettings={() => selectTab('settings')} onRemoved={() => router.back()} />
       <Sheet visible={folderSheet} title="Folders" onClose={() => setFolderSheet(false)}>
         <FolderChips chips={chips} onAttach={() => { setFolderSheet(false); attachFolder(); }} />
       </Sheet>
-      <Sheet
-        visible={snoozing}
-        title="Snooze until"
-        options={resolveSnoozePresets().map((preset) => ({ label: preset.label, hint: preset.whenLabel, onPress: () => run('update-project', [project.id, { snoozedUntil: preset.snoozedUntil }]) }))}
-        onClose={() => setSnoozing(false)}
-      />
-      <RemoveProjectPrompt project={project} visible={removing} onClose={() => setRemoving(false)} after={() => router.back()} />
-      <TextPrompt
-        visible={!!rename}
-        title={rename?.kind === 'new-track' ? 'New track' : 'Rename'}
-        initialValue={rename?.name || ''}
-        confirm={rename?.kind === 'new-track' ? 'Create' : 'Rename'}
-        onClose={() => setRename(null)}
-        onSubmit={(name) => {
-          if (!rename || !name || name === rename.name) return;
-          if (rename.kind === 'project') run('update-project', [rename.id, { name }]);
-          else if (rename.kind === 'track') run('update-track', [rename.id, { name }]);
-          else run('create-track', [rename.id, { name }]);
-        }}
-      />
+      <RenamePrompt rename={rename} run={run} onClose={() => setRename(null)} />
     </View>
   );
 }
