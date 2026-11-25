@@ -15,7 +15,9 @@
 
 const FILES_SEARCH_DEBOUNCE_MS = 300;
 const FILES_SEARCH_PAGE = 2500; // match rows drawn at once; "Show more" draws the next ones
-const SEARCH_OPTION_KEYS = ['query', 'replace', 'matchCase', 'wholeWord', 'isRegex', 'include', 'exclude', 'showReplace', 'showDetails'];
+const SEARCH_OPTION_KEYS = ['query', 'replace', 'matchCase', 'wholeWord', 'isRegex', 'preserveCase', 'include', 'exclude', 'showReplace', 'showDetails'];
+// Preserve Case, as the editor's find bar draws it (editor/find.mjs).
+const PRESERVE_CASE_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.6 11.5h-1.2l-.7-2H1.2l-.7 2H-.6L2 3.8h1.1zM3.4 8.4 2.5 5.6l-1 2.8zM7 3.8h2.7c1.6 0 2.4.7 2.4 1.9 0 .8-.4 1.3-1.1 1.6.9.2 1.4.9 1.4 1.8 0 1.5-1 2.4-2.7 2.4H7zm1.1 3.2h1.4c.9 0 1.4-.4 1.4-1.1s-.5-1.1-1.4-1.1H8.1zm0 3.5h1.6c1 0 1.6-.5 1.6-1.3s-.6-1.2-1.6-1.2H8.1z"/><path d="M13 13h3v1h-3z"/></svg>';
 
 const SICONS = {
   caseSensitive: (s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 16 16" fill="currentColor"><path d="M7.5 12.5h-1.2l-.9-2.6H2.3l-.9 2.6H.2L3.2 4h1.3zm-2.5-3.6L3.9 5.6 2.7 8.9zM14.5 12.5h-1.1v-.8c-.5.6-1 1-1.9 1-1.1 0-1.9-.7-1.9-1.8 0-1.1.8-1.8 2.3-1.9l1.5-.1v-.4c0-.7-.4-1.1-1.2-1.1-.6 0-1.1.2-1.6.6l-.5-.8c.6-.5 1.3-.8 2.2-.8 1.4 0 2.2.7 2.2 2zm-1.1-2.7-1.3.1c-.9.1-1.3.4-1.3.9 0 .6.4.9 1 .9.9 0 1.6-.6 1.6-1.4z"/></svg>`,
@@ -30,7 +32,7 @@ function filesSearchState(project, root) {
   if (!state.search) {
     const last = filesUi(project).lastSearch || {};
     state.search = {
-      query: '', replace: '', matchCase: false, wholeWord: false, isRegex: false,
+      query: '', replace: '', matchCase: false, wholeWord: false, isRegex: false, preserveCase: false,
       include: '', exclude: '', showReplace: false, showDetails: false,
       ...last,
       results: null, error: '', notice: '', running: false, request: 0,
@@ -43,7 +45,7 @@ function filesSearchState(project, root) {
 }
 
 function searchOptionsOf(s) {
-  return { query: s.query, isRegex: s.isRegex, matchCase: s.matchCase, wholeWord: s.wholeWord, include: s.include, exclude: s.exclude };
+  return { query: s.query, isRegex: s.isRegex, matchCase: s.matchCase, wholeWord: s.wholeWord, preserveCase: !!s.preserveCase, include: s.include, exclude: s.exclude };
 }
 
 function rememberSearch(project, s) {
@@ -124,6 +126,7 @@ function renderFilesSearch(project, root, container) {
         </div>
         <div class="ws-search-box ws-replace-box"${s.showReplace ? '' : ' hidden'}>
           <input type="text" class="ws-replace-input" placeholder="Replace" aria-label="Replace" spellcheck="false" autocomplete="off" value="${escapeHtml(s.replace)}">
+          <span class="ws-search-opts">${searchToggleHtml('preserveCase', `Preserve Case (${key('⌥⌘P', 'Alt+P')})`, PRESERVE_CASE_ICON, !!s.preserveCase)}</span>
           <button type="button" class="ws-search-opt ws-replace-all" title="Replace All (${key('⌥⌘↩', 'Ctrl+Alt+Enter')})" aria-label="Replace All">${SICONS.replaceAll(14)}</button>
         </div>
         <div class="ws-search-details-row">
@@ -181,6 +184,7 @@ function renderFilesSearch(project, root, container) {
     if (alt && (mac ? mod : !e.ctrlKey) && code === 'KeyC') { e.preventDefault(); setOption('matchCase'); return; }
     if (alt && (mac ? mod : !e.ctrlKey) && code === 'KeyW') { e.preventDefault(); setOption('wholeWord'); return; }
     if (alt && (mac ? mod : !e.ctrlKey) && code === 'KeyR') { e.preventDefault(); setOption('isRegex'); return; }
+    if (alt && (mac ? mod : !e.ctrlKey) && code === 'KeyP') { e.preventDefault(); setOption('preserveCase'); return; }
     if (alt && (mac ? e.metaKey : e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); replaceAllResults(project, root, container); return; }
     if (e.key === 'Enter' && e.target === input) { e.preventDefault(); schedule(0); return; }
     if (e.key === 'ArrowDown' && (e.target === input || e.target === replaceInput)) {

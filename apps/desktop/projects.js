@@ -353,18 +353,34 @@ function applyTemplate(template, root, vars) {
   return header;
 }
 
+const NOTE_FILE = 'note.md';
+// What older versions wrote in a new note: its title and nothing else.
+const GENERATED_NOTE = /^# [^\n]* note\s*$/;
+
+/** A note that still holds only the title it was made with is emptied: the pad is the user's. */
+function emptyUntouchedNote(filePath) {
+  try {
+    if (GENERATED_NOTE.test(fs.readFileSync(filePath, 'utf8'))) fs.writeFileSync(filePath, '', 'utf8');
+  } catch {}
+}
+
 /**
  * Create one of the agent-owned files when the user opens it from the page
- * before any session has. Only the four known names, only when missing.
+ * before any session has. Only the known names, only when missing. The
+ * agent's files start with their title; the note (note.md, there is one per
+ * project) starts empty.
  */
 function createProjectFile(projectId, name, content) {
   const project = db.getProject(projectId);
   if (!project) return { error: 'Project not found' };
   if (!PROJECT_FILES.includes(name)) return { error: `Not a project file: ${name}` };
   const filePath = path.join(project.root, name);
-  if (fs.existsSync(filePath)) return { ok: true, filePath, created: false };
+  if (fs.existsSync(filePath)) {
+    if (name === NOTE_FILE) emptyUntouchedNote(filePath);
+    return { ok: true, filePath, created: false };
+  }
   const label = name.replace(/\.md$/, '').replace(/-/g, ' ');
-  const text = typeof content === 'string' ? content : `# ${project.name} ${label}\n\n`;
+  const text = typeof content === 'string' ? content : (name === NOTE_FILE ? '' : `# ${project.name} ${label}\n\n`);
   try { fs.writeFileSync(filePath, text, 'utf8'); } catch (err) { return { error: err.message }; }
   return { ok: true, filePath, created: true };
 }

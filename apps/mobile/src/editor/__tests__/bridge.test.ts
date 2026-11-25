@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { call, parseMessage } from '../bridge';
+import { call, languageScript, parseMessage } from '../bridge';
 
 /** Runs a call as the WebView would, against a page that records what it was given. */
 function runInPage(script: string) {
@@ -53,5 +53,43 @@ describe('a message from the editor page', () => {
       '{"type":"state","dirty":"yes","canUndo":true,"canRedo":false}', '{"type":"text","id":"4","text":"a"}', '{"type":"text","id":1.5,"text":"a"}']) {
       expect(parseMessage(data)).toBeNull();
     }
+  });
+});
+
+describe('find and replace through the bridge', () => {
+  it('calls the page\'s find functions with their options', () => {
+    const options = { matchCase: true, wholeWord: false, isRegex: true, preserveCase: false };
+    expect(runInPage(call('find', 'a(b)', options)).calls).toEqual([{ fn: 'find', args: ['a(b)', options] }]);
+    expect(runInPage(call('findNext', -1)).calls).toEqual([{ fn: 'findNext', args: [-1] }]);
+    expect(runInPage(call('replaceAll', '$1', options)).calls).toEqual([{ fn: 'replaceAll', args: ['$1', options] }]);
+    expect(runInPage(call('clearFind')).calls).toEqual([{ fn: 'clearFind', args: [] }]);
+  });
+
+  it('reads what the page found, and refuses anything else', () => {
+    expect(parseMessage(JSON.stringify({ type: 'find', count: 3, current: 2, limited: false }))).toEqual({ type: 'find', count: 3, current: 2, limited: false });
+    expect(parseMessage(JSON.stringify({ type: 'find', count: 0, current: 0, error: 'Invalid regular expression: x' })))
+      .toEqual({ type: 'find', count: 0, current: 0, limited: false, error: 'Invalid regular expression: x' });
+    expect(parseMessage(JSON.stringify({ type: 'find', count: 4, current: 0, limited: false, replaced: 4 }))?.type).toBe('find');
+    expect(parseMessage(JSON.stringify({ type: 'find', count: 2, current: 9 }))).toEqual({ type: 'find', count: 2, current: 2, limited: false });
+    expect(parseMessage(JSON.stringify({ type: 'find', count: -1, current: 0 }))).toBeNull();
+    expect(parseMessage(JSON.stringify({ type: 'openFind' }))).toEqual({ type: 'openFind' });
+  });
+});
+
+describe('a grammar the page asks for', () => {
+  it('is asked by its add-on name, and nothing else is', () => {
+    expect(parseMessage(JSON.stringify({ type: 'needLanguage', addon: 'lang-php' }))).toEqual({ type: 'needLanguage', addon: 'lang-php' });
+    expect(parseMessage(JSON.stringify({ type: 'needLanguage', addon: '../x' }))).toBeNull();
+    expect(parseMessage(JSON.stringify({ type: 'needLanguage' }))).toBeNull();
+  });
+
+  it('goes in with the page told it is there', () => {
+    const told: string[] = [];
+    const sb = { languageReady: (addon: string) => told.push(addon) };
+    const window = { sb, __sbEditorAddons: {} as Record<string, unknown> };
+    const source = "window.__sbEditorAddons['lang-php'] = { support: () => null };";
+    new Function('window', languageScript('lang-php', source))(window);
+    expect(window.__sbEditorAddons['lang-php']).toBeDefined();
+    expect(told).toEqual(['lang-php']);
   });
 });

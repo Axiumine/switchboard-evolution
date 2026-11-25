@@ -2,8 +2,8 @@
 // Do not edit: change it in packages/shared and run npm run sync-shared.
 
 // text-search.js — the query of a search box (a VS Code-like find, in a file or
-// across a folder) as a regular expression, the matches on one line, and the
-// text that replaces a match.
+// across a folder) as a regular expression, the matches on one line or in a
+// whole document, and the text that replaces a match.
 //
 // Used by the desktop's search worker and Files tab, the editor's find bar,
 // and the phone app (scripts/sync-shared.mjs there): no DOM, no Node.
@@ -63,18 +63,98 @@
    * lookbehinds and anchors see the same text they matched in.
    */
   function replacementFor(options, matchText, replace, context = null) {
+    const cased = value => (options.preserveCase ? preserveCase(matchText, value) : value);
     const text = String(replace ?? '');
-    if (!options.isRegex) return text;
+    if (!options.isRegex) return cased(text);
     const regex = buildSearchRegExp(options);
     if (context && typeof context.line === 'string' && Number.isInteger(context.column)) {
       const sticky = new RegExp(regex.source, regex.flags.replace('g', '') + 'y');
       sticky.lastIndex = context.column;
       const m = sticky.exec(context.line);
-      if (m && m[0] === matchText) return expandReplacement(text, m);
+      if (m && m[0] === matchText) return cased(expandReplacement(text, m));
     }
     const single = new RegExp(regex.source, regex.flags.replace('g', ''));
     const m = single.exec(matchText);
-    return m ? expandReplacement(text, m) : text;
+    return cased(m ? expandReplacement(text, m) : text);
+  }
+
+  // ── A whole document (an editor's find bar, on the desktop and the phone) ──
+
+  const MATCH_LIMIT = 20000;
+
+  /** The query as a regular expression for a whole document: ^ and $ at every line, as VS Code. */
+  function documentRegExp(options) {
+    const regex = buildSearchRegExp(options);
+    return regex.flags.includes('m') ? regex : new RegExp(regex.source, `${regex.flags}m`);
+  }
+
+  /**
+   * The matches of `regex` (global) in `text`, as [{ from, to }]: inside the
+   * ranges of `scope` when it is given (Find in Selection), at most `limit`.
+   * Empty matches are skipped. The regex sees the whole text, so lookbehinds
+   * and ^ work at a scope's edges as they do elsewhere.
+   */
+  function findAllMatches(text, regex, scope = null, limit = MATCH_LIMIT) {
+    const out = [];
+    const ranges = scope && scope.length ? scope : [{ from: 0, to: text.length }];
+    for (const { from, to } of ranges) {
+      regex.lastIndex = from;
+      let m;
+      while (out.length < limit && (m = regex.exec(text)) !== null) {
+        if (m.index >= to) break;
+        if (m[0].length === 0) {
+          regex.lastIndex = m.index + 1;
+          if (regex.lastIndex > text.length) break;
+          continue;
+        }
+        if (m.index + m[0].length <= to) out.push({ from: m.index, to: m.index + m[0].length });
+      }
+      if (out.length >= limit) break;
+    }
+    regex.lastIndex = 0;
+    return out;
+  }
+
+  /** The index of the first match that ends after `pos`. */
+  function firstMatchAfter(matches, pos) {
+    let lo = 0;
+    let hi = matches.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (matches[mid].to <= pos) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+
+  /**
+   * Where to go from the selection [from, to]: the first match that starts at
+   * or after `to` (direction 1), or the last that starts before `from` (-1),
+   * round the end of the document.
+   */
+  function nextMatchIndex(matches, from, to, direction) {
+    if (!matches.length) return -1;
+    if (direction > 0) {
+      const idx = matches.findIndex(m => m.from >= to && !(m.from === from && m.to === to));
+      return idx < 0 ? 0 : idx;
+    }
+    for (let i = matches.length - 1; i >= 0; i--) if (matches[i].from < from) return i;
+    return matches.length - 1;
+  }
+
+  /**
+   * What replaces `match` ({ from, to }) of `text`: `replace` with the groups of
+   * the regular expression `regex` matched there ($1, \u …), in the match's case
+   * when `options.preserveCase`.
+   */
+  function documentReplacement(regex, options, text, match, replace) {
+    let replacement = String(replace ?? '');
+    if (options.isRegex) {
+      const sticky = new RegExp(regex.source, `${regex.flags.replace('g', '')}y`);
+      sticky.lastIndex = match.from;
+      const m = sticky.exec(text);
+      if (m) replacement = expandReplacement(replacement, m);
+    }
+    return options.preserveCase ? preserveCase(text.slice(match.from, match.to), replacement) : replacement;
   }
 
   const GROUP_TOKEN = /^\$(\$|&|`|'|\d{1,2}|<([^>]*)>)/;
@@ -223,7 +303,10 @@
     return out;
   }
 
-  const api = { escapeRegExp, buildSearchRegExp, matchesInLine, replacementFor, expandReplacement, preserveCase, globListMatcher };
+  const api = {
+    escapeRegExp, buildSearchRegExp, matchesInLine, replacementFor, expandReplacement, preserveCase, globListMatcher,
+    MATCH_LIMIT, documentRegExp, findAllMatches, firstMatchAfter, nextMatchIndex, documentReplacement,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TextSearch = api;
 })(typeof window !== 'undefined' ? window : globalThis);

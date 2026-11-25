@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu, webContents } = require('electron');
 // Capture every IPC handler as it is registered, so the remote-access server
 // can call the same functions. Must run before the first registration below.
 require('./ipc-registry').install(ipcMain);
@@ -897,6 +897,113 @@ projects.onFolderChange((event) => knowledge.folderChanged(event));
 addSink((channel, args) => {
   if (channel === 'git-graph-repo-changed' && typeof args[0] === 'string') knowledge.scheduleRefresh(args[0]);
 });
+
+// --- The editor's language servers (lsp/) ---
+// Started for a file inside a project's folders, when that project has the
+// server on (its Settings tab) and the server is installed on this computer:
+// nothing is downloaded. One process per window, folder and server
+// (lsp/manager.js), spoken to by the window's editors over lsp-send /
+// lsp-message.
+const { createProjectServers } = require('./lsp/project-servers');
+const { createLspManager } = require('./lsp/manager');
+const lspLocate = require('./lsp/locate');
+function lspDataDir() {
+  const dir = path.join(app.getPath('userData'), 'lsp');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+// The app's switch (Settings › Editor, "Language servers"): off, no server starts anywhere.
+function languageServersOn() {
+  return (getSetting('global') || {}).languageServers !== false;
+}
+const lspProjects = createProjectServers({
+  db: dbModule,
+  log,
+  locate: server => lspLocate.locateServer(server, { root: '', dataDir: lspDataDir() }),
+});
+const lspManager = createLspManager({
+  projectServers: lspProjects,
+  locate: (server, context) => lspLocate.locateServer(server, context),
+  send: (ownerId, channel, ...args) => {
+    const target = webContents.fromId(ownerId);
+    if (target && !target.isDestroyed()) target.send(channel, ...args);
+  },
+  log,
+  dataDir: lspDataDir(),
+  env: async () => ({ ...buildPtyEnv(process.env), PATH: lspLocate.serverPath({ login: await lspLocate.loginPath() }) }),
+  isOn: languageServersOn,
+});
+// A window's servers stop with it.
+const lspOwners = new Set();
+function watchLspOwner(sender) {
+  if (!sender || lspOwners.has(sender.id)) return;
+  const id = sender.id;
+  lspOwners.add(id);
+  sender.once('destroyed', () => { lspOwners.delete(id); lspManager.closeOwner(id); });
+}
+// A folder that joins a project turns on the servers of the languages it has
+// (with the switch off it is looked at later, the first time a server is needed).
+projects.onFolderChange((event) => {
+  if (event.change !== 'attached' || !event.folder?.path || !languageServersOn()) return;
+  lspProjects.ensureDetected(event.projectId, [event.folder.path]).catch(err => log.warn(`[lsp] detection failed: ${err.message}`));
+});
+ipcMain.handle('lsp-open', async (event, filePath) => {
+  try {
+    watchLspOwner(event.sender);
+    return await lspManager.open({ ownerId: event.sender.id, filePath });
+  } catch (err) {
+    log.error('[lsp] open', err);
+    return { unavailable: 'error', error: err.message };
+  }
+});
+ipcMain.on('lsp-send', (event, sessionId, message) => lspManager.fromClient(event.sender.id, sessionId, message));
+ipcMain.handle('lsp-close', async (event, sessionId) => { await lspManager.close(event.sender.id, sessionId); return { ok: true }; });
+ipcMain.handle('lsp-restart', (event, sessionId) => lspManager.restart(event.sender.id, sessionId));
+ipcMain.handle('lsp-project-servers', guarded(projectId => lspProjects.summary(projectId, { detect: languageServersOn() })));
+ipcMain.handle('get-language-servers', () => languageServersOn());
+// Off: every server stops; every window hears it (its editors let their servers go, or ask again when on).
+ipcMain.handle('set-language-servers', guarded(async (on) => {
+  setSetting('global', { ...(getSetting('global') || {}), languageServers: !!on });
+  if (!on) await lspManager.stopAll();
+  for (const target of webContents.getAllWebContents()) {
+    if (!target.isDestroyed()) target.send('language-servers-changed', !!on);
+  }
+  return { ok: true, on: !!on };
+}));
+ipcMain.handle('set-project-lsp-server', guarded((projectId, serverId, on) => lspProjects.setEnabled(projectId, serverId, on)));
+ipcMain.handle('lsp-detect', guarded(async (projectId) => { await lspProjects.redetect(projectId); return lspProjects.summary(projectId); }));
+// A rename's edits to files no editor has open, written here (only inside a project's folders).
+const lspEdits = require('./lsp/apply-edits');
+ipcMain.handle('lsp-apply-edits', guardedEvent(async (event, fileEdits, { title = 'Rename' } = {}) => {
+  const files = Object.keys(fileEdits || {});
+  if (!files.length) return { ok: true, files: 0 };
+  const sender = event?.sender ? BrowserWindow.fromWebContents(event.sender) : null;
+  const win = sender && !sender.isDestroyed() ? sender : mainWindow;
+  const shown = files.slice(0, 8).map(f => `• ${f}`);
+  if (files.length > shown.length) shown.push(`+ ${files.length - shown.length} more`);
+  const options = {
+    type: 'question',
+    message: `${title} also in ${files.length} file${files.length === 1 ? '' : 's'} that ${files.length === 1 ? 'is' : 'are'} not open?`,
+    detail: `${shown.join('\n')}\n\nThe files are changed on disk.`,
+    buttons: ['Change Them', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  if (response !== 0) return { cancelled: true };
+  return lspEdits.writeFileEdits(fileEdits, { folderOf: f => lspProjects.folderOf(f) });
+}));
+// Format Document and Format Selection (formatter.js): the project's Prettier, else the app's.
+const { createFormatter } = require('./formatter');
+const formatter = createFormatter({ folderOf: f => lspProjects.folderOf(f), log });
+ipcMain.handle('editor-format', guarded(request => formatter.format(request || {})));
+// Go to Definition through the code graph where no language server answers.
+const { findDefinitionInGraph } = require('./lsp/graph-definition');
+ipcMain.handle('editor-find-definition', guarded((filePath, word) => findDefinitionInGraph({
+  folderOf: f => lspProjects.folderOf(f),
+  query: (projectId, folder, tool, args) => knowledge.query(projectId, folder, tool, args),
+}, filePath, word)));
 // Like guarded(), and the error's code too ('not-indexed', 'cbm-missing', …) for the tab's states.
 function knowledgeGuarded(fn) {
   return async (_event, ...args) => {
@@ -3954,6 +4061,7 @@ app.on('before-quit', () => {
   remoteServer.stop();
   knowledge.stopWatching();
   cbmClient.stop();
+  lspManager.stopAll();
   // Shut down all MCP servers
   shutdownAllMcp();
   taskManager.shutdown();
@@ -3976,5 +4084,7 @@ app.on('before-quit', () => {
 
 // Close SQLite after all windows are closed to avoid "connection is not open" errors
 app.on('will-quit', () => {
+  // A language server still there after its shutdown and exit messages goes now.
+  lspManager.killAll();
   closeDb();
 });

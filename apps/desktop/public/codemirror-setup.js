@@ -13,6 +13,45 @@ import { highlightCodeLines } from './editor/languages.mjs';
 import { openSearch, openGotoLine, findNext, findPrevious, runEditorKeys, createPreviewFind } from './editor/find.mjs';
 import { openSymbolPicker } from './editor/symbols.mjs';
 import { detectEol, normalizeEol } from './editor/indentation.mjs';
+import { PREFS, readPref, setPref, togglePref, onPrefChange } from './editor/prefs.mjs';
+// The modules the add-ons loaded later (editor/addons.mjs) use as their own.
+import * as cmState from '@codemirror/state';
+import * as cmView from '@codemirror/view';
+import * as cmLanguage from '@codemirror/language';
+import * as cmCommands from '@codemirror/commands';
+import * as cmSearch from '@codemirror/search';
+import * as cmAutocomplete from '@codemirror/autocomplete';
+import * as cmLint from '@codemirror/lint';
+import * as lezerCommon from '@lezer/common';
+import * as lezerHighlight from '@lezer/highlight';
+import * as lezerLr from '@lezer/lr';
+import * as markedModule from 'marked';
+import * as langHtml from '@codemirror/lang-html';
+import * as langCss from '@codemirror/lang-css';
+import * as langJavascript from '@codemirror/lang-javascript';
+import * as lezerJavascript from '@lezer/javascript';
+import * as lezerHtml from '@lezer/html';
+import * as lezerCss from '@lezer/css';
+
+window.__sbEditorModules = {
+  '@codemirror/state': cmState,
+  '@codemirror/view': cmView,
+  '@codemirror/language': cmLanguage,
+  '@codemirror/commands': cmCommands,
+  '@codemirror/search': cmSearch,
+  '@codemirror/autocomplete': cmAutocomplete,
+  '@codemirror/lint': cmLint,
+  '@lezer/common': lezerCommon,
+  '@lezer/highlight': lezerHighlight,
+  '@lezer/lr': lezerLr,
+  marked: markedModule,
+  '@codemirror/lang-html': langHtml,
+  '@codemirror/lang-css': langCss,
+  '@codemirror/lang-javascript': langJavascript,
+  '@lezer/javascript': lezerJavascript,
+  '@lezer/html': lezerHtml,
+  '@lezer/css': lezerCss,
+};
 
 window.createCodeEditor = createCodeEditor;
 window.createPlanEditor = createPlanEditor;
@@ -36,6 +75,21 @@ window.cmGetText = editorText;
 window.cmSetText = setEditorText;
 window.cmDetectEol = detectEol;
 window.cmNormalizeEol = normalizeEol;
+// The language servers' switch is the main process's: this window follows it.
+if (window.api && window.api.getLanguageServers) {
+  const follow = (on) => { if (readPref('languageServers') !== !!on) setPref('languageServers', !!on, { fromApp: true }); };
+  window.api.getLanguageServers().then(follow, () => {});
+  if (window.api.onLanguageServersChanged) window.api.onLanguageServersChanged(follow);
+}
+// The editor's preferences (editor/prefs.mjs), for Settings › Editor.
+window.cmEditorPrefs = {
+  names: () => [...PREFS.keys()],
+  label: name => (PREFS.has(name) ? PREFS.get(name).label : name),
+  get: readPref,
+  set: setPref,
+  toggle: togglePref,
+  onChange: onPrefChange,
+};
 
 marked.setOptions({ breaks: true, gfm: true });
 window.marked = marked;

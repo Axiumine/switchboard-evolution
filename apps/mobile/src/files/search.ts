@@ -44,20 +44,22 @@ export type SearchForm = {
   isRegex: boolean;
   matchCase: boolean;
   wholeWord: boolean;
+  /** Replace in the case of each match (VS Code's Preserve Case). */
+  preserveCase: boolean;
   /** Comma-separated globs. */
   include: string;
   exclude: string;
   replace: string;
 };
 
-export const EMPTY_SEARCH: SearchForm = { query: '', isRegex: false, matchCase: false, wholeWord: false, include: '', exclude: '', replace: '' };
+export const EMPTY_SEARCH: SearchForm = { query: '', isRegex: false, matchCase: false, wholeWord: false, preserveCase: false, include: '', exclude: '', replace: '' };
 
 /** How many matches the phone asks for (the desktop allows up to 20000). */
 export const MAX_RESULTS = 2000;
 
 /** The options the query itself is made of: what both the search and a replace send. */
 export function queryOptions(form: SearchForm): Required<SearchOptions> {
-  return { query: form.query, isRegex: form.isRegex, matchCase: form.matchCase, wholeWord: form.wholeWord };
+  return { query: form.query, isRegex: form.isRegex, matchCase: form.matchCase, wholeWord: form.wholeWord, preserveCase: form.preserveCase };
 }
 
 /** The `opts` of search-project-files, or null while there is nothing to search for. */

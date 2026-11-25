@@ -2,8 +2,9 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Com
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 
-import { call, parseMessage, type CursorAction, type EditorState } from '@/editor/bridge';
+import { call, languageScript, parseMessage, type CursorAction, type EditorState, type FindOptions, type FindResult } from '@/editor/bridge';
 import { EDITOR_HTML } from '@/editor/editor-html.generated';
+import { EDITOR_LANGUAGES } from '@/editor/editor-languages.generated';
 import { useEditorFont } from '@/editor/font';
 import { colors } from '@/theme';
 
@@ -26,6 +27,14 @@ export type CodeEditorHandle = {
   cursors(action: CursorAction): void;
   /** `text` (from getText) was saved: the editor is clean unless it changed since, its history kept. */
   saved(text: string): void;
+  /** Search `query` (an empty one clears the search); the matches marked, the first from the cursor selected. */
+  find(query: string, options: FindOptions): void;
+  /** The next match (1) or the previous one (-1), round the end. */
+  findNext(direction: 1 | -1): void;
+  /** Replace the selected match and go to the next (the first press goes to a match). */
+  replace(text: string, options: FindOptions): void;
+  replaceAll(text: string, options: FindOptions): void;
+  clearFind(): void;
 };
 
 /**
@@ -37,8 +46,10 @@ export type CodeEditorHandle = {
  * The text size is the one all editors share (useEditorFont), or `fontSize`.
  * `onChange` is called at every edit (not on a load), for autosave's timer:
  * `onState` only hears of the first edit, as dirty does not change after it.
+ * `onFind` hears what a search found (and its count as the text changes),
+ * `onOpenFind` that Cmd/Ctrl+F was pressed on a hardware keyboard.
  */
-export function CodeEditor({ text, filename, editable, line, wrap = false, base, fontSize, onState, onChange, ref }: {
+export function CodeEditor({ text, filename, editable, line, wrap = false, base, fontSize, onState, onChange, onFind, onOpenFind, ref }: {
   text: string;
   filename: string;
   editable: boolean;
@@ -48,22 +59,28 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, base,
   fontSize?: number;
   onState?: (state: EditorState) => void;
   onChange?: () => void;
+  onFind?: (result: FindResult) => void;
+  onOpenFind?: () => void;
   ref?: Ref<CodeEditorHandle>;
 }) {
   const webRef = useRef<WebViewHandle>(null);
   const ready = useRef(false);
   // The page's state as calls: sent again whenever the page (re)starts.
-  const shown = useRef({ load: '', editable: '', fontSize: '' });
+  const shown = useRef({ load: '', editable: '', fontSize: '', find: '' });
   const texts = useRef(new Map<number, (text: string) => void>());
   const nextId = useRef(1);
   const onStateRef = useRef(onState);
   const onChangeRef = useRef(onChange);
+  const onFindRef = useRef(onFind);
+  const onOpenFindRef = useRef(onOpenFind);
   const sharedSize = useEditorFont((s) => s.size);
   const size = fontSize ?? sharedSize;
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => { onStateRef.current = onState; }, [onState]);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { onFindRef.current = onFind; }, [onFind]);
+  useEffect(() => { onOpenFindRef.current = onOpenFind; }, [onOpenFind]);
 
   // Before the page is ready a call is dropped: undo, redo and the rest only
   // come after a file is shown, and the file and the mode go with `ready`.
@@ -99,6 +116,18 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, base,
     revert: () => run(call('revert')),
     cursors: (action) => run(call('cursors', action)),
     saved: (text) => run(call('saved', text)),
+    find: (query, options) => {
+      // The search goes with the page when it starts again, as the file does.
+      shown.current.find = query ? call('find', query, options) : '';
+      run(query ? shown.current.find : call('clearFind'));
+    },
+    findNext: (direction) => run(call('findNext', direction)),
+    replace: (value, options) => run(call('replace', value, options)),
+    replaceAll: (value, options) => run(call('replaceAll', value, options)),
+    clearFind: () => {
+      shown.current.find = '';
+      run(call('clearFind'));
+    },
   }), [run]);
 
   const onMessage = useCallback((event: WebViewMessageEvent) => {
@@ -107,13 +136,22 @@ export function CodeEditor({ text, filename, editable, line, wrap = false, base,
     if (message.type === 'ready') {
       // The first start, or the page loaded again: it starts empty either way.
       ready.current = true;
-      webRef.current?.injectJavaScript(shown.current.fontSize + shown.current.load + shown.current.editable);
+      webRef.current?.injectJavaScript(shown.current.fontSize + shown.current.load + shown.current.editable + shown.current.find);
     } else if (message.type === 'loaded') {
       setLoaded(true);
     } else if (message.type === 'changed') {
       onChangeRef.current?.();
     } else if (message.type === 'state') {
       onStateRef.current?.({ dirty: message.dirty, canUndo: message.canUndo, canRedo: message.canRedo, cursors: message.cursors });
+    } else if (message.type === 'find') {
+      const { type: _type, ...result } = message;
+      onFindRef.current?.(result);
+    } else if (message.type === 'openFind') {
+      onOpenFindRef.current?.();
+    } else if (message.type === 'needLanguage') {
+      // Asked once per page: a grammar it has not got stays plain text.
+      const source = EDITOR_LANGUAGES[message.addon];
+      if (source) webRef.current?.injectJavaScript(languageScript(message.addon, source));
     } else if (message.type === 'text') {
       const resolve = texts.current.get(message.id);
       texts.current.delete(message.id);

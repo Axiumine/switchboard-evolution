@@ -81,6 +81,8 @@ function normalizeOptions(opts = {}) {
     isRegex: !!opts.isRegex,
     matchCase: !!opts.matchCase,
     wholeWord: !!opts.wholeWord,
+    // Replace in the case of each match (VS Code's Preserve Case).
+    preserveCase: !!opts.preserveCase,
     include: typeof opts.include === 'string' ? opts.include : '',
     exclude: typeof opts.exclude === 'string' ? opts.exclude : '',
     maxResults: Number.isInteger(opts.maxResults) && opts.maxResults > 0 ? Math.min(opts.maxResults, DEFAULT_MAX_RESULTS) : DEFAULT_MAX_RESULTS,
@@ -195,7 +197,8 @@ function replaceInRoot(root, rawOptions) {
         sticky.lastIndex = column;
         const m = sticky.exec(line);
         if (!m || m[0] !== match.text || m[0].length === 0) { stale += 1; continue; }
-        add(index, column, m[0].length, options.isRegex ? textSearch.expandReplacement(replace, m) : replace);
+        const value = options.isRegex ? textSearch.expandReplacement(replace, m) : replace;
+        add(index, column, m[0].length, options.preserveCase ? textSearch.preserveCase(m[0], value) : value);
       }
     } else {
       for (let index = 0; index < pieces.length; index += 1) {

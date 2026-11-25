@@ -358,6 +358,35 @@ contextBridge.exposeInMainWorld('api', {
   mcpDiffResponse: (sessionId, diffId, action, editedContent) =>
     ipcRenderer.invoke('mcp-diff-response', sessionId, diffId, action, editedContent),
   readFileForPanel: (filePath) => ipcRenderer.invoke('read-file-for-panel', filePath),
+  // The editor's language servers (lsp/manager.js): one session per window, folder and server.
+  lspOpen: (filePath) => ipcRenderer.invoke('lsp-open', filePath),
+  lspSend: (sessionId, message) => ipcRenderer.send('lsp-send', sessionId, message),
+  lspClose: (sessionId) => ipcRenderer.invoke('lsp-close', sessionId),
+  lspRestart: (sessionId) => ipcRenderer.invoke('lsp-restart', sessionId),
+  onLspMessage: (callback) => {
+    const handler = (_event, sessionId, message) => callback(sessionId, message);
+    ipcRenderer.on('lsp-message', handler);
+    return () => ipcRenderer.removeListener('lsp-message', handler);
+  },
+  onLspState: (callback) => {
+    const handler = (_event, sessionId, state) => callback(sessionId, state);
+    ipcRenderer.on('lsp-state', handler);
+    return () => ipcRenderer.removeListener('lsp-state', handler);
+  },
+  lspProjectServers: (projectId) => ipcRenderer.invoke('lsp-project-servers', projectId),
+  setProjectLspServer: (projectId, serverId, on) => ipcRenderer.invoke('set-project-lsp-server', projectId, serverId, on),
+  lspDetect: (projectId) => ipcRenderer.invoke('lsp-detect', projectId),
+  // The app's switch for every language server (Settings › Editor).
+  getLanguageServers: () => ipcRenderer.invoke('get-language-servers'),
+  setLanguageServers: (on) => ipcRenderer.invoke('set-language-servers', on),
+  onLanguageServersChanged: (callback) => {
+    const handler = (_event, on) => callback(on);
+    ipcRenderer.on('language-servers-changed', handler);
+    return () => ipcRenderer.removeListener('language-servers-changed', handler);
+  },
+  lspApplyEdits: (fileEdits, options) => ipcRenderer.invoke('lsp-apply-edits', fileEdits, options),
+  editorFindDefinition: (filePath, word) => ipcRenderer.invoke('editor-find-definition', filePath, word),
+  editorFormat: (request) => ipcRenderer.invoke('editor-format', request),
   openFileExternally: (filePath, projectRoot) => ipcRenderer.invoke('open-file-externally', filePath, projectRoot),
   shareFile: (filePath) => ipcRenderer.invoke('share-file', filePath),
   resolveTerminalFiles: (references, context) => ipcRenderer.invoke('resolve-terminal-files', references, context),
