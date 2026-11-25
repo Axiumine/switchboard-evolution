@@ -259,6 +259,7 @@ test('in the Projects tab, navigation follows the list the session on screen cam
 
 function starContext() {
   const context = vm.createContext({
+    PinnedOrder: require('../public/pinned-order'),
     escapeHtml: text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
     starIconSvg: filled => `<svg data-filled="${filled}"></svg>`,
   });
@@ -285,6 +286,65 @@ test('starred projects at work get a section of their own above Active, newest f
   assert.deepEqual(ids(groups.active), ['d', 'b']);
   assert.deepEqual(ids(groups.snoozed), ['e', 'f'], 'a snoozed project stays on its shelf, starred ones first');
   assert.deepEqual(ids(groups.done), ['g', 'h'], 'a finished one too, though h moved later');
+});
+
+test('the Starred section keeps the order it was dragged into; one starred since comes after, newest first', () => {
+  const { projectListGroups } = starContext();
+  const time = { a: 1, b: 5, c: 3, d: 9 };
+  const projects = [
+    { id: 'a', status: 'active', starred: true, starRank: 1 },
+    { id: 'b', status: 'active', starred: true, starRank: null },
+    { id: 'c', status: 'active', starred: true, starRank: 0 },
+    { id: 'd', status: 'active', starred: true },
+  ];
+  const groups = projectListGroups(projects, { isSnoozed: () => false, sortTime: p => time[p.id] });
+  assert.deepEqual(plain(groups.starred).map(p => p.id), ['c', 'a', 'd', 'b']);
+});
+
+// --- A project's drawer: its pinned sessions first, in the order they were dragged into ---
+
+function groupingContext({ states = {} } = {}) {
+  const context = vm.createContext({
+    PinnedOrder: require('../public/pinned-order'),
+    sessionEventTime: s => s.time,
+    sessionState: s => states[s.sessionId] || '',
+    trackColors: () => ({ fg: '#fff' }),
+    projectSessionsAll: p => [...p.sessions, ...p.tracks.flatMap(t => t.sessions)],
+    Date: class extends Date { static now() { return Date.parse('2026-11-25T12:00:00'); } },
+  });
+  vm.runInContext(between('function startOfDay(', '/**\n * A project\'s sessions as one list'), context);
+  return context;
+}
+
+const drawerProject = () => {
+  const now = Date.parse('2026-11-25T11:00:00');
+  const s = (sessionId, extra = {}) => ({ sessionId, time: now, ...extra });
+  return {
+    id: 'p1',
+    sessions: [s('loose'), s('pin-b', { starred: 1, pinRank: 1 }), s('old-pin', { starred: 1, time: now - 9e8 })],
+    tracks: [{ id: 't1', name: 'API', sessions: [s('pin-a', { starred: 1, pinRank: 0 }), s('api'), s('gone', { starred: 1, archived: 1 })] }],
+  };
+};
+
+test('every grouping puts the pinned sessions first, in their order, and leaves them out of the groups under', () => {
+  for (const mode of ['time', 'track', 'state']) {
+    const groups = plain(groupingContext({ states: { api: 'running' } }).groupSessions(drawerProject(), mode));
+    assert.equal(groups[0].key, 'pinned', mode);
+    assert.equal(groups[0].title, 'Pinned');
+    assert.deepEqual(groups[0].sessions.map(s => s.sessionId), ['pin-a', 'pin-b', 'old-pin'], `${mode}: ranked first, then the newest`);
+    assert.equal(groups[0].unlimited, true, 'never cut at the limit');
+    const below = groups.slice(1).flatMap(g => g.sessions.map(s => s.sessionId));
+    assert.deepEqual(below.filter(id => id.includes('pin')), [], `${mode}: not listed twice`);
+    assert.ok(!below.includes('gone') && !groups[0].sessions.some(s => s.sessionId === 'gone'), 'an archived one stays with the archived');
+  }
+});
+
+test('a drawer with no pinned session has no Pinned group', () => {
+  const project = drawerProject();
+  project.sessions = project.sessions.filter(s => !s.starred);
+  project.tracks[0].sessions = project.tracks[0].sessions.filter(s => !s.starred);
+  const groups = plain(groupingContext().groupSessions(project, 'time'));
+  assert.ok(!groups.some(g => g.key === 'pinned'));
 });
 
 test("a project row's star says what a click does, and is filled once starred", () => {

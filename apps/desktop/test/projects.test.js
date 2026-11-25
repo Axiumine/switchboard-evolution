@@ -49,7 +49,7 @@ function makeFakeDb({ global = {} } = {}) {
     updateProject: (id, patch) => {
       const row = rows.projects.find(r => r.id === id);
       if (!row) return 0;
-      for (const key of ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'starred', 'modified']) {
+      for (const key of ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'starred', 'starRank', 'modified']) {
         if (key in patch) row[key] = key === 'sharedBranch' || key === 'starred' ? (patch[key] ? 1 : 0) : patch[key];
       }
       return 1;
@@ -241,6 +241,38 @@ test('a star: kept on the project, without touching its modified time', async ()
     const renamed = projects.updateProject(project.id, { name: 'Favourite 2', starred: true }).project;
     assert.equal(renamed.starred, true);
     assert.equal(renamed.name, 'Favourite 2');
+  } finally { t.cleanup(); }
+});
+
+test('starred projects keep the order they are dragged into; unstarring forgets the place', async () => {
+  const t = setup();
+  try {
+    const ids = [];
+    for (const name of ['One', 'Two', 'Three']) {
+      const { project } = await projects.createProject({ name });
+      projects.updateProject(project.id, { starred: true });
+      ids.push(project.id);
+    }
+    const [one, two, three] = ids;
+    const rank = id => projects.buildProjectTree(false).projects.find(p => p.id === id).starRank;
+    assert.deepEqual(ids.map(rank), [null, null, null], 'no place until the first drag');
+
+    const before = t.notifications();
+    const modified = projects.buildProjectTree(false).projects.find(p => p.id === one).modified;
+    assert.deepEqual(projects.setStarredOrder([three, one, two]), { ok: true });
+    assert.deepEqual(ids.map(rank), [1, 2, 0]);
+    assert.ok(t.notifications() > before, 'the window and the phones read the projects again');
+    assert.equal(projects.buildProjectTree(false).projects.find(p => p.id === one).modified, modified, 'an order is not work on the project');
+
+    projects.updateProject(one, { starred: false });
+    assert.equal(rank(one), null);
+    projects.updateProject(one, { starred: true });
+    assert.equal(rank(one), null, 'starred again, it goes after the ordered ones');
+    projects.updateProject(two, { name: 'Two again', starred: true });
+    assert.equal(rank(two), 2, 'a patch that keeps the star keeps the place');
+
+    assert.match(projects.setStarredOrder(['nope']).error, /unknown project/i);
+    assert.match(projects.setStarredOrder('x').error, /list/i);
   } finally { t.cleanup(); }
 });
 

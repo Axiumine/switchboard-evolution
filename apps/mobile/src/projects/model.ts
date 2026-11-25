@@ -3,6 +3,7 @@
 // same prompts for starting a session on part of the plan.
 
 import { rowState, type LiveState, type Notices, type RowState, type Session } from '@/sessions/model';
+import { compareByRank } from '@/shared/vendor/pinned-order';
 import { projectSnoozed } from '@/shared/vendor/snooze';
 
 export type Track = { id: string; name: string; status: 'active' | 'done'; cwd: string | null; cli: string | null; sessions: Session[] };
@@ -21,6 +22,8 @@ export type Project = {
   snoozedUntil: string | null; defaultCwd: string | null;
   /** Starred: listed above Active, and first on the Snoozed and Done shelves. */
   starred?: boolean;
+  /** Its place in the Starred section (pinned-order.js); null until a drag, none from an older desktop. */
+  starRank?: number | null;
   /** The project folder's name, and the worktree branch when none is set. */
   slug?: string;
   /** One branch for every worktree of the project (branchName, else the slug), or each worktree names its own. */
@@ -79,7 +82,9 @@ export function rollupState(sessions: Session[], live: Record<string, LiveState>
 /**
  * Starred (the starred ones at work), active, snoozed (until it wakes, or a
  * session needs you) and done, as the desktop's sidebar: a snoozed or
- * finished project keeps its shelf, starred ones first there.
+ * finished project keeps its shelf, starred ones first there. Starred is in
+ * the order it was dragged into; one starred since comes after, in the
+ * desktop's order.
  */
 export function groupProjects(projects: Project[], { now = Date.now(), live = {}, notices }: { now?: number; live?: Record<string, LiveState>; notices: Notices }) {
   const groups: { starred: Project[]; active: Project[]; snoozed: Project[]; done: Project[] } = { starred: [], active: [], snoozed: [], done: [] };
@@ -89,6 +94,7 @@ export function groupProjects(projects: Project[], { now = Date.now(), live = {}
     else (project.starred ? groups.starred : groups.active).push(project);
   }
   const starFirst = (a: Project, b: Project) => Number(!!b.starred) - Number(!!a.starred);
+  groups.starred.sort(compareByRank((p: Project) => p.starRank, () => 0));
   groups.snoozed.sort(starFirst);
   groups.done.sort(starFirst);
   return groups;

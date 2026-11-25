@@ -3,20 +3,28 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
 
 import { usePullRefresh } from '@/components/PullRefresh';
+import { ReorderItem, ReorderProvider } from '@/components/reorder/Reorder';
 import { SessionActions } from '@/components/SessionActions';
 import { SessionRow } from '@/components/SessionRow';
 import { Sheet } from '@/components/Sheet';
+import { pinnedSessions } from '@/projects/drawer';
 import { projectSessions, rollupState, scheduleSummary, type Project, type ProjectFolder, type Schedule, type Track } from '@/projects/model';
 import { useOpenSession } from '@/projects/open-session';
+import { pinnedGroup, type OrderGroup } from '@/projects/order';
+import { saveOrder } from '@/projects/save-order';
 import { relativeTime, rowState, shortProjectPath, type Session } from '@/sessions/model';
 import { projectSnoozed, snoozeWakeDescription } from '@/shared/vendor/snooze';
-import { useConnection } from '@/store/connection';
+import { useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import { scheduleOptions, trackOptions, type Rename, type Run } from '../actions';
 import { InfoRow, Section, SectionLink } from '../Section';
 import { useTabScroll } from '../useTabScroll';
 
-/** The project at a glance: status, tracks and their sessions, other sessions, schedules and folders. */
+/**
+ * The project at a glance: status, its pinned sessions (in the order they were
+ * dragged into, by the handle at their end), tracks and their other sessions,
+ * the sessions of no track, schedules and folders.
+ */
 export function OverviewTab({ project, now, run, onRename, onRefresh }: {
   project: Project;
   now: number;
@@ -32,34 +40,51 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
   const [folderActions, setFolderActions] = useState<ProjectFolder | null>(null);
   const [scheduleActions, setScheduleActions] = useState<Schedule | null>(null);
   const [sessionActions, setSessionActions] = useState<Session | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // A desktop older than the order has no handles.
+  const canOrder = useCapability('set-pinned-order');
 
   const snoozed = projectSnoozed(project, now);
   const state = rollupState(projectSessions(project), live, notices);
   const status = project.status === 'done' ? 'Done' : snoozed ? `Snoozed until ${snoozeWakeDescription(project.snoozedUntil!)}` : null;
   const openInTab = useOpenSession();
   const openSession = (session: Session) => openInTab(session.sessionId);
-  const sessionRow = (session: Session) => (
-    <SessionRow key={session.sessionId} inset session={session} state={rowState(session.sessionId, live[session.sessionId], notices)} onPress={openSession} onLongPress={setSessionActions} />
+  const sessionRow = (session: Session, handle = false) => (
+    <SessionRow key={session.sessionId} inset session={session} state={rowState(session.sessionId, live[session.sessionId], notices)} onPress={openSession} onLongPress={setSessionActions} handle={handle} />
   );
+  // The pinned ones are listed once, above the tracks.
+  const pinned = pinnedSessions(project);
+  const pinGroup = pinnedGroup(project.id);
+  const pinIds = pinned.map((s) => s.sessionId);
+  const shown = (list: Session[]) => list.filter((s) => !s.archived && !s.starred);
+  const none = (list: Session[]) => !list.some((s) => !s.archived);
   const roots = [{ path: project.root, title: 'Project folder', hint: 'plan, memory, notes' }, ...project.folders.map((f) => ({ path: f.path, title: shortProjectPath(f.path), hint: f.mode === 'worktree' ? `worktree${f.branch ? ` · ${f.branch}` : ''}` : 'folder' }))];
 
   return (
-    <>
-      <ScrollView {...scroll} refreshControl={pull}>
+    <ReorderProvider onOrder={(group, ids) => { saveOrder(group as OrderGroup, ids); }} onDragChange={setDragging}>
+      <ScrollView {...scroll} scrollEnabled={!dragging} refreshControl={pull}>
         {status || state !== 'idle' ? (
           <Text style={styles.status}>{[status, state === 'attention' ? 'a session needs you' : state === 'busy' ? 'working' : state === 'subagent' ? 'a subagent is working' : state === 'unread' ? 'unread' : null].filter(Boolean).join(' · ')}</Text>
         ) : null}
 
+        {pinned.length ? (
+          <Section title="Pinned">
+            {pinned.map((session) => (canOrder
+              ? <ReorderItem key={session.sessionId} group={pinGroup} id={session.sessionId} ids={pinIds} rowKey={session.sessionId}>{sessionRow(session, true)}</ReorderItem>
+              : sessionRow(session)))}
+          </Section>
+        ) : null}
+
         {project.tracks.map((track) => (
           <Section key={track.id} title={`${track.name}${track.status === 'done' ? ' · done' : ''}`} action="•••" onAction={() => setTrackActions(track)}>
-            {track.sessions.filter((s) => !s.archived).map(sessionRow)}
-            {!track.sessions.some((s) => !s.archived) ? <Text style={styles.empty}>No sessions in this track.</Text> : null}
+            {shown(track.sessions).map((session) => sessionRow(session))}
+            {none(track.sessions) ? <Text style={styles.empty}>No sessions in this track.</Text> : null}
           </Section>
         ))}
 
         <Section title={project.tracks.length ? 'Other sessions' : 'Sessions'} action="New" onAction={() => router.push({ pathname: '/new', params: { target: `p:${project.id}` } })}>
-          {project.sessions.filter((s) => !s.archived).map(sessionRow)}
-          {!project.sessions.some((s) => !s.archived) ? <Text style={styles.empty}>No sessions yet.</Text> : null}
+          {shown(project.sessions).map((session) => sessionRow(session))}
+          {none(project.sessions) ? <Text style={styles.empty}>No sessions yet.</Text> : null}
         </Section>
 
         <Section title="Schedules" action="New" onAction={() => router.push({ pathname: '/schedule', params: { projectId: project.id } })}>
@@ -103,7 +128,7 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
       />
       <Sheet visible={!!scheduleActions} title={scheduleActions?.name} options={scheduleActions ? scheduleOptions(project, scheduleActions, run) : []} onClose={() => setScheduleActions(null)} />
       <SessionActions session={sessionActions} onClose={() => setSessionActions(null)} />
-    </>
+    </ReorderProvider>
   );
 }
 

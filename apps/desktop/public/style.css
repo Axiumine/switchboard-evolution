@@ -9434,6 +9434,10 @@ body.project-window .ws-body:has(> .note-window-body) { padding: 0; overflow: hi
 /* Pinned rows are moved by dragging them: a line shows where one would go. */
 .files-pinned-group .memory-item[draggable="true"] { cursor: grab; }
 .memory-item.is-dragging { opacity: 0.4; }
+/* Ordered by dragging (projects-view.js bindOrderDrag): the Starred section and a drawer's Pinned group. */
+[data-order-group].is-dragging { opacity: 0.4; }
+[data-order-group].drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+[data-order-group].drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 .memory-item.drop-before .session-row { box-shadow: 0 -2px 0 0 var(--accent); }
 .memory-item.drop-after .session-row { box-shadow: 0 2px 0 0 var(--accent); }
 

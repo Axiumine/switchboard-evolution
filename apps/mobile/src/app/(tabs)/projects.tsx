@@ -12,12 +12,15 @@ import {
   ArchivedToggle, CardEnd, DrawerSessionRow, FolderHead, GroupHead, MoreRow, NoneRow, ProjectListRow, SectionLabel, SectionToggle,
 } from '@/components/projects/ListRows';
 import { usePullRefresh } from '@/components/PullRefresh';
+import { ReorderCell, ReorderItem, ReorderProvider } from '@/components/reorder/Reorder';
 import { SearchStopBar } from '@/components/SearchStopBar';
 import { SessionActions } from '@/components/SessionActions';
 import { SessionRow } from '@/components/SessionRow';
 import { Sheet } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import { GROUP_MODES, projectListRows, sessionEventTime, sessionsWithoutProject, type DrawerState, type ListRow } from '@/projects/drawer';
+import { pinnedGroup, STARRED, type OrderGroup } from '@/projects/order';
+import { saveOrder } from '@/projects/save-order';
 import { useListUi } from '@/projects/list-ui';
 import { groupProjects, projectRowStats, projectSessions, rollupState, type Project } from '@/projects/model';
 import { openSessionFromTabs } from '@/projects/open-session';
@@ -26,7 +29,7 @@ import { relativeTime, rowState, type Folder, type Session } from '@/sessions/mo
 import { isLive, projectSearchResults, runningAmong } from '@/sessions/search-stop';
 import { useSessionSearch } from '@/sessions/useSessionSearch';
 import { projectSnoozed, snoozeWakeDescription } from '@/shared/vendor/snooze';
-import { request, useConnection } from '@/store/connection';
+import { request, useCapability, useConnection } from '@/store/connection';
 import { useDonate, useDonateBoxDue } from '@/store/donate';
 import { colors, spacing } from '@/theme';
 
@@ -37,7 +40,8 @@ import { colors, spacing } from '@/theme';
  * combo beside the search); a session there opens on the project's Session
  * tab. On a Surface Duo the list stays on the left and the project opens on
  * the right. A long press on a project shows its actions, the ones the ⋯ of
- * its page shows.
+ * its page shows. The Starred section, and each drawer's Pinned group, are
+ * put in order by dragging their rows by the handle at their end.
  */
 export default function ProjectsScreen() {
   const loaded = useConnection((s) => s.loaded);
@@ -53,6 +57,10 @@ export default function ProjectsScreen() {
   const [grouping, setGrouping] = useState(false);
   const [actionsFor, setActionsFor] = useState<Session | null>(null);
   const [projectActionsFor, setProjectActionsFor] = useState<Project | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // A desktop older than the order has no handles.
+  const canOrderStarred = useCapability('set-starred-order');
+  const canOrderPinned = useCapability('set-pinned-order');
   const donateDue = useDonateBoxDue();
   const closeDonate = useDonate((s) => s.close);
 
@@ -94,6 +102,17 @@ export default function ProjectsScreen() {
     return projectListRows({ groups: groupProjects(projects, { now, live, notices }), found, other, ui, stateOf, archivedOf, now });
   }, [projects, folders.data, otherAll, treeAll.data, matchIds, search, excludedProjects, excludedSessions, isRunning, now, live, notices, ui, stateOf]);
 
+  // Each group ordered by dragging, its ids in the order on screen.
+  const orderIds = useMemo(() => {
+    const groups = new Map<OrderGroup, string[]>();
+    const add = (group: OrderGroup, id: string) => groups.set(group, [...(groups.get(group) || []), id]);
+    for (const row of rows) {
+      if (row.kind === 'project' && row.ordered) add(STARRED, row.project.id);
+      if (row.kind === 'session' && row.ordered && row.project) add(pinnedGroup(row.project.id), row.session.sessionId);
+    }
+    return groups;
+  }, [rows]);
+
   // What the search shows, for the bar's count and Stop: only the rows drawn.
   const shown = useMemo(() => rows.flatMap((row) => (row.kind === 'found' || (row.kind === 'session' && !row.project) ? [row.session] : [])), [rows]);
   const running = useMemo(() => runningAmong(shown, isRunning), [shown, isRunning]);
@@ -134,8 +153,9 @@ export default function ProjectsScreen() {
         return <SectionLabel title={item.title} />;
       case 'toggle':
         return <SectionToggle title={item.title} count={item.count} open={item.open} onPress={() => ui.toggleSection(item.section, searching)} />;
-      case 'project':
-        return (
+      case 'project': {
+        const ordered = !!item.ordered && canOrderStarred;
+        const row = (
           <ProjectRow
             project={item.project}
             open={item.open}
@@ -145,8 +165,13 @@ export default function ProjectsScreen() {
             onLongPress={setProjectActionsFor}
             onNewSession={() => newSession(`p:${item.project.id}`)}
             onLeaveOut={searching ? () => leaveOut({ projectId: item.project.id }) : undefined}
+            handle={ordered}
           />
         );
+        return ordered
+          ? <ReorderItem group={STARRED} id={item.project.id} ids={orderIds.get(STARRED) || []} rowKey={item.key}>{row}</ReorderItem>
+          : row;
+      }
       case 'head': {
         const { project, group } = item;
         const plus = item.plus === 'track' && group.track ? () => newSession(`t:${group.track!.id}`) : undefined;
@@ -154,8 +179,9 @@ export default function ProjectsScreen() {
       }
       case 'none':
         return <NoneRow />;
-      case 'session':
-        return (
+      case 'session': {
+        const ordered = !!item.ordered && !!item.project && canOrderPinned;
+        const row = (
           <DrawerSessionRow
             session={item.session}
             project={item.project}
@@ -165,8 +191,13 @@ export default function ProjectsScreen() {
             archived={item.archived}
             onPress={(session) => openSession(session, item.project)}
             onLongPress={setActionsFor}
+            handle={ordered}
           />
         );
+        if (!ordered || !item.project) return row;
+        const group = pinnedGroup(item.project.id);
+        return <ReorderItem group={group} id={item.session.sessionId} ids={orderIds.get(group) || []} rowKey={item.key}>{row}</ReorderItem>;
+      }
       case 'more':
         return <MoreRow label={item.label} onPress={() => ui.showWhole(item.listKey)} />;
       case 'archived':
@@ -241,21 +272,26 @@ export default function ProjectsScreen() {
         </View>
         {searching ? <SearchStopBar shown={shown.length} running={running} leftOut={leftOut} query={search} onRestore={restore} /> : null}
       </View>
-      <FlatList
-        ref={listRef}
-        data={rows}
-        // Rows differ in height: a row not drawn yet is reached in two steps.
-        onScrollToIndexFailed={({ index, averageItemLength }) => {
-          listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
-          setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.4, animated: true }), 120);
-        }}
-        keyExtractor={(row) => row.key}
-        renderItem={renderItem}
-        initialNumToRender={30}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.list}
-        refreshControl={pull}
-      />
+      <ReorderProvider onOrder={(group, ids) => { saveOrder(group as OrderGroup, ids); }} onDragChange={setDragging}>
+        <FlatList
+          ref={listRef}
+          data={rows}
+          // The row being dragged rises above the cells after it; the list stays still meanwhile.
+          CellRendererComponent={ReorderCell}
+          scrollEnabled={!dragging}
+          // Rows differ in height: a row not drawn yet is reached in two steps.
+          onScrollToIndexFailed={({ index, averageItemLength }) => {
+            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
+            setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.4, animated: true }), 120);
+          }}
+          keyExtractor={(row) => row.key}
+          renderItem={renderItem}
+          initialNumToRender={30}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.list}
+          refreshControl={pull}
+        />
+      </ReorderProvider>
       {/* Pinned below the list, which gets the height left (src/store/donate.ts says when). */}
       {donateDue ? <DonateBox onClose={closeDonate} style={styles.donate} /> : null}
       <TextPrompt visible={creating} title="New project" confirm="Create" onClose={() => setCreating(false)} onSubmit={create} />
@@ -272,7 +308,7 @@ export default function ProjectsScreen() {
 }
 
 /** A project row with what it needs read: its plan's numbers, its state and running sessions. */
-function ProjectRow({ project, open, now, onToggle, onOpen, onLongPress, onNewSession, onLeaveOut }: {
+function ProjectRow({ project, open, now, onToggle, onOpen, onLongPress, onNewSession, onLeaveOut, handle }: {
   project: Project;
   open: boolean;
   now: number;
@@ -281,6 +317,7 @@ function ProjectRow({ project, open, now, onToggle, onOpen, onLongPress, onNewSe
   onLongPress: (project: Project) => void;
   onNewSession: () => void;
   onLeaveOut?: () => void;
+  handle?: boolean;
 }) {
   const live = useConnection((s) => s.live);
   const notices = useConnection((s) => s.notices);
@@ -305,6 +342,7 @@ function ProjectRow({ project, open, now, onToggle, onOpen, onLongPress, onNewSe
       onLongPress={() => onLongPress(project)}
       onNewSession={onNewSession}
       onLeaveOut={onLeaveOut}
+      handle={handle}
     />
   );
 }

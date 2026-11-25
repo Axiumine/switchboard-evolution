@@ -5,6 +5,7 @@
 // the screen only draws the rows they return.
 
 import type { Folder, Session } from '@/sessions/model';
+import { compareByRank } from '@/shared/vendor/pinned-order';
 import { projectSessions, type Project, type Track } from './model';
 
 export type GroupMode = 'time' | 'track' | 'state';
@@ -64,13 +65,33 @@ export type DrawerGroup = {
   /** State view: the colour of the heading. */
   tone?: 'attention' | 'running';
   done?: boolean;
-  /** Shown whole, never cut at the limit (what is live now). */
+  /** Shown whole, never cut at the limit (what is live now, the pinned ones). */
   unlimited?: boolean;
+  /** The pinned sessions: ordered by dragging them among themselves. */
+  ordered?: boolean;
 };
 
-/** A project's sessions grouped the three ways the desktop's drawers group them. */
+/**
+ * A project's pinned sessions, archived ones left out: in the order they were
+ * dragged into (pinned-order.js), then the ones without a place, newest first.
+ */
+export function pinnedSessions(project: Project): Session[] {
+  return projectSessions(project).filter((s) => s.starred && !s.archived).sort(compareByRank((s: Session) => s.pinRank, newestFirst));
+}
+
+/**
+ * A project's sessions grouped the three ways the desktop's drawers group
+ * them. Whatever the grouping, the pinned sessions come first in a Pinned
+ * group of their own, and the groups under it leave them out.
+ */
 export function drawerGroups(project: Project, mode: GroupMode, stateOf: (sessionId: string) => DrawerState, now: number): DrawerGroup[] {
-  const shown = (list: Session[]) => list.filter((s) => !s.archived).sort(newestFirst);
+  const pinned = pinnedSessions(project);
+  const first: DrawerGroup[] = pinned.length ? [{ key: 'pinned', title: 'Pinned', sessions: pinned, unlimited: true, ordered: true }] : [];
+  return [...first, ...unpinnedGroups(project, mode, stateOf, now)];
+}
+
+function unpinnedGroups(project: Project, mode: GroupMode, stateOf: (sessionId: string) => DrawerState, now: number): DrawerGroup[] {
+  const shown = (list: Session[]) => list.filter((s) => !s.archived && !s.starred).sort(newestFirst);
 
   if (mode === 'track') {
     const groups: DrawerGroup[] = project.tracks.map((track) => ({
@@ -182,10 +203,12 @@ export const DEFAULT_LIST_UI: ListUi = {
 export type ListRow =
   | { kind: 'section'; key: string; title: string }
   | { kind: 'toggle'; key: string; section: 'snoozed' | 'done' | 'other'; title: string; count: number; open: boolean }
-  | { kind: 'project'; key: string; project: Project; open: boolean }
+  /** `ordered`: a row of the Starred section, dragged among the others to order them. */
+  | { kind: 'project'; key: string; project: Project; open: boolean; ordered?: boolean }
   /** A drawer's group heading. `plus` starts a session in the group's track (the project's own + is on its row). */
   | { kind: 'head'; key: string; project: Project; group: DrawerGroup; plus: 'track' | null }
-  | { kind: 'session'; key: string; project: Project | null; session: Session; showTrack: boolean; archived?: boolean }
+  /** `ordered`: a row of a drawer's Pinned group, dragged among the others to order them. */
+  | { kind: 'session'; key: string; project: Project | null; session: Session; showTrack: boolean; archived?: boolean; ordered?: boolean }
   | { kind: 'more'; key: string; listKey: string; label: string }
   | { kind: 'none'; key: string }
   | { kind: 'archived'; key: string; project: Project; count: number; open: boolean }
@@ -231,7 +254,10 @@ function drawerRows(project: Project, { ui, stateOf, archivedOf, now }: ListInpu
     const listKey = `${project.id}:${mode}:${group.key}`;
     const limit = group.unlimited || ui.expandedLists[listKey] ? Infinity : mode === 'track' ? LIST_LIMIT : GROUP_LIMIT;
     for (const session of group.sessions.slice(0, limit)) {
-      rows.push({ kind: 'session', key: `${base}:${group.key}:${session.sessionId}`, project, session, showTrack: mode !== 'track' });
+      rows.push({
+        kind: 'session', key: `${base}:${group.key}:${session.sessionId}`, project, session,
+        showTrack: !!group.ordered || mode !== 'track', ...(group.ordered ? { ordered: true } : {}),
+      });
     }
     if (!group.sessions.length) rows.push({ kind: 'none', key: `${base}:none:${group.key}` });
     if (group.sessions.length > limit) {
@@ -259,9 +285,9 @@ export function projectListRows(input: ListInput): ListRow[] {
   const done = keep(input.groups.done);
   const rows: ListRow[] = [];
 
-  const project = (p: Project) => {
+  const project = (p: Project, ordered = false) => {
     const open = drawerOpen(ui, p.id, searching);
-    rows.push({ kind: 'project', key: `p:${p.id}`, project: p, open });
+    rows.push({ kind: 'project', key: `p:${p.id}`, project: p, open, ...(ordered ? { ordered: true } : {}) });
     if (open) rows.push(...drawerRows(p, input));
     for (const session of found?.get(p.id) || []) rows.push({ kind: 'found', key: `f:${p.id}:${session.sessionId}`, project: p, session });
   };
@@ -271,19 +297,20 @@ export function projectListRows(input: ListInput): ListRow[] {
   }
   if (starred.length) {
     rows.push({ kind: 'section', key: 's:starred', title: 'Starred' });
-    starred.forEach(project);
+    // Ordered by dragging, outside a search (which shows only some).
+    starred.forEach((p) => project(p, !searching));
   }
   if (active.length) {
     rows.push({ kind: 'section', key: 's:active', title: 'Active' });
-    active.forEach(project);
+    active.forEach((p) => project(p));
   }
   if (snoozed.length) {
     rows.push({ kind: 'toggle', key: 's:snoozed', section: 'snoozed', title: 'Snoozed', count: snoozed.length, open: ui.snoozedOpen });
-    if (ui.snoozedOpen) snoozed.forEach(project);
+    if (ui.snoozedOpen) snoozed.forEach((p) => project(p));
   }
   if (done.length) {
     rows.push({ kind: 'toggle', key: 's:done', section: 'done', title: 'Done', count: done.length, open: ui.doneOpen });
-    if (ui.doneOpen) done.forEach(project);
+    if (ui.doneOpen) done.forEach((p) => project(p));
   }
 
   const otherCount = other.reduce((n, folder) => n + folder.sessions.length, 0);

@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Fragment, memo, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ReorderHandle } from '@/components/reorder/Reorder';
 import { LeaveOutButton } from '@/components/SearchStopBar';
 import { STATE_COLORS } from '@/components/SessionRow';
 import { markTint, projectInitials, trackTint, type DrawerGroup } from '@/projects/drawer';
@@ -54,9 +55,10 @@ export function ProjectMark({ project, size = 30 }: { project: Pick<Project, 'id
  * its numbers (tap one to see what it counts), and on the right its + (a new
  * session in the project) over how many of its sessions run and its state
  * dot. The rest of the row opens the project, and a long press on it shows
- * the project's actions.
+ * the project's actions. In the Starred section a handle at its end drags it
+ * among the others (components/reorder).
  */
-export const ProjectListRow = memo(function ProjectListRow({ project, open, dim, state, running, stats, tail, onToggle, onOpen, onLongPress, onNewSession, onLeaveOut }: {
+export const ProjectListRow = memo(function ProjectListRow({ project, open, dim, state, running, stats, tail, onToggle, onOpen, onLongPress, onNewSession, onLeaveOut, handle }: {
   project: Project;
   open: boolean;
   /** Snoozed or done: quieter, as on the desktop. */
@@ -70,6 +72,8 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
   onLongPress?: () => void;
   onNewSession?: () => void;
   onLeaveOut?: () => void;
+  /** The drag handle, inside a ReorderItem. */
+  handle?: boolean;
 }) {
   const [named, setNamed] = useState<RowStat['key'] | null>(null);
   const spoken = [...stats.map((stat) => `${stat.label} ${stat.value}`), tail].filter(Boolean).join(', ');
@@ -129,6 +133,7 @@ export const ProjectListRow = memo(function ProjectListRow({ project, open, dim,
           ) : null}
         </View>
         {onLeaveOut ? <LeaveOutButton label={project.name} onPress={onLeaveOut} /> : null}
+        {handle ? <ReorderHandle label={project.name} /> : null}
       </Pressable>
     </View>
   );
@@ -224,7 +229,7 @@ const STATE_WORDS: Partial<Record<RowState, string>> = { attention: 'waiting for
  * state dot (when it runs or waits), its track, the CLI, when it last moved
  * and how many messages.
  */
-export const DrawerSessionRow = memo(function DrawerSessionRow({ session, project, here, state, showTrack, archived, onPress, onLongPress }: {
+export const DrawerSessionRow = memo(function DrawerSessionRow({ session, project, here, state, showTrack, archived, onPress, onLongPress, handle }: {
   session: Session;
   project: Project | null;
   /** The session open on the right: highlighted, as the desktop marks the one on screen. */
@@ -234,6 +239,8 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
   archived?: boolean;
   onPress: (session: Session) => void;
   onLongPress: (session: Session) => void;
+  /** The drag handle of a pinned one, inside a ReorderItem. */
+  handle?: boolean;
 }) {
   const track = project && session.trackId ? project.tracks.find((t) => t.id === session.trackId) ?? null : null;
   const tint = project ? trackTint(project, track) : null;
@@ -265,6 +272,7 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
         </View>
         {/* At the right of the row, as on the Sessions tab, in the session's own color. */}
         {session.starred ? <Text style={[styles.star, { color: starTintColor(session.starTint, session.sessionId) }]}>★</Text> : null}
+        {handle ? <ReorderHandle label={sessionTitle(session)} /> : null}
       </Pressable>
     </Card>
   );

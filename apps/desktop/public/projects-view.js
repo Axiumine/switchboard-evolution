@@ -927,7 +927,8 @@ function projectStarHtml(project) {
 
 /**
  * The sections of the Projects tab. Starred holds the starred projects at
- * work, above Active; each is newest first. A snoozed or finished project
+ * work, above Active, in the order they were dragged into (pinned-order.js;
+ * one starred since comes after them, newest first); Active is newest first. A snoozed or finished project
  * stays on its shelf, starred ones first there: the shelf reads as "what
  * comes back first", Done newest first.
  */
@@ -940,7 +941,7 @@ function projectListGroups(projects, { isSnoozed, sortTime }) {
   }
   const byEvent = (a, b) => sortTime(b) - sortTime(a);
   const starFirst = (a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0);
-  starred.sort(byEvent);
+  starred.sort(PinnedOrder.compareByRank(p => p.starRank, byEvent));
   active.sort(byEvent);
   done.sort((a, b) => starFirst(a, b) || byEvent(a, b));
   snoozed.sort((a, b) => starFirst(a, b) || Date.parse(a.snoozedUntil) - Date.parse(b.snoozedUntil));
@@ -959,6 +960,108 @@ async function toggleProjectStar(project) {
     alert(result.error);
     return;
   }
+  loadProjects();
+}
+
+// --- Order by dragging: the Starred section, and each drawer's Pinned group ---
+
+// The row being dragged ({ group, id }), so only the rows of its own group take it.
+let orderDrag = null;
+const ORDER_DRAG_TYPE = 'application/x-switchboard-order';
+
+/** Make a row one of `group`'s, dragged among them by its `id` (bindOrderDrag). */
+function markOrderRow(row, group, id) {
+  row.dataset.orderGroup = group;
+  row.dataset.orderId = id;
+  row.setAttribute('draggable', 'true');
+}
+
+function clearOrderDropMarks(except) {
+  document.querySelectorAll('[data-order-group].drop-before, [data-order-group].drop-after').forEach((el) => {
+    if (el !== except) el.classList.remove('drop-before', 'drop-after');
+  });
+}
+
+/**
+ * Let a marked row (markOrderRow) be dropped on the other rows of its group:
+ * before one, or after it on its lower half. `onOrder` gets the group's ids in
+ * their new order, read from the rows on screen. A row not marked loses the
+ * handlers, as morphdom keeps a row that left the Starred section.
+ */
+function bindOrderDrag(row, onOrder) {
+  if (!row.dataset.orderGroup) {
+    row.ondragstart = row.ondragend = row.ondragover = row.ondragleave = row.ondrop = null;
+    return;
+  }
+  const lowerHalf = (e) => {
+    const rect = row.getBoundingClientRect();
+    return e.clientY > rect.top + rect.height / 2;
+  };
+  const accepts = () => !!orderDrag && orderDrag.group === row.dataset.orderGroup;
+  row.ondragstart = (e) => {
+    orderDrag = { group: row.dataset.orderGroup, id: row.dataset.orderId };
+    e.dataTransfer.setData(ORDER_DRAG_TYPE, orderDrag.id);
+    e.dataTransfer.effectAllowed = 'move';
+    row.classList.add('is-dragging');
+  };
+  row.ondragend = () => {
+    orderDrag = null;
+    row.classList.remove('is-dragging');
+    clearOrderDropMarks();
+  };
+  row.ondragover = (e) => {
+    if (!accepts()) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clearOrderDropMarks(row);
+    const after = lowerHalf(e);
+    row.classList.toggle('drop-after', after);
+    row.classList.toggle('drop-before', !after);
+  };
+  row.ondragleave = (e) => {
+    if (!row.contains(e.relatedTarget)) row.classList.remove('drop-before', 'drop-after');
+  };
+  row.ondrop = (e) => {
+    if (!accepts()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const { group, id: fromId } = orderDrag;
+    const after = lowerHalf(e);
+    clearOrderDropMarks();
+    const ids = [...document.querySelectorAll('[data-order-group]')]
+      .filter(el => el.dataset.orderGroup === group)
+      .map(el => el.dataset.orderId);
+    const index = PinnedOrder.dropIndex(ids, fromId, row.dataset.orderId, after);
+    if (index !== null) onOrder(PinnedOrder.moveId(ids, fromId, index), group);
+  };
+}
+
+/** Both trees' copies of a project: the sidebar's and the one with the archived. */
+function treeCopiesOf(projectId) {
+  return [cachedProjectTree, cachedProjectTreeAll]
+    .map(tree => (tree?.projects || []).find(p => p.id === projectId))
+    .filter(Boolean);
+}
+
+/** The Starred section in a new order: it shows at once, then main keeps it. */
+async function setStarredOrder(ids) {
+  ids.forEach((id, rank) => { for (const project of treeCopiesOf(id)) project.starRank = rank; });
+  renderProjectList();
+  const result = await window.api.setStarredOrder(ids);
+  if (result?.error) alert(result.error);
+  loadProjects();
+}
+
+/** A project's pinned sessions in a new order: its drawer shows it at once, then main keeps it. */
+async function setPinnedOrder(ids, group) {
+  const projectId = group.slice('pinned:'.length);
+  const rankOf = new Map(ids.map((id, rank) => [id, rank]));
+  for (const project of treeCopiesOf(projectId)) {
+    for (const session of projectSessionsAll(project)) if (rankOf.has(session.sessionId)) session.pinRank = rankOf.get(session.sessionId);
+  }
+  refreshProjectDrawer(projectId);
+  const result = await window.api.setPinnedOrder(ids);
+  if (result?.error) alert(result.error);
   loadProjects();
 }
 
@@ -1042,8 +1145,11 @@ function renderProjectList() {
   // A row, then its drawer when open, then (while searching) the sessions
   // found in it. The drawer is an empty shell here: renderProjectDrawer fills
   // it after the morph (see below).
-  const appendProject = (project) => {
-    list.appendChild(buildProjectRow(project));
+  const appendProject = (project, { ordered = false } = {}) => {
+    const row = buildProjectRow(project);
+    // The Starred section is ordered by dragging its rows, outside a search (which shows only some).
+    if (ordered && !found) markOrderRow(row, 'starred', project.id);
+    list.appendChild(row);
     if (projectDrawerOpen(project)) {
       const drawer = document.createElement('div');
       drawer.className = 'proj-drawer';
@@ -1082,7 +1188,7 @@ function renderProjectList() {
     label.id = 'proj-sec-starred';
     label.textContent = 'Starred';
     list.appendChild(label);
-    for (const project of starred) appendProject(project);
+    for (const project of starred) appendProject(project, { ordered: true });
   }
 
   if (active.length) {
@@ -1177,6 +1283,7 @@ function bindProjectList() {
     if (star) star.onclick = (e) => { e.stopPropagation(); toggleProjectStar(project); };
     const plus = row.querySelector('.proj-new');
     if (plus) plus.onclick = (e) => { e.stopPropagation(); showNewSessionMenu(findTreeProject(project.id) || project, null, e.currentTarget); };
+    bindOrderDrag(row, setStarredOrder);
   });
   // Bound here rather than on the built rows: morphdom keeps the live nodes.
   projectsContent.querySelectorAll('.proj-search-session').forEach(row => {
@@ -3169,13 +3276,19 @@ function timeBucket(session, now) {
 
 /**
  * The same rows, grouped three ways. Each group: { key, title, color, sessions,
- * track (Track view), plus (Track view) }.
+ * track (Track view), plus (Track view) }. Whatever the grouping, the pinned
+ * sessions come first, in a Pinned group of their own in the order they were
+ * dragged into (pinned-order.js), and the groups under it leave them out.
  */
 function groupSessions(project, mode) {
   // One rule everywhere: the session with the latest event comes first.
-  const byEvent = (list) => list.filter(s => !s.archived).sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
+  const newestFirst = (a, b) => sessionEventTime(b) - sessionEventTime(a);
+  const byEvent = (list) => list.filter(s => !s.archived && !s.starred).sort(newestFirst);
   const all = byEvent(projectSessionsAll(project));
   const byRunningFirst = byEvent;
+  const pinned = projectSessionsAll(project).filter(s => !s.archived && s.starred)
+    .sort(PinnedOrder.compareByRank(s => s.pinRank, newestFirst));
+  const pinnedGroup = pinned.length ? [{ key: 'pinned', title: 'Pinned', sessions: pinned, unlimited: true, ordered: true }] : [];
 
   if (mode === 'track') {
     const groups = (project.tracks || []).map(track => ({
@@ -3185,7 +3298,7 @@ function groupSessions(project, mode) {
     if (project.sessions.length || !groups.length) {
       groups.push({ key: 'general', title: 'General', color: trackColors(project, null).fg, track: null, sessions: byRunningFirst(project.sessions), plus: true });
     }
-    return groups;
+    return [...pinnedGroup, ...groups];
   }
 
   if (mode === 'state') {
@@ -3193,6 +3306,7 @@ function groupSessions(project, mode) {
     const running = all.filter(s => sessionState(s) === 'running');
     const idle = all.filter(s => !sessionState(s));
     return [
+      ...pinnedGroup,
       { key: 'attention', title: 'Needs input', color: '#f0b060', sessions: attention },
       { key: 'running', title: 'Running', color: '#59d46d', sessions: running },
       { key: 'idle', title: 'Idle', sessions: idle },
@@ -3205,6 +3319,7 @@ function groupSessions(project, mode) {
   const buckets = { today: [], yesterday: [], week: [], month: [], older: [] };
   for (const s of rest) buckets[timeBucket(s, now)].push(s);
   return [
+    ...pinnedGroup,
     { key: 'now', title: 'Now', sessions: live, unlimited: true },
     { key: 'today', title: 'Today', sessions: buckets.today },
     { key: 'yesterday', title: 'Yesterday', sessions: buckets.yesterday },
@@ -3254,10 +3369,18 @@ function buildSessionPaneList(project) {
     const id = `${project.id}:${mode}:${group.key}`;
     const defaultLimit = mode === 'track' ? visibleSessionCount : PANE_GROUP_LIMIT;
     const limit = group.unlimited || expanded[id] ? Infinity : defaultLimit;
-    for (const s of group.sessions.slice(0, limit)) scroll.appendChild(buildSessionRow(project, s, {
-      showTrack: searching || mode !== 'track',
-      className: s.archived ? 'pane-session pane-session--archived' : 'pane-session',
-    }));
+    for (const s of group.sessions.slice(0, limit)) {
+      const row = buildSessionRow(project, s, {
+        showTrack: searching || group.ordered || mode !== 'track',
+        className: s.archived ? 'pane-session pane-session--archived' : 'pane-session',
+      });
+      // The Pinned group is ordered by dragging its rows, among themselves.
+      if (group.ordered) {
+        markOrderRow(row, `pinned:${project.id}`, s.sessionId);
+        bindOrderDrag(row, setPinnedOrder);
+      }
+      scroll.appendChild(row);
+    }
     if (!group.sessions.length) {
       const none = document.createElement('div');
       none.className = 'pane-empty';
