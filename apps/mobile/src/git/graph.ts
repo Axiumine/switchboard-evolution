@@ -53,3 +53,31 @@ export function graphRows(commits: { hash: string; parents: string[]; kind?: str
   });
   return { rows, lanes };
 }
+
+/** The room the panel opened under a row keeps from the screen's edges. */
+export const PANEL_EDGE = 12;
+// Narrower than this beside the lines, the files are cramped: the panel takes the screen's width instead.
+const PANEL_MIN_BESIDE = 280;
+
+/** Where the panel opened under a row goes sideways, in the list's coordinates (it scrolls with the list). */
+export type PanelPlace = {
+  left: number; width: number;
+  /** How far the list scrolls before the panel stops at the screen's left edge and stays there. */
+  stick: number;
+};
+
+/**
+ * The panel opened under a row starts just after the last line that passes
+ * beside it (`below`; `start` is where the row's graph starts, `gap` the room
+ * after the line), not after the whole graph: a wide graph with few lines at
+ * that row leaves the panel its room. Where that room is narrow it is as wide
+ * as the screen (`viewport`), and the list scrolls to show it all; scrolled
+ * further, it stays at the left edge, in sight however far the subjects go.
+ */
+export function detailsPanel(below: readonly Passing[], start: number, gap: number, viewport: number): PanelPlace {
+  const left = below.length ? start + Math.max(...below.map((line) => line.x)) + LANE_WIDTH / 2 + gap : PANEL_EDGE;
+  const full = viewport - 2 * PANEL_EDGE;
+  const beside = viewport - left - PANEL_EDGE;
+  const width = Math.max(0, beside >= Math.min(full, PANEL_MIN_BESIDE) ? beside : full);
+  return { left, width, stick: Math.max(0, left - PANEL_EDGE) };
+}

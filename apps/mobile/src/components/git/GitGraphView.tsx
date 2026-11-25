@@ -12,7 +12,7 @@ import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
 import { COMPARE_MAX, compareBase, compareLabel, compareOrder, compareParams } from '@/git/compare';
 import { forceRetry, pushAction, rowActions, type GraphAction } from '@/git/actions';
-import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, type GraphRow } from '@/git/graph';
+import { detailsPanel, graphRows, laneColour, LANE_WIDTH, PANEL_EDGE, ROW_HEIGHT, type GraphRow } from '@/git/graph';
 import type { HistoryRow } from '@/git/history';
 import {
   commonFolder, grownLimits, initialLimit, mergeSlices, morePlan, plainRow, repoKey, sliceInfo, splitKey, type GraphData, type RepoRow, type Slice,
@@ -137,11 +137,10 @@ export function GitGraphView({ projectId, folders, primary: primaryFolder, repoC
   const openPlain = useMemo(() => (openRow ? plainRow(openRow) : null), [openRow]);
   // A row dropped or reset away is no longer ticked (like the open row, it is read against what is loaded).
   const ticked = useMemo(() => new Set([...checked].filter((hash) => byKey.has(hash))), [checked, byKey]);
-  const extraData = useMemo(() => ({ open, view, lastViewed, ticked, selecting, repoTags }), [open, view, lastViewed, ticked, selecting, repoTags]);
   const primaryInfo = infos[primary] ?? sliceInfo(undefined);
 
   // Sideways the list is as wide as its widest row, guessed for every loaded row and measured for the ones drawn,
-  // so a long subject and every branch on it can be read. The open row's details stay in sight as it scrolls.
+  // so a long subject and every branch on it can be read, and as wide as the open row's details need.
   const foldersKey = folders.join('\n');
   const [viewport, setViewport] = useState(0);
   const [measured, setMeasured] = useState({ key: foldersKey, width: 0 });
@@ -152,8 +151,22 @@ export function GitGraphView({ projectId, folders, primary: primaryFolder, repoC
   }, [foldersKey]);
   const graphWidth = Math.max(lanes, 1) * LANE_WIDTH;
   const guessed = useMemo(() => history.reduce((widest, row) => Math.max(widest, estimateTextWidth(row, repoTags[row.folder]?.name)), 0), [history, repoTags]);
-  const chrome = ROW_LEFT + (selecting ? CHECK_WIDTH : 0) + graphWidth + TEXT_GAP + ROW_RIGHT;
-  const contentWidth = Math.ceil(Math.max(viewport, chrome + guessed, measured.key === foldersKey ? measured.width : 0));
+  const leading = selecting ? CHECK_WIDTH : 0;
+  const chrome = ROW_LEFT + leading + graphWidth + TEXT_GAP + ROW_RIGHT;
+  // The open row's details start after the lines passing beside them and scroll with the list until they reach
+  // the left edge, where they stay as it scrolls on.
+  const openIndex = useMemo(() => (open ? history.findIndex((row) => row.hash === open) : -1), [history, open]);
+  const panel = openIndex >= 0 && layout[openIndex] ? detailsPanel(layout[openIndex].below, ROW_LEFT + leading, TEXT_GAP, viewport) : null;
+  const stick = panel?.stick ?? 0;
+  const panelShift = useMemo(
+    () => scrollX.interpolate({ inputRange: [stick, stick + 1], outputRange: [0, 1], extrapolateLeft: 'clamp', extrapolateRight: 'extend' }),
+    [scrollX, stick],
+  );
+  const contentWidth = Math.ceil(Math.max(
+    viewport, chrome + guessed, measured.key === foldersKey ? measured.width : 0, panel ? panel.left + panel.width + PANEL_EDGE : 0,
+  ));
+  // The viewport too: the open row's details are laid out by its width.
+  const extraData = useMemo(() => ({ open, view, lastViewed, ticked, selecting, repoTags, viewport }), [open, view, lastViewed, ticked, selecting, repoTags, viewport]);
 
 
   // The repository changed (here, on the computer, or from a terminal), and the progress of a network action.
@@ -347,8 +360,7 @@ export function GitGraphView({ projectId, folders, primary: primaryFolder, repoC
               onLongPress={() => { queryClient.invalidateQueries({ queryKey: ['git-remotes', projectId, item.folder] }); setSelected(item); }}
               onWidth={onRowWidth}
             />
-            {item.hash === open && openPlain ? (
-              <Animated.View style={{ width: viewport || undefined, transform: [{ translateX: scrollX }] }}>
+            {item.hash === open && openPlain && panel ? (
               <CommitDetails
                 key={item.hash}
                 projectId={projectId}
@@ -356,8 +368,9 @@ export function GitGraphView({ projectId, folders, primary: primaryFolder, repoC
                 row={openPlain}
                 headHash={infos[item.folder]?.headHash ?? null}
                 below={layout[index].below}
-                graphWidth={graphWidth}
-                leading={selecting ? CHECK_WIDTH : 0}
+                place={panel}
+                shift={panelShift}
+                leading={leading}
                 colour={(i) => laneColour(palette, i)}
                 fileView={view}
                 onFileView={setFileView}
@@ -371,7 +384,6 @@ export function GitGraphView({ projectId, folders, primary: primaryFolder, repoC
                 // Near the end of the list the details only fit once they are there.
                 onShown={() => scrollToRow(item.hash)}
               />
-              </Animated.View>
             ) : null}
           </Fragment>
           );

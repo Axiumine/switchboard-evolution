@@ -2,11 +2,11 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { FileViewToggle, type FileView } from '@/components/git/FileViewToggle';
 import type { FileChange } from '@/git/compare';
-import type { Passing } from '@/git/graph';
+import type { PanelPlace, Passing } from '@/git/graph';
 import type { HistoryRow } from '@/git/history';
 import { STATUS_COLORS, statusLetter, treeRows, type TreeRow } from '@/git/model';
 import { useAreaWidth, useWindowHeight } from '@/layout/size';
@@ -38,15 +38,17 @@ const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
  * A row of the Git Graph, opened under it as on the desktop
  * (project-git-graph-view.js gitGraphDetailsBodyHtml): the commit, then the
  * files it changed as a tree or a list, each opening its diff. The graph's
- * lines go on beside it.
+ * lines go on beside it; the panel starts after them (`place`, from
+ * detailsPanel) and scrolls sideways with the list, moved back by `shift` once
+ * it reaches the left edge, so it stays in sight.
  */
 export function CommitDetails({
-  projectId, folder, row, headHash, below, graphWidth, leading = 0, colour,
+  projectId, folder, row, headHash, below, place, shift, leading = 0, colour,
   fileView, onFileView, compact, lastViewed, onViewed, isLoaded, onOpenCommit, onClose, onShown,
 }: {
   projectId: string; folder: string; row: HistoryRow; headHash: string | null;
-  below: Passing[]; graphWidth: number; colour: (index: number) => string;
-  /** Room taken before the graph (the checkboxes): the lines and the panel move over by it. */
+  below: Passing[]; place: PanelPlace; shift: Animated.AnimatedInterpolation<number>; colour: (index: number) => string;
+  /** Room taken before the graph (the checkboxes): the lines move over by it. */
   leading?: number;
   fileView: FileView; onFileView: (view: FileView) => void; compact: boolean;
   lastViewed: string | null; onViewed: (path: string) => void;
@@ -167,12 +169,12 @@ export function CommitDetails({
       }}
     >
       {below.map((line) => <View key={line.x} style={[styles.line, { left: spacing.sm + leading + line.x - 1, backgroundColor: colour(line.colorIndex) }]} />)}
-      <View style={[styles.panel, { marginLeft: spacing.sm + leading + graphWidth + spacing.sm }]}>
+      <Animated.View style={[styles.panel, { marginLeft: place.left, width: place.width || undefined, transform: [{ translateX: shift }] }]}>
         <Pressable onPress={onClose} hitSlop={10} style={styles.close} accessibilityRole="button" accessibilityLabel="Close the details">
           <Ionicons name="close" size={18} color={colors.textDim} />
         </Pressable>
         <ScrollView nestedScrollEnabled style={{ maxHeight: scrollHeight }}>{content}</ScrollView>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -226,7 +228,7 @@ const styles = StyleSheet.create({
   wrap: { paddingBottom: spacing.sm },
   line: { position: 'absolute', top: 0, bottom: 0, width: 2 },
   panel: {
-    marginRight: spacing.md, padding: spacing.md, borderRadius: 8,
+    padding: spacing.md, borderRadius: 8,
     backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
   },
   close: { position: 'absolute', top: spacing.sm, right: spacing.sm, zIndex: 1, padding: 2 },

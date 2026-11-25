@@ -1,6 +1,6 @@
 import { expect, test } from '@jest/globals';
 
-import { graphRows, laneColour, LANE_WIDTH, ROW_HEIGHT, UNCOMMITTED } from '../graph';
+import { detailsPanel, graphRows, laneColour, LANE_WIDTH, PANEL_EDGE, ROW_HEIGHT, UNCOMMITTED } from '../graph';
 
 const x = (lane: number) => LANE_WIDTH / 2 + lane * LANE_WIDTH;
 const mid = ROW_HEIGHT / 2;
@@ -68,4 +68,27 @@ test('the Uncommitted Changes node and its line down to the checked-out commit a
   expect(rows[2].node.colorIndex).not.toBe(UNCOMMITTED);
   expect(laneColour(['#00ff00'], UNCOMMITTED)).not.toBe('#00ff00');
   expect(laneColour(['#00ff00', '#0000ff'], 3)).toBe('#0000ff');
+});
+
+test('the panel under a row starts after the lines beside it, not after the whole graph', () => {
+  // Three lines pass beside the row; the graph further on does not count.
+  const place = detailsPanel([{ x: x(0), colorIndex: 0 }, { x: x(2), colorIndex: 1 }, { x: x(1), colorIndex: 2 }], 8, 8, 400);
+  expect(place.left).toBe(8 + 3 * LANE_WIDTH + 8);
+  // Room enough beside them: it fills it, and the list need not scroll to show it.
+  expect(place.width).toBe(400 - place.left - PANEL_EDGE);
+  expect(place.stick).toBe(place.left - PANEL_EDGE);
+});
+
+test('a panel with little room beside the lines takes the screen\'s width, and the list scrolls to it', () => {
+  const below = Array.from({ length: 12 }, (_, lane) => ({ x: x(lane), colorIndex: lane }));
+  const place = detailsPanel(below, 8, 8, 360);
+  expect(place.width).toBe(360 - 2 * PANEL_EDGE);
+  // Scrolled this far, it is at the left edge, all of it in sight.
+  expect(place.left - place.stick).toBe(PANEL_EDGE);
+});
+
+test('with no line beside it the panel spans the screen from the start', () => {
+  expect(detailsPanel([], 8, 8, 360)).toEqual({ left: PANEL_EDGE, width: 360 - 2 * PANEL_EDGE, stick: 0 });
+  // Not laid out yet: never a negative width.
+  expect(detailsPanel([], 8, 8, 0).width).toBe(0);
 });
