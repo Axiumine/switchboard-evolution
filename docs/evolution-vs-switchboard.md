@@ -123,6 +123,7 @@ What "an app of its own" means:
 - Numbers on each project row: plan done/total, open todos, tracks, sessions.
 - Search in the Projects tab finds sessions too. A "No project" row gathers sessions no project claims. An X leaves a result out of the search, and "Stop n running" stops the sessions found.
 - Rename from the session menu; a live terminal keeps its name and star across refreshes.
+- A **Commands** palette in the terminal header (Cmd/Ctrl+Shift+K) and a "/" button in the phone's composers list what the session's CLI understands: Claude Code's, Codex's or OpenCode's built-in slash commands and flags (read from their docs, refreshed once a day), the user's, the project's and the plugins' skills and commands, MCP servers, keyboard shortcuts. A pick types the command without Enter; Run, for one with no required argument, presses Enter too and asks first for the ones that end the session or replace the conversation. On the phone, typing `/` (or `$`, `@` for Codex's and OpenCode's skills) in a composer suggests the commands that complete it.
 - Attached folders can be detached from the Overview card (with an offer to remove the worktree) and trusted for Claude Code once.
 - At start, the project of the reopened session opens.
 - A **Note** for each project (its `note.md`, made when first opened), from the project's header and menu: the file editor in a panel floating over the app, moved and resized, that opens again where it was left and saves itself as you type. It can move to a window of its own (on the phone: a DeX or tablet window).

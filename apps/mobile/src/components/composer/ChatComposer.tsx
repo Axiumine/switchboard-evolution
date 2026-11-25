@@ -4,11 +4,14 @@ import { Alert, StyleSheet, View } from 'react-native';
 import { CHAT_COLUMN } from '@/components/ChatView';
 import { uploadHint } from '@/sessions/attachments';
 import { draftReady, sendDraft, setDraftText, useDraft } from '@/sessions/drafts';
-import type { SessionState } from '@/sessions/model';
+import type { Session, SessionState } from '@/sessions/model';
+import { applyToDraft } from '@/shared/vendor/command-catalog-model';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import { AttachButton } from './AttachButton';
 import { AttachmentStrip } from './AttachmentStrip';
+import { CommandsButton } from './CommandsButton';
+import { CommandSuggestions } from './CommandSuggestions';
 import { ComposerField } from './ComposerField';
 import { SendButton, StopButton } from './SendButton';
 import { StateStrip } from './StateStrip';
@@ -21,10 +24,14 @@ const ESC = '\x1b';
  * Attach, a field that grows to five lines, and Send. Send types the text,
  * pastes the attachments' paths on the computer and presses Enter; while
  * the session works and nothing is written it is Stop (Esc). The draft
- * stays with the session until it is sent. No terminal keys here.
+ * stays with the session until it is sent. No terminal keys here; "/" beside
+ * Attach lists the CLI's commands, a pick going in front of the draft, and a
+ * command being typed shows the ones that complete it.
  */
-export function ChatComposer({ sessionId, cli, state, working, onOpenTerminal }: {
+export function ChatComposer({ sessionId, session, cli, state, working, onOpenTerminal }: {
   sessionId: string;
+  /** The session, for its CLI's command catalog. */
+  session?: Pick<Session, 'type' | 'runtime'> | null;
   /** The CLI's name: "Claude", "Codex" or "OpenCode". */
   cli: string;
   state: SessionState;
@@ -62,8 +69,18 @@ export function ChatComposer({ sessionId, cli, state, working, onOpenTerminal }:
       <View style={styles.column}>
         <StateStrip state={state} cli={cli} working={working} stopShown={stop} onStop={interrupt} onOpenTerminal={onOpenTerminal} />
         {canAttach ? <AttachmentStrip attachments={attachments} hint={uploadHint(attachments.items, computer)} /> : null}
+        <CommandSuggestions sessionId={sessionId} session={session} text={draft.text} onPick={(text) => setDraftText(sessionId, text)} />
         <View style={styles.row}>
           {canAttach ? <AttachButton attachments={attachments} /> : null}
+          <CommandsButton
+            sessionId={sessionId}
+            session={session}
+            state={state}
+            write={write}
+            onInsert={(text) => setDraftText(sessionId, applyToDraft(draft.text, text))}
+            // A command that opens a picker shows it in the terminal.
+            onRan={(entry) => { if (entry.flags?.includes('opensMenu')) onOpenTerminal(); }}
+          />
           <ComposerField
             value={draft.text}
             onChangeText={(text) => setDraftText(sessionId, text)}

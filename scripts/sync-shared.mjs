@@ -36,6 +36,7 @@ const modules = {
   'repo-selection.js': 'apps/desktop/public/repo-selection.js',
   'action-icons.js': 'apps/desktop/public/action-icons.js',
   'pinned-order.js': 'apps/desktop/public/pinned-order.js',
+  'command-catalog-model.js': 'apps/desktop/public/command-catalog-model.js',
 };
 
 const header = (file) =>

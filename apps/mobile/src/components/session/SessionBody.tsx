@@ -78,10 +78,11 @@ export function SessionBody({ data, view, onView, terminalOpened, onResume, onFo
       {/* The bottom block rides on the keyboard; the body above shrinks. The
           terminal keys belong to the terminal: the chat has its own composer.
           When the session is not running, the card to resume it takes its place. */}
-      {running && shown === 'terminal' ? <TerminalComposer sessionId={sessionId} send={send} placeholder={isTerminal ? 'Type a command…' : undefined} /> : null}
+      {running && shown === 'terminal' ? <TerminalComposer sessionId={sessionId} send={send} session={session} state={state} placeholder={isTerminal ? 'Type a command…' : undefined} /> : null}
       {running && shown === 'chat' ? (
         <ChatComposer
           sessionId={sessionId}
+          session={session}
           cli={session ? cliLabel(session) : 'Claude'}
           state={state}
           working={working}

@@ -1,0 +1,125 @@
+/* The terminal's Commands palette (command-catalog-view.js): a panel under
+   the header button, the search and the tabs on top, the list on the left and
+   the selected command on the right. It reuses the Node Knowledge tabs
+   (.kn-seg) and the colours of the context menu. */
+
+#command-catalog-btn {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px;
+  line-height: 1;
+  color: #7a7a90;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+#command-catalog-btn:hover,
+#command-catalog-btn.active {
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  background: rgb(from var(--accent) r g b / 0.1);
+}
+
+.cmdp {
+  position: fixed;
+  z-index: 10030;
+  display: flex;
+  flex-direction: column;
+  height: min(560px, calc(100vh - 72px));
+  background: #1b1b26;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.5);
+  color: #c8c8dc;
+  font-size: 12.5px;
+  overflow: hidden;
+}
+.cmdp-loading, .cmdp-empty { padding: 18px; color: #7a7a90; }
+
+.cmdp-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 6px; }
+.cmdp-search {
+  flex: 1; min-width: 0; height: 30px; padding: 0 10px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 7px;
+  color: #e6e6f4; font: inherit; font-size: 13px; outline: none;
+}
+.cmdp-search:focus { border-color: rgb(from var(--accent) r g b / 0.6); }
+.cmdp-tabs { margin: 0 10px 8px; align-self: flex-start; }
+.cmdp-clis { flex-shrink: 0; }
+
+.cmdp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 46%) minmax(0, 1fr); border-top: 1px solid rgba(255,255,255,0.07); }
+.cmdp-list { overflow-y: auto; padding: 4px; border-right: 1px solid rgba(255,255,255,0.07); }
+.cmdp-row {
+  display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 8px;
+  border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.cmdp-row:hover { background: rgba(255,255,255,0.045); }
+.cmdp-row.selected { background: rgb(from var(--accent) r g b / 0.14); }
+.cmdp-row-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.cmdp-cmd { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 12px; color: #e6e6f4; white-space: nowrap; }
+.cmdp-args { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11.5px; color: #7a7a90; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cmdp-desc { color: #8a8aa0; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.cmdp-badge { flex: 0 0 auto; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+  color: color-mix(in srgb, var(--accent) 77%, white); background: rgb(from var(--accent) r g b / 0.12); }
+.cmdp-badge--danger { color: #f08098; background: rgba(224,80,112,0.12); }
+.cmdp-badge--newer { color: #e0a050; background: rgba(224,160,80,0.14); }
+.cmdp-badge--menu, .cmdp-badge--requires { color: #9a9ab0; background: rgba(255,255,255,0.06); }
+
+.cmdp-details { overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.cmdp-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.cmdp-title .cmdp-cmd { font-size: 14px; white-space: normal; }
+.cmdp-title .cmdp-args { white-space: normal; }
+.cmdp-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.cmdp-text { margin: 0; line-height: 1.5; color: #c8c8dc; }
+.cmdp-text--dim { color: #8a8aa0; }
+.cmdp-section { display: flex; gap: 8px; align-items: baseline; line-height: 1.6; }
+.cmdp-label { flex: 0 0 64px; font-size: 11px; color: #6f6f86; }
+.cmdp-section code, .cmdp-text code {
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11.5px; color: #d8d8ec;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere;
+}
+.cmdp-notice { color: #e0a050; background: rgba(224,160,80,0.1); border-radius: 6px; padding: 6px 8px; line-height: 1.45; }
+.cmdp-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: #f0b0c0; background: rgba(224,80,112,0.1); border-radius: 6px; padding: 8px; line-height: 1.45; }
+.cmdp-confirm span { flex: 1 1 200px; }
+.cmdp-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; }
+.cmdp-btn {
+  height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04); color: #d8d8e8; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.cmdp-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+.cmdp-btn:disabled { color: #5a5a72; cursor: default; }
+.cmdp-btn--primary { background: rgb(from var(--accent) r g b / 0.22); border-color: rgb(from var(--accent) r g b / 0.5); color: #ececfa; }
+.cmdp-btn--primary:hover:not(:disabled) { background: rgb(from var(--accent) r g b / 0.32); }
+.cmdp-btn--danger { background: rgba(224,80,112,0.18); border-color: rgba(224,80,112,0.5); color: #f6c8d2; }
+.cmdp-btn--link { margin-left: auto; border-color: transparent; background: none; color: color-mix(in srgb, var(--accent) 80%, white); }
+.cmdp-hint { font-size: 11px; color: #6f6f86; }
+
+.cmdp-foot { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 11px; color: #6f6f86; white-space: nowrap; overflow: hidden; }
+.cmdp-foot span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.cmdp-notes { padding: 6px 12px 8px; font-size: 11px; color: #e0a050; }
+
+/* In a card of the grid view, beside Stop, shown while the card is pointed at. */
+.grid-card-commands-btn {
+  margin-left: auto;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 3px;
+  line-height: 1;
+  color: #7a7a90;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+}
+.grid-card:hover .grid-card-commands-btn,
+.grid-card.focused .grid-card-commands-btn { opacity: 1; }
+.grid-card-commands-btn:hover {
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  background: rgb(from var(--accent) r g b / 0.1);
+}
+.grid-card-commands-btn + .grid-card-stop-btn { margin-left: 2px; }

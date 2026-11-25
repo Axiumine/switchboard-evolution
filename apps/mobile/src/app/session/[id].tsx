@@ -78,7 +78,7 @@ export default function SessionScreen() {
               <ChatView items={transcript.items} error={transcript.error} state={state} loading={transcript.loading} cwd={session?.projectPath} earlier={transcript.earlier} />
             </View>
             {running ? (
-              <ChatComposer sessionId={sessionId} cli={session ? cliLabel(session) : 'Claude'} state={state} working={working} onOpenTerminal={() => {}} />
+              <ChatComposer sessionId={sessionId} session={session} cli={session ? cliLabel(session) : 'Claude'} state={state} working={working} onOpenTerminal={() => {}} />
             ) : <View style={styles.chatColumn}><NotRunning data={data} onResume={resume} onFork={fork} /></View>}
             <KeyboardSpacer />
           </View>
@@ -89,7 +89,7 @@ export default function SessionScreen() {
           <View style={styles.body}>
             {running ? <TerminalView key={sessionId} sessionId={sessionId} /> : <Text style={styles.ended}>This session is not running.</Text>}
           </View>
-          {running ? <TerminalComposer sessionId={sessionId} send={data.send} /> : null}
+          {running ? <TerminalComposer sessionId={sessionId} send={data.send} session={session} state={state} /> : null}
           <KeyboardSpacer />
         </View>
         <SessionActions session={actions} onClose={() => setActions(null)} extra={splitOption} />

@@ -77,6 +77,7 @@ function setActiveSession(id) {
   }
   // Update file panel to show this session's open files/diffs
   if (typeof switchPanel === 'function') switchPanel(id);
+  if (typeof updateCommandCatalogButton === 'function') updateCommandCatalogButton();
 }
 // Persist slug group expand state across reloads
 function getExpandedSlugs() {
@@ -974,6 +975,7 @@ function updateTerminalHeader() {
     ? 'This session kept running while Switchboard was closed. Its diffs now show in the terminal; stop and resume it to bring Switchboard\'s diff view back.'
     : '';
   terminalStopBtn.style.display = running ? '' : 'none';
+  if (typeof updateCommandCatalogButton === 'function') updateCommandCatalogButton();
   updatePtyTitle();
 }
 
@@ -1949,3 +1951,5 @@ quotaGaugeEl.addEventListener('click', () => {
 
 // --- Initialize file panel (MCP bridge UI) ---
 if (typeof initFilePanel === 'function') initFilePanel();
+// The Commands button goes before the project files button initFilePanel adds.
+if (typeof initCommandCatalog === 'function') initCommandCatalog();
