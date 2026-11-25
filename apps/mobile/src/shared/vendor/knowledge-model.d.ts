@@ -156,10 +156,43 @@ export type IndexGaps = {
   skipped: { path: string; reason: string | null }[];
   notIndexed: { path: string; reason: string | null }[];
   notIndexedDirs: string[];
+  /** A list shorter than its count, or CBM said it cut one short. */
   truncated: boolean;
-  counts: { partial: number; unusable: number; skipped: number; notIndexed: number; notIndexedDirs: number };
+  /** Whole counts; the lists stop at the rows CBM sent (500 at most with diagnostics 'full'). */
+  counts: GapCounts;
+  listed: GapCounts;
+  complete: { partial: boolean; unusable: boolean; skipped: boolean; notIndexed: boolean; notIndexedDirs: boolean };
+  /** Left-out folders by name (".claude" in eight places is one group); `where` is each one's parent, '.' at the top. */
+  dirsByName: DirGroup[];
+  /** Files read in part, by their first folder. */
+  partialByFolder: { folder: string; count: number }[];
+  /** Why the listed files were left out. */
+  reasons: { reason: string; count: number }[];
   note: string | null;
 };
+
+export type GapCounts = { partial: number; unusable: number; skipped: number; notIndexed: number; notIndexedDirs: number };
+
+export type DirGroup = { name: string; count: number; where: string[] };
+
+export type ModuleState = 'own' | 'in' | 'out' | 'unknown';
+
+export type ModuleKind = 'submodule' | 'clone' | 'checkout';
+
+/** A repository inside a folder of the tab (knowledge-modules). */
+export type KnowledgeModule = {
+  path: string;
+  rel: string;
+  kind: ModuleKind;
+  /** own: a graph of its own; in: in this folder's graph; out: in no graph; unknown: this folder has no graph yet. */
+  state: ModuleState;
+  /** What CBM flagged inside it (with state 'in'). */
+  gaps: number;
+  graph: string | null;
+  attached: boolean;
+};
+
+export type Modules = { modules: KnowledgeModule[]; limited: boolean };
 
 export type Coverage = {
   signal: string | null;
@@ -215,6 +248,11 @@ export function architectureModel(result: unknown): Architecture;
 export function schemaModel(result: unknown): Schema;
 export function indexSummary(status: unknown): IndexSummary;
 export function indexGaps(status: unknown): IndexGaps;
+export function dirsByName(dirs: string[]): DirGroup[];
+export function byTopFolder(paths: string[]): { folder: string; count: number }[];
+export function modulesModel(result: unknown): Modules;
+export const MODULE_STATE_TEXT: Readonly<Record<ModuleState, string>>;
+export const MODULE_KIND_TEXT: Readonly<Record<ModuleKind, string>>;
 export function coverageModel(result: unknown): Coverage;
 export function queryTable(result: unknown): QueryTable;
 export function cellText(value: unknown): string;

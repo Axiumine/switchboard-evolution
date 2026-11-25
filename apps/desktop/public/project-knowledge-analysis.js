@@ -379,31 +379,96 @@ function renderKnowledgeAdr(project, view, folder, body) {
 
 function knCoverageState(s, folder) {
   const d = knViewData(s, 'coverage', folder);
-  if (!d.init) Object.assign(d, { init: true, gaps: null, generation: null, loading: false, error: null, paths: '', check: null });
+  if (!d.init) Object.assign(d, { init: true, gaps: null, generation: null, loading: false, error: null, paths: '', check: null, modules: null, modulesGeneration: null, modulesLoading: false, modulesError: null });
   return d;
 }
 
-function knGapListHtml(title, items, { line = false, hint = '' } = {}) {
-  if (!items.length) return '';
-  return `<div class="ws-card"><div class="ws-card-h"><span class="ws-card-title">${escapeHtml(title)}</span><span class="ws-card-meta">${knNumber(items.length)}${hint ? ` · ${escapeHtml(hint)}` : ''}</span></div>
+/** "410", or "500 of 1,345 listed" when codebase-memory-mcp sent fewer rows than there are. */
+function knCountText(total, listed) {
+  return listed < total ? `${knNumber(listed)} of ${knNumber(total)} listed` : knNumber(total);
+}
+
+function knGapListHtml(title, items, { total = items.length, hint = '', groups = [] } = {}) {
+  if (!total) return '';
+  const groupHtml = groups.length > 1
+    ? `<div class="kn-chips" title="By folder, of the files listed">${groups.slice(0, 16).map(g => `<span class="kn-chip"><span class="mono">${escapeHtml(g.folder === '.' ? '(top)' : `${g.folder}/`)}</span><b>${knNumber(g.count)}</b></span>`).join('')}</div>`
+    : '';
+  return `<div class="ws-card" data-kn-gap-card="${escapeAttr(title)}"><div class="ws-card-h"><span class="ws-card-title">${escapeHtml(title)}</span><span class="ws-card-meta">${knCountText(total, items.length)} file${total === 1 ? '' : 's'}</span></div>
+    ${hint ? `<div class="ws-card-text muted">${escapeHtml(hint)}</div>` : ''}
+    ${groupHtml}
     <div class="kn-results kn-gap-list">${items.map((g, i) => `<button type="button" class="kn-result" data-kn-gap="${escapeAttr(title)}" data-kn-i="${i}">
       <span class="kn-result-name mono">${escapeHtml(g.path)}</span>
       ${g.ranges ? `<span class="kn-result-meta">lines ${escapeHtml(g.ranges)}</span>` : ''}
-      ${g.reason ? `<span class="kn-label kn-label--muted">${escapeHtml(g.reason)}</span>` : ''}
-      ${line ? '' : ''}</button>`).join('')}</div></div>`;
+      ${g.reason ? `<span class="kn-label kn-label--muted">${escapeHtml(g.reason)}</span>` : ''}</button>`).join('')}</div></div>`;
+}
+
+/** The left-out folders by name: ".claude" in eight places is one rule. */
+function knDirGroupsHtml(groups) {
+  if (!groups.length) return '';
+  return `<div class="kn-chips">${groups.slice(0, 40).map(g => {
+    const where = g.where.map(w => (w === '.' ? '(top)' : w));
+    const title = `${g.name} is left out in ${g.count} place${g.count === 1 ? '' : 's'}: ${where.slice(0, 30).join(', ')}${where.length > 30 ? ', …' : ''}`;
+    return `<span class="kn-chip" title="${escapeAttr(title)}"><span class="mono">${escapeHtml(g.name)}</span><b>${knNumber(g.count)}</b></span>`;
+  }).join('')}</div>`;
+}
+
+/** The repositories inside the folder, and where their code is. */
+function knModulesHtml(d) {
+  if (d.modulesError) return `<div class="ws-card"><div class="ws-card-h"><span class="ws-card-title">Repositories inside</span></div><div class="kn-notice-error">${escapeHtml(d.modulesError)}</div></div>`;
+  if (!d.modules) return d.modulesLoading ? '<div class="kn-loading">Looking for repositories inside…</div>' : '';
+  const { modules, limited } = d.modules;
+  if (!modules.length && !limited) return '';
+  const rows = modules.map((m, i) => {
+    const state = KnowledgeModel.MODULE_STATE_TEXT[m.state] || m.state;
+    const extra = m.state === 'in' && m.gaps ? ` · ${knNumber(m.gaps)} gap${m.gaps === 1 ? '' : 's'} flagged` : m.state === 'own' && m.graph ? ` · ${m.graph}` : '';
+    const action = m.state === 'out' && !m.attached
+      ? `<button type="button" class="ws-ghost ws-ghost--sm" data-kn-module-attach="${i}" title="Attach it to the project: it gets a graph of its own">${PICONS.plus(11)}<span>Attach</span></button>`
+      : '';
+    return `<div class="kn-result kn-result--static kn-module kn-module--${escapeAttr(m.state)}">
+      <span class="kn-result-name mono" title="${escapeAttr(m.path)}">${escapeHtml(m.rel)}</span>
+      <span class="kn-label kn-label--muted">${escapeHtml(KnowledgeModel.MODULE_KIND_TEXT[m.kind] || m.kind)}</span>
+      <span class="kn-result-meta${m.state === 'out' ? ' kn-error-text' : ''}">${escapeHtml(state + extra)}</span>
+      ${action}</div>`;
+  }).join('');
+  return `<div class="ws-card" data-kn-modules><div class="ws-card-h"><span class="ws-card-title">Repositories inside</span><span class="ws-card-meta">${knNumber(modules.length)}${limited ? '+' : ''}</span></div>
+    <div class="ws-card-text muted">Submodules and repositories cloned inside this folder. Their code is in this graph, in a graph of their own (a folder of the project), or in none when this folder's rules leave them out: attach one of those to read it.</div>
+    <div class="kn-results kn-gap-list">${rows}</div>
+    ${limited ? '<div class="ws-card-text muted">The search stopped early (a very large folder): repositories deeper down may be missing from the list.</div>' : ''}</div>`;
+}
+
+/** Other CBM graphs of folders inside this one (made by a session that started in a subfolder): its files are here already. */
+function knInnerGraphsHtml(fstatus) {
+  const inner = fstatus?.inner || [];
+  if (!inner.length) return '';
+  return `<div class="ws-card" data-kn-inner><div class="ws-card-h"><span class="ws-card-title">Other graphs inside this folder</span><span class="ws-card-meta">${knNumber(inner.length)}</span></div>
+    <div class="ws-card-text muted">codebase-memory-mcp made these when an agent's session started in a subfolder. Their files are in this folder's graph already, so they only repeat it.</div>
+    <div class="kn-results kn-gap-list">${inner.map((g, i) => `<div class="kn-result kn-result--static"><span class="kn-result-name mono">${escapeHtml(g.rel)}</span><span class="kn-result-meta mono">${escapeHtml(g.name)}</span>
+      <button type="button" class="ws-link-danger" data-kn-inner-delete="${i}">Delete</button></div>`).join('')}</div></div>`;
 }
 
 function renderKnowledgeCoverage(project, view, folder, body) {
   const s = knState(project);
   const d = knCoverageState(s, folder);
-  const generation = knFolderStatus(s, folder)?.index?.indexed_at || '';
+  const fstatus = knFolderStatus(s, folder);
+  const generation = fstatus?.index?.indexed_at || '';
   if ((!d.gaps && !d.loading && !d.error) || (d.generation !== generation && !d.loading)) {
     d.loading = true;
     d.generation = generation;
-    window.api.knowledgeQuery(project.id, folder, 'index_status', { verbose: true, diagnostics: 'summary' }).then(r => {
+    // 'full': every row CBM keeps (up to 500 of each list); 'summary' would give five.
+    window.api.knowledgeQuery(project.id, folder, 'index_status', { verbose: true, diagnostics: 'full' }).then(r => {
       d.loading = false;
       d.error = r?.error || null;
       d.gaps = r?.error ? null : KnowledgeModel.indexGaps(r);
+      if (view.isConnected) renderKnowledgeCoverage(project, view, folder, body);
+    });
+  }
+  if (window.api.knowledgeModules && ((!d.modules && !d.modulesLoading && !d.modulesError) || (d.modulesGeneration !== generation && !d.modulesLoading))) {
+    d.modulesLoading = true;
+    d.modulesGeneration = generation;
+    window.api.knowledgeModules(project.id, folder).then(r => {
+      d.modulesLoading = false;
+      d.modulesError = r?.error || null;
+      d.modules = r?.error ? null : KnowledgeModel.modulesModel(r);
       if (view.isConnected) renderKnowledgeCoverage(project, view, folder, body);
     });
   }
@@ -412,40 +477,49 @@ function renderKnowledgeCoverage(project, view, folder, body) {
   if (d.error) gapsHtml = `<div class="kn-notice-error">${escapeHtml(d.error)}</div>`;
   else if (!g) gapsHtml = '<div class="kn-loading">Reading the index…</div>';
   else {
-    const byReason = new Map();
-    for (const f of g.notIndexed) byReason.set(f.reason || 'other', (byReason.get(f.reason || 'other') || 0) + 1);
-    const reasons = [...byReason].map(([r, n]) => `<span class="kn-chip"><span>${escapeHtml(r)}</span><b>${knNumber(n)}</b></span>`).join('');
+    const reasons = g.reasons.map(r => `<span class="kn-chip"><span>${escapeHtml(r.reason)}</span><b>${knNumber(r.count)}</b></span>`).join('');
     gapsHtml = `${g.note ? `<details class="kn-outline"><summary>How to read these lists</summary><div class="ws-help">${escapeHtml(g.note)}</div></details>` : ''}
-      ${knGapListHtml('Read in part', g.partial, { hint: 'the graph may miss what is on these lines' })}
-      ${knGapListHtml('Could not read', g.unusable)}
-      ${knGapListHtml('Skipped', g.skipped)}
-      <div class="ws-card"><div class="ws-card-h"><span class="ws-card-title">Left out on purpose</span><span class="ws-card-meta">${knNumber(Math.max(g.counts.notIndexed, g.notIndexed.length))} files · ${knNumber(Math.max(g.counts.notIndexedDirs, g.notIndexedDirs.length))} folders${g.notIndexed.length < g.counts.notIndexed ? ` · ${knNumber(g.notIndexed.length)} listed` : ''}</span>
+      ${g.truncated ? '<div class="ws-card-text muted kn-truncated">codebase-memory-mcp lists at most 500 rows of each list; the counts are whole. Check a file or a folder above for its own gaps.</div>' : ''}
+      ${knGapListHtml('Read in part', g.partial, { total: g.counts.partial, groups: g.partialByFolder, hint: 'These files are in the graph, but codebase-memory-mcp\'s parser could not read the lines shown: what is on them may be missing from the graph. Read those lines in the file. This is a limit of the parser, not a cut made by Switchboard.' })}
+      ${knGapListHtml('Could not read', g.unusable, { total: g.counts.unusable, hint: 'The parser could not use these files: none of their code is in the graph. Read them directly.' })}
+      ${knGapListHtml('Skipped', g.skipped, { total: g.counts.skipped })}
+      <div class="ws-card" data-kn-left-out><div class="ws-card-h"><span class="ws-card-title">Left out on purpose</span><span class="ws-card-meta">${knCountText(g.counts.notIndexed, g.listed.notIndexed)} files · ${knCountText(g.counts.notIndexedDirs, g.listed.notIndexedDirs)} folders</span>
         <span class="kn-spacer"></span><button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="ignore">${PICONS.file(11)}<span>Ignore rules</span></button></div>
-        ${reasons ? `<div class="kn-chips">${reasons}</div>` : ''}
-        ${g.notIndexedDirs.length ? `<div class="ws-card-text muted mono">${g.notIndexedDirs.map(x => escapeHtml(x)).join(' · ')}</div>` : ''}
+        <div class="ws-card-text muted">The same rule leaves a folder out wherever it is: the folders are counted by name.</div>
+        ${knDirGroupsHtml(g.dirsByName)}
+        ${reasons ? `<div class="kn-chips" title="Why, for the files listed">${reasons}</div>` : ''}
+        <details class="kn-outline kn-gap-details"><summary>The folders</summary><div class="ws-card-text muted mono">${g.notIndexedDirs.map(x => escapeHtml(x)).join(' · ')}</div></details>
         <details class="kn-outline kn-gap-details"><summary>The files</summary><div class="kn-results kn-gap-list">${g.notIndexed.slice(0, 500).map(f => `<div class="kn-result kn-result--static"><span class="kn-result-name mono">${escapeHtml(f.path)}</span>${f.reason ? `<span class="kn-label kn-label--muted">${escapeHtml(f.reason)}</span>` : ''}</div>`).join('')}</div></details>
       </div>
-      ${!g.partial.length && !g.unusable.length && !g.skipped.length ? '<div class="kn-empty">Every source file was read whole. (A clean index means no recorded gap, not proof that nothing is missing.)</div>' : ''}`;
+      ${!g.counts.partial && !g.counts.unusable && !g.counts.skipped ? '<div class="kn-empty">Every source file was read whole. (A clean index means no recorded gap, not proof that nothing is missing.)</div>' : ''}`;
   }
   const c = d.check;
+  const scopeRows = c?.model ? (c.model.scopes || []).map(sc => `<tr><td>${escapeHtml(String(sc.scope || sc.requested_scope || ''))}/</td><td>${escapeHtml(String(sc.status || ''))}</td><td></td><td>${knNumber(sc.total || 0)} gap${Number(sc.total) === 1 ? '' : 's'}</td></tr>`).join('') : '';
   const checkHtml = !c ? '' : c.error ? `<div class="kn-notice-error">${escapeHtml(c.error)}</div>`
-    : `<div class="kn-table-wrap"><table class="kn-table"><thead><tr><th>file</th><th>status</th><th>freshness</th><th>what to do</th></tr></thead><tbody>${c.model.paths.map(p => `<tr><td>${escapeHtml(p.path)}</td><td>${escapeHtml(p.status || '')}</td><td>${escapeHtml(p.freshness || '')}</td><td>${escapeHtml((p.action || '').replace(/_/g, ' '))}</td></tr>`).join('')}</tbody></table></div>`;
+    : `<div class="kn-table-wrap"><table class="kn-table"><thead><tr><th>file or folder</th><th>status</th><th>freshness</th><th>what to do</th></tr></thead><tbody>${c.model.paths.map(p => `<tr><td>${escapeHtml(p.path)}</td><td>${escapeHtml(p.status || '')}</td><td>${escapeHtml(p.freshness || '')}</td><td>${escapeHtml((p.action || '').replace(/_/g, ' '))}</td></tr>`).join('')}${scopeRows}</tbody></table></div>`;
   view.innerHTML = `<div class="kn-page">
     <div class="kn-section-title">Check files</div>
     <form class="kn-search-bar" data-kn-form>
-      <input type="text" class="ws-input mono kn-search-input" data-kn-field="paths" value="${escapeAttr(d.paths)}" placeholder="paths in the folder, separated by commas, e.g. src/app.ts, src/routes" spellcheck="false" aria-label="Paths">
+      <input type="text" class="ws-input mono kn-search-input" data-kn-field="paths" value="${escapeAttr(d.paths)}" placeholder="files or folders (ending in /), separated by commas, e.g. src/app.ts, src/routes/" spellcheck="false" aria-label="Paths">
       <button type="submit" class="ws-btn">${PICONS.check(12)}<span>Check</span></button>
     </form>
     ${checkHtml}
     <div class="kn-section-title">What the graph is missing</div>
+    ${knInnerGraphsHtml(fstatus)}
+    ${knModulesHtml(d)}
     ${gapsHtml}
   </div>`;
   view.querySelector('[data-kn-form]').onsubmit = async (e) => {
     e.preventDefault();
     d.paths = view.querySelector('[data-kn-field="paths"]').value;
-    const paths = d.paths.split(/[,\n]/).map(p => p.trim()).filter(Boolean).slice(0, 128);
-    if (!paths.length) return;
-    const r = await window.api.knowledgeQuery(project.id, folder, 'check_index_coverage', { paths });
+    const items = d.paths.split(/[,\n]/).map(p => p.trim()).filter(Boolean);
+    const paths = items.filter(p => !/[\\/]$/.test(p)).slice(0, 128);
+    const scopes = items.filter(p => /[\\/]$/.test(p)).map(p => p.replace(/[\\/]+$/, '')).filter(Boolean).slice(0, 32);
+    if (!paths.length && !scopes.length) return;
+    const args = {};
+    if (paths.length) args.paths = paths;
+    if (scopes.length) args.scopes = scopes;
+    const r = await window.api.knowledgeQuery(project.id, folder, 'check_index_coverage', args);
     d.check = r?.error ? { error: r.error } : { model: KnowledgeModel.coverageModel(r) };
     if (view.isConnected) renderKnowledgeCoverage(project, view, folder, body);
   };
@@ -455,6 +529,31 @@ function renderKnowledgeCoverage(project, view, folder, body) {
     const item = list[Number(btn.dataset.knI)];
     const first = item?.ranges ? Number(String(item.ranges).split(/[-,]/)[0]) : null;
     btn.onclick = () => item && knOpenInFiles(project, folder, item.path, first);
+  });
+  view.querySelectorAll('[data-kn-module-attach]').forEach(btn => {
+    const m = d.modules?.modules[Number(btn.dataset.knModuleAttach)];
+    btn.onclick = async () => {
+      if (!m) return;
+      btn.disabled = true;
+      const r = await window.api.attachProjectFolder(project.id, { path: m.path, mode: 'in-place' });
+      if (knToastError(r)) { btn.disabled = false; return; }
+      d.modules = null;
+      s.stale = true;
+      await knLoadStatus(project);
+      if (view.isConnected) renderKnowledgeCoverage(project, view, folder, body);
+    };
+  });
+  view.querySelectorAll('[data-kn-inner-delete]').forEach(btn => {
+    const inner = (fstatus?.inner || [])[Number(btn.dataset.knInnerDelete)];
+    btn.onclick = async () => {
+      if (!inner) return;
+      btn.disabled = true;
+      const r = await window.api.knowledgeDeleteInnerGraph(project.id, folder, inner.name);
+      if (knToastError(r)) { btn.disabled = false; return; }
+      s.stale = true;
+      await knLoadStatus(project);
+      if (view.isConnected) renderKnowledgeCoverage(project, view, folder, body);
+    };
   });
 }
 

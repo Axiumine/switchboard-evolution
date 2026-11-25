@@ -186,6 +186,20 @@ function onProjectCreated(fn) {
   if (typeof fn === 'function') createdListeners.push(fn);
 }
 
+// Modules told when a project is deleted, after its folders were reported
+// detached (knowledge.js deletes its project folder's graph): fn({ projectId, root }).
+const deletedListeners = [];
+
+function onProjectDeleted(fn) {
+  if (typeof fn === 'function') deletedListeners.push(fn);
+}
+
+function projectDeleted(projectId, root) {
+  for (const fn of deletedListeners) {
+    try { fn({ projectId, root }); } catch (err) { log.error?.('[projects] a project listener failed', err); }
+  }
+}
+
 function projectCreated(projectId) {
   for (const fn of createdListeners) {
     try { fn({ projectId }); } catch (err) { log.error?.('[projects] a project listener failed', err); }
@@ -582,7 +596,9 @@ function syncBriefFile(filePath, block) {
 /**
  * Keep the managed block in CLAUDE.md and AGENTS.md current — the title, the
  * project folder, the working rules and the attached-folder list. Generated
- * instructions belong only in the project root, never in attached repos.
+ * instructions belong only in the project root, never in attached repos. (The
+ * one thing written in an attached repo is knowledge.js's block in .cbmignore,
+ * and only when another folder with a graph of its own sits inside it.)
  */
 async function syncProjectBrief(projectId) {
   const project = db.getProject(projectId);
@@ -895,6 +911,7 @@ function deleteProject(id) {
   db.deleteProject(id);
   log.info?.(`[projects] removed "${row.name}" (folder kept at ${row.root})`);
   for (const folder of folders) folderChanged(id, folder, 'detached');
+  projectDeleted(id, row.root);
   refreshPlanWatchers();
   notifyRendererProjectsChanged();
   return { ok: true, root: row.root };
@@ -2274,7 +2291,7 @@ async function saveProjectActionsLog(projectId, folderPath, opts) {
 
 module.exports = {
   init,
-  projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection, onFolderChange, onProjectCreated,
+  projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection, onFolderChange, onProjectCreated, onProjectDeleted,
   createProject, updateProject, setStarredOrder, deleteProject, attachFolder, detachFolder, requireAttachedFolder,
   folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths, readProjectGitEditFile, saveProjectGitEditFile,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,

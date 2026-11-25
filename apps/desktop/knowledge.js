@@ -1,12 +1,23 @@
-// knowledge.js — the Node Knowledge tab: a project's attached folders as
+// knowledge.js — the Node Knowledge tab: a project's folders as
 // codebase-memory-mcp (CBM) code graphs.
 //
-// Each attached folder is one CBM project, under a name this module picks
-// once and keeps in the project's settings: the name CBM already has for that
-// folder when it is indexed (by the agents, by hand), else the folder's name,
-// made unique. Every call is about a folder of the project, and the CBM name
-// is filled in here: the renderer and the phone never name a CBM project or a
-// path to index themselves, so they cannot reach other indexes or folders.
+// The tab's folders are the project folder (project.root: plans, notes, tools,
+// and where the agents' sessions start) and the attached ones. Each is one CBM
+// project, under a name this module picks once and keeps in the project's
+// settings: the name CBM already has for that folder when it is indexed (by
+// the agents, by hand), else the folder's name, made unique; the project
+// folder takes the name CBM gives it, the one an agent's session there finds.
+// Every call is about a folder of the project, and the CBM name is filled in
+// here: the renderer and the phone never name a CBM project or a path to index
+// themselves, so they cannot reach other indexes or folders.
+//
+// A file is in one graph: the one of the innermost folder of the tab that holds
+// it. A folder inside another (a worktree in the project folder's repos/, a
+// repository attached on its own inside an attached one) has a graph of its
+// own, and the graph around it leaves it out through a block this module keeps
+// in that folder's .cbmignore (reconcileExclusions). Repositories inside a
+// folder that are not folders of the tab (submodules, clones) are read with it
+// (modules() says which ones, and which its rules leave out).
 //
 // Indexing runs as a CBM job (index_repository async) that this module polls
 // and reports with 'knowledge-changed'. CBM's own watcher only follows the
@@ -59,7 +70,27 @@ const TRACES_FILE_MAX_BYTES = 20 * 1024 * 1024;
 const TRACES_MAX = 10000;
 const TRACE_PATH_MAX = 256;
 const SAVED_QUERIES_MAX = 100;
+// The names this module makes up are at most this long; the ones CBM makes
+// (from the whole path, for a folder an agent's session indexed) reach NAME_CBM_MAX.
 const NAME_MAX = 80;
+const NAME_CBM_MAX = 200;
+// The project folder's mode in the tab's folder list (an attached folder is 'in-place' or 'worktree').
+const PROJECT_MODE = 'project';
+// The block of .cbmignore this module keeps: the folders inside that have a graph of their own.
+const IGNORE_FILE = '.cbmignore';
+const IGNORE_START = '# switchboard:managed start (folders with a code graph of their own; kept by Switchboard)';
+const IGNORE_END = '# switchboard:managed end';
+// Repositories looked for inside a folder (modules()): how deep, how many folders read, how many found.
+const MODULE_DEPTH = 4;
+const MODULE_MAX_DIRS = 5000;
+const MODULE_MAX = 100;
+const MODULE_SKIP = new Set(['node_modules', 'dist', 'build', 'out', 'target', 'vendor', 'venv', '__pycache__']);
+// check_index_coverage takes at most this many scopes per call.
+const SCOPES_MAX = 32;
+// How long a modules() answer stands before a refresh of the folder reads it again.
+const MODULES_TTL_MS = 10 * 60 * 1000;
+// Settings key: the graphs of the app's own folders (its CBM session's cwd before) were deleted once.
+const APP_GRAPHS_KEY = 'knowledge-app-graphs-swept';
 const POLL_MS = 1000;
 const POLL_ERRORS_MAX = 10;
 const REFRESH_DEBOUNCE_MS = 3000;
@@ -94,7 +125,7 @@ const CONFIG_DEFAULTS = {
 };
 const CONFIG_DEFAULTS_KEY = 'knowledge-config-defaults';
 
-let db, log, projects, client, locator, emit, runConfig, fetchImpl, now, timers, watchRepo, syncBrief, cbmDir, runInstall;
+let db, log, projects, client, locator, emit, runConfig, fetchImpl, now, timers, watchRepo, syncBrief, cbmDir, runInstall, runGit;
 let keepAlive = null;
 const jobs = new Map(); // folderPath → { projectId, name, state, mode, startedAt, finishedAt, error, kind, again }
 const refreshTimers = new Map(); // folderPath → timeout
@@ -106,6 +137,8 @@ let agentsCache = null; // { at, value }
 let latestVersion = null;
 let latestAsked = false;
 let download = null; // { step, error } while a download runs or after it failed
+let reconciling = Promise.resolve(); // .cbmignore blocks, written one pass at a time
+const moduleCache = new Map(); // folderPath → the last modules() answer, for the brief
 
 function init(ctx) {
   db = ctx.db;
@@ -122,7 +155,10 @@ function init(ctx) {
   syncBrief = ctx.syncBrief || (async () => {});
   cbmDir = ctx.cbmDir || null;
   runInstall = ctx.runInstall || defaultRunInstall;
+  runGit = ctx.runGit || defaultRunGit;
   jobs.clear();
+  reconciling = Promise.resolve();
+  moduleCache.clear();
   for (const t of refreshTimers.values()) timers.clearTimeout(t);
   refreshTimers.clear();
   linking.clear();
@@ -137,8 +173,9 @@ function init(ctx) {
 
 // --- Settings ---
 
+/** A CBM project name: the app's own (NAME_MAX) or one CBM made from a long path (up to NAME_CBM_MAX). */
 function cleanName(value) {
-  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(value) ? value : null;
+  return typeof value === 'string' && value.length <= NAME_CBM_MAX && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) ? value : null;
 }
 
 function cleanQueries(value) {
@@ -212,7 +249,8 @@ function setSettings(projectId, patch) {
     if (key in p) next[key] = p[key];
   }
   if (p.share && typeof p.share === 'object') {
-    const folders = new Set(db.listProjectFolders(projectId).map(f => f.path));
+    // The project folder is not a repository to share a graph through.
+    const folders = new Set(knowledgeFolders(projectId).filter(f => f.mode !== PROJECT_MODE).map(f => f.path));
     next.share = { ...current.share };
     for (const [folder, on] of Object.entries(p.share)) {
       if (!folders.has(folder)) continue;
@@ -223,19 +261,46 @@ function setSettings(projectId, patch) {
   const settings = settingsFor(projectId);
   watchEnabledFolders();
   if (current.enabled !== settings.enabled || current.crossRepo !== settings.crossRepo) briefChanged(projectId);
-  // Turned on: the folders without a graph are read now.
+  // Turned on: the folders without a graph are read now, the project folder first.
   if (!current.enabled && settings.enabled) {
-    for (const f of db.listProjectFolders(projectId)) if (!settings.indexed[f.path]) autoIndex(projectId, f.path);
+    for (const f of knowledgeFolders(projectId)) if (!settings.indexed[f.path]) autoIndex(projectId, f.path);
   }
   emit('knowledge-changed', { projectId, reason: 'settings' });
   return { ok: true, settings };
 }
 
-/** A new project (projects.js onProjectCreated) starts with the code graph on; its folders are read as they join. */
+/**
+ * A new project (projects.js onProjectCreated) starts with the code graph on:
+ * its project folder is read now, the attached folders as they join.
+ */
 function projectCreated({ projectId } = {}) {
   if (!projectId || !db.getProject(projectId)) return;
   saveSettings(projectId, { ...settingsFor(projectId), enabled: true });
   emit('knowledge-changed', { projectId, reason: 'settings' });
+  const root = projectFolder(projectId);
+  if (root) autoIndex(projectId, root.path);
+}
+
+/**
+ * A project was deleted (projects.js onProjectDeleted; its attached folders
+ * were reported detached before). The project folder stays on disk, but its
+ * graph goes when no other project has that folder, and so do the settings.
+ */
+async function projectDeleted({ projectId, root } = {}) {
+  if (!projectId) return { ok: false };
+  const s = settingsFor(projectId);
+  const rootPath = typeof root === 'string' && path.isAbsolute(root) ? root : null;
+  let deleted = false;
+  if (rootPath) {
+    const name = s.names[rootPath] || null;
+    if (name && !projectsWithFolder(rootPath).length) {
+      deleted = await (forgetting = forgetting.then(() => deleteGraph(name, rootPath)).catch(() => false));
+    }
+  }
+  if (typeof db.deleteSetting === 'function') db.deleteSetting(SETTINGS_PREFIX + projectId);
+  else db.setSetting(SETTINGS_PREFIX + projectId, null);
+  reconcileSoon();
+  return { ok: true, deleted };
 }
 
 function globalSettings() {
@@ -267,8 +332,37 @@ function samePath(a, b) {
   try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; }
 }
 
+function realOrResolved(p) {
+  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+}
+
+/** child is strictly inside parent (both as given, resolved). */
+function isInsidePath(child, parent) {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** The project folder as one of the tab's folders, or null for a project without one. */
+function projectFolder(projectId, project = db.getProject(projectId)) {
+  if (!project || typeof project.root !== 'string' || !path.isAbsolute(project.root)) return null;
+  const attached = db.listProjectFolders(projectId).find(f => path.resolve(f.path) === path.resolve(project.root));
+  // A project folder also attached keeps its row's path, under which its settings are kept.
+  return { path: attached ? attached.path : project.root, mode: PROJECT_MODE, sourcePath: null, branch: null, attached: !!attached };
+}
+
+/** The tab's folders: the project folder first, then the attached ones in their order. */
+function knowledgeFolders(projectId) {
+  const project = db.getProject(projectId);
+  const attached = db.listProjectFolders(projectId);
+  const root = projectFolder(projectId, project);
+  if (!root) return attached;
+  return [root, ...attached.filter(f => f.path !== root.path)];
+}
+
 function requireFolder(projectId, folderPath) {
   if (typeof folderPath !== 'string' || !path.isAbsolute(folderPath)) throw new Error('Pick one of the project\'s folders');
+  const root = projectFolder(projectId);
+  if (root && root.path === folderPath) return root;
   return projects.requireAttachedFolder(projectId, folderPath);
 }
 
@@ -293,7 +387,7 @@ function worktreeNameBase(folder, byFolder, listed) {
 }
 
 function folderRow(projectId, folderPath) {
-  return db.listProjectFolders(projectId).find(f => f.path === folderPath) || null;
+  return knowledgeFolders(projectId).find(f => f.path === folderPath) || null;
 }
 
 /** A worktree of a repository whose main checkout the project has too: a second copy of the same code. */
@@ -345,6 +439,9 @@ async function pickName(projectId, folderPath, listed) {
     const indexed = listed || await listProjects();
     const existing = indexed.find(p => samePath(p.root_path, folderPath));
     if (existing && cleanName(existing.name)) name = existing.name;
+    // The project folder is named by CBM on its first index (index() reads the
+    // name back), so an agent's session that starts there finds the same graph.
+    else if (row?.mode === PROJECT_MODE) return null;
     else {
       for (const p of indexed) taken.add(p.name);
       const base = worktree ? worktreeNameBase(row, byFolder, indexed) : folderNameBase(folderPath);
@@ -417,8 +514,9 @@ async function status(projectId) {
   requireProject(projectId);
   const settings = settingsFor(projectId);
   const binary = binaryStatus();
-  const folders = db.listProjectFolders(projectId).map(f => ({
+  const folders = knowledgeFolders(projectId).map(f => ({
     path: f.path,
+    // 'project' (the project folder), 'in-place' or 'worktree'.
     mode: f.mode,
     // A worktree's repository (its main checkout) and branch.
     sourcePath: f.mode === 'worktree' ? f.sourcePath || null : null,
@@ -429,11 +527,15 @@ async function status(projectId) {
     index: null,
     job: jobFor(f.path),
     error: null,
+    // Other CBM graphs of folders inside this one (see innerGraphs).
+    inner: [],
   }));
   let error = null;
   if (binary.found && binary.found.ok) {
     try {
       const listed = await listProjects();
+      const inner = innerGraphs(listed);
+      for (const folder of folders) folder.inner = inner.get(folder.path) || [];
       for (const folder of folders) {
         const existing = folder.name
           ? listed.find(p => p.name === folder.name)
@@ -457,6 +559,60 @@ async function status(projectId) {
     }
   }
   return { ok: true, binary, client: client.status(), agents: binary.found && binary.found.ok ? agentsStatus() : null, settings, folders, error };
+}
+
+/** Every folder of the tab in every project, by path: { projectIds, indexed }. */
+function allKnowledgeFolders() {
+  const out = new Map();
+  for (const project of db.listProjects()) {
+    const s = settingsFor(project.id);
+    for (const f of knowledgeFolders(project.id)) {
+      const entry = out.get(f.path) || { path: f.path, mode: f.mode, projectIds: [], indexed: false };
+      entry.projectIds.push(project.id);
+      if (s.indexed[f.path]) entry.indexed = true;
+      out.set(f.path, entry);
+    }
+  }
+  return out;
+}
+
+/**
+ * The CBM graphs of folders inside a folder of the tab that are not folders of
+ * the tab themselves, by that folder: their files are in its graph already.
+ * CBM makes one when an agent's session starts in a subfolder (auto_index
+ * reads the session's folder, not its repository's). The tab names them and
+ * deletes one when asked (deleteInnerGraph), never on its own: it did not make them.
+ */
+function innerGraphs(listed) {
+  const known = [...allKnowledgeFolders().keys()].map(p => ({ path: p, real: realOrResolved(p) }));
+  const knownReal = new Set(known.map(k => k.real));
+  const out = new Map();
+  for (const graph of listed) {
+    const root = typeof graph?.root_path === 'string' ? realOrResolved(graph.root_path) : null;
+    if (!root || !cleanName(graph.name) || knownReal.has(root)) continue;
+    // The innermost folder of the tab that holds it.
+    let owner = null;
+    for (const k of known) {
+      if (!isInsidePath(root, k.real)) continue;
+      if (!owner || isInsidePath(k.real, owner.real)) owner = k;
+    }
+    if (!owner) continue;
+    const list = out.get(owner.path) || [];
+    list.push({ name: graph.name, path: graph.root_path, rel: path.relative(owner.real, root).split(path.sep).join('/') });
+    out.set(owner.path, list);
+  }
+  return out;
+}
+
+/** Delete one of the graphs innerGraphs() found inside a folder of the project, and only such a one. */
+async function deleteInnerGraph(projectId, folderPath, name) {
+  requireFolder(projectId, folderPath);
+  const listed = await listProjects();
+  const match = (innerGraphs(listed).get(folderPath) || []).find(g => g.name === name);
+  if (!match) throw new Error('That graph is not one inside this folder');
+  await client.call('delete_project', { project: match.name });
+  changed(projectId, folderPath, 'inner-deleted');
+  return { ok: true, deleted: match.name };
 }
 
 // --- Asking the graph ---
@@ -539,9 +695,9 @@ function changed(projectId, folderPath, reason) {
   emit('knowledge-changed', { projectId, folderPath, reason });
 }
 
-/** Projects that have this folder attached. */
+/** Projects that have this folder among the tab's folders (attached, or as their project folder). */
 function projectsWithFolder(folderPath) {
-  return db.listProjects().filter(p => db.listProjectFolders(p.id).some(f => f.path === folderPath)).map(p => p.id);
+  return db.listProjects().filter(p => knowledgeFolders(p.id).some(f => f.path === folderPath)).map(p => p.id);
 }
 
 function announceJob(folderPath) {
@@ -602,21 +758,29 @@ async function index(projectId, folderPath, opts = {}) {
   if (running && !JOB_DONE.has(running.state)) {
     // A change while the folder is read: read it again once this job ends.
     if (opts.kind === 'refresh') running.again = true;
+    // Asked to wait: for the job under way (it already reads what changed before it started).
+    if (opts.wait && running.done) await Promise.resolve(running.done).catch(() => {});
     return { ok: true, job: jobFor(folderPath), already: true };
   }
   const settings = settingsFor(projectId);
   const mode = INDEX_MODES.has(opts.mode) ? opts.mode : settings.mode;
   // In the map before anything is awaited, so a second call joins this one.
   const job = { projectId, name: null, state: 'queued', mode, kind: opts.kind === 'refresh' ? 'refresh' : 'index', startedAt: now(), finishedAt: null, error: null, again: false };
+  // Settles when the job ends, from the start: a call that joins it while it starts can wait for it.
+  let settle;
+  job.done = new Promise((resolve) => { settle = resolve; });
   jobs.set(folderPath, job);
   announceJob(folderPath);
   let repoArgs;
   try {
+    // The folders inside with a graph of their own are left out of this one first.
+    await reconcileFolder(folderPath).catch((err) => log.warn?.('[knowledge] could not update .cbmignore', folderPath, err.message));
     const name = await nameFor(projectId, folderPath);
     job.name = name;
-    repoArgs = { repo_path: folderPath, name };
+    // A project folder without a graph yet is named by CBM (pickName); its name is read back below.
+    repoArgs = name ? { repo_path: folderPath, name } : { repo_path: folderPath };
     const args = { ...repoArgs, mode, async: true };
-    if (settings.share[folderPath]) args.persistence = true;
+    if (settings.share[folderPath] && folder?.mode !== PROJECT_MODE) args.persistence = true;
     // CBM set to ignore worktrees (ignore_worktrees) still takes one asked for by name.
     if (folder?.mode === 'worktree') args.index_worktree = true;
     const started = await client.call('index_repository', args);
@@ -627,37 +791,70 @@ async function index(projectId, folderPath, opts = {}) {
     job.error = err.message;
     job.finishedAt = now();
     announceJob(folderPath);
+    settle(job);
     throw err;
   }
   announceJob(folderPath);
   const done = pollJob(folderPath, job, repoArgs).then(async (finished) => {
     // The folder left the project while it was read: forgetFolder() takes it from here.
     if (!projectsWithFolder(folderPath).length) return finished;
+    if (finished.state === 'succeeded' && !job.name) {
+      // The project folder's first graph: take the name CBM gave it.
+      const named = await adoptName(projectId, folderPath).catch(() => null);
+      if (named) job.name = named;
+      else { finished.state = 'failed'; finished.error = 'codebase-memory-mcp indexed the folder but lists no graph of it'; announceJob(folderPath); }
+    }
     if (finished.state === 'succeeded') {
       const wasIndexed = !!settingsFor(projectId).indexed[folderPath];
       markIndexed(folderPath, true);
       watchEnabledFolders();
-      // The brief names the folder once its first graph is there.
-      if (!wasIndexed) for (const id of projectsWithFolder(folderPath)) briefChanged(id);
+      // The brief names the folder once its first graph is there; a folder inside
+      // another with a graph of its own now leaves that one.
+      if (!wasIndexed) {
+        for (const id of projectsWithFolder(folderPath)) briefChanged(id);
+        reconcileSoon();
+      }
+      // Which repositories inside it the graph has, for the brief and the Coverage view:
+      // with an index asked for, and at most every few minutes with the refreshes.
+      const cached = moduleCache.get(folderPath);
+      if (finished.kind === 'index' || !cached || now() - cached.at > MODULES_TTL_MS) {
+        modules(projectId, folderPath).catch((err) => log.warn?.('[knowledge] modules', folderPath, err.message));
+      }
       // Links between folders come with an index asked for, not with each refresh,
-      // and not for a second checkout of a repository the project has.
-      if (finished.kind === 'index' && settingsFor(projectId).crossRepo && !isCopy(projectId, folderRow(projectId, folderPath))) {
+      // and not for a second checkout of a repository the project has nor for the project folder.
+      const row = folderRow(projectId, folderPath);
+      if (finished.kind === 'index' && settingsFor(projectId).crossRepo && row?.mode !== PROJECT_MODE && !isCopy(projectId, row)) {
         await linkCrossRepo(projectId).catch((err) => log.warn?.('[knowledge] cross-repo link failed', err.message));
       }
     }
     if (finished.again) scheduleRefresh(folderPath);
     return finished;
   });
-  job.done = done;
+  done.then(settle, () => settle(job));
   if (opts.wait) await done;
   else done.catch(() => {});
   return { ok: true, job: jobFor(folderPath) };
 }
 
-/** Index every attached folder of the project, one job after the other. */
+/** The name CBM gave a folder indexed without one (the project folder), kept like any other. */
+async function adoptName(projectId, folderPath) {
+  const listed = await listProjects();
+  const existing = listed.find(p => samePath(p.root_path, folderPath));
+  const name = existing ? cleanName(existing.name) : null;
+  if (!name) return null;
+  for (const id of projectsWithFolder(folderPath)) {
+    const s = settingsFor(id);
+    if (s.names[folderPath]) continue;
+    s.names[folderPath] = name;
+    saveSettings(id, s);
+  }
+  return name;
+}
+
+/** Index every folder of the project (the project folder first), one job after the other. */
 async function indexAll(projectId, opts = {}) {
   requireProject(projectId);
-  const folders = db.listProjectFolders(projectId).map(f => f.path);
+  const folders = knowledgeFolders(projectId).map(f => f.path);
   const run = async () => {
     for (const folder of folders) {
       try { await index(projectId, folder, { ...opts, wait: true }); } catch (err) { log.warn?.('[knowledge] index failed', folder, err.message); }
@@ -680,34 +877,69 @@ function linkCrossRepo(projectId) {
   return run;
 }
 
-async function linkNow(projectId) {
+/** The folders that take part in cross-repo links: indexed, attached (not the project folder), not a second checkout. */
+function linkableFolders(projectId) {
   const settings = settingsFor(projectId);
   // A worktree next to its main checkout would only link the same code twice.
-  const folders = db.listProjectFolders(projectId).filter(f => !isCopy(projectId, f)).map(f => f.path).filter(p => settings.names[p] && settings.indexed[p]);
+  return knowledgeFolders(projectId)
+    .filter(f => f.mode !== PROJECT_MODE && !isCopy(projectId, f))
+    .map(f => f.path)
+    .filter(p => settings.names[p] && settings.indexed[p]);
+}
+
+// The folders the last link of each project could not link: the brief says so.
+const LINK_ERRORS_KEY = 'knowledge-link-errors:';
+
+function linkErrors(projectId) {
+  const raw = db.getSetting(LINK_ERRORS_KEY + projectId);
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+}
+
+async function linkNow(projectId) {
+  const settings = settingsFor(projectId);
+  const folders = linkableFolders(projectId);
   if (folders.length < 2) return { ok: true, linked: 0 };
   const listed = new Set((await listProjects()).map(p => p.name));
   const indexed = folders.filter(p => listed.has(settings.names[p]));
   if (indexed.length < 2) return { ok: true, linked: 0 };
-  const names = indexed.map(p => settings.names[p]);
   let linked = 0;
+  // One folder that fails does not keep the others from being linked.
+  const errors = {};
   for (const folder of indexed) {
     const name = settings.names[folder];
-    await client.call('index_repository', { repo_path: folder, name, mode: 'cross-repo-intelligence', target_projects: names.filter(n => n !== name) }, { timeoutMs: 10 * 60 * 1000 });
-    linked += 1;
+    // A folder inside another that could not be left out of its graph is in both:
+    // linking the two would only link the same code.
+    const targets = indexed.filter(p => p !== folder && !overlapping(folder, p)).map(p => settings.names[p]);
+    if (!targets.length) continue;
+    try {
+      await client.call('index_repository', { repo_path: folder, name, mode: 'cross-repo-intelligence', target_projects: targets }, { timeoutMs: 10 * 60 * 1000 });
+      linked += 1;
+    } catch (err) {
+      errors[folder] = String(err.message || err).slice(0, 300);
+      log.warn?.('[knowledge] cross-repo link failed', folder, err.message);
+    }
   }
+  const before = JSON.stringify(linkErrors(projectId));
+  db.setSetting(LINK_ERRORS_KEY + projectId, errors);
+  if (before !== JSON.stringify(errors)) briefChanged(projectId);
   changed(projectId, null, 'cross-repo');
-  return { ok: true, linked };
+  if (!linked) throw new Error(`No folder could be linked: ${Object.values(errors)[0] || 'codebase-memory-mcp did not answer'}`);
+  return { ok: true, linked, errors };
 }
 
 /**
  * Refresh a folder's index soon (its git state moved). Only for projects with
  * the code graph turned on and automatic refresh kept, and only once indexed.
  */
-function scheduleRefresh(folderPath) {
-  const owner = projectsWithFolder(folderPath).find((id) => {
+function refreshOwner(folderPath) {
+  return projectsWithFolder(folderPath).find((id) => {
     const s = settingsFor(id);
     return s.enabled && s.autoRefresh && s.names[folderPath] && s.indexed[folderPath];
-  });
+  }) || null;
+}
+
+function scheduleRefresh(folderPath) {
+  const owner = refreshOwner(folderPath);
   if (!owner) return false;
   const pendingTimer = refreshTimers.get(folderPath);
   if (pendingTimer) timers.clearTimeout(pendingTimer);
@@ -718,7 +950,12 @@ function scheduleRefresh(folderPath) {
   return true;
 }
 
-/** The folders whose git state starts a refresh: indexed ones of projects with the graph on. */
+/**
+ * The folders whose git state starts a refresh: indexed ones of projects with
+ * the graph on. Not the project folder, which is no repository: it is read
+ * again when a session of the project ends and when the app starts
+ * (sessionEnded, refreshProjectFolders).
+ */
 function watchedFolders() {
   const out = new Set();
   for (const project of db.listProjects()) {
@@ -727,6 +964,29 @@ function watchedFolders() {
     for (const f of db.listProjectFolders(project.id)) if (s.names[f.path] && s.indexed[f.path]) out.add(f.path);
   }
   return [...out];
+}
+
+/** A session of the project ended: what it wrote in the project folder (plans, notes, tools) is read soon. */
+function sessionEnded(projectId) {
+  if (!projectId) return false;
+  const root = projectFolder(projectId);
+  return root ? scheduleRefresh(root.path) : false;
+}
+
+/**
+ * At start: the project folders with a graph are read again, one after the
+ * other (sessions herdr-core kept running may have written there).
+ */
+function refreshProjectFolders() {
+  const roots = [];
+  for (const project of db.listProjects()) {
+    const root = projectFolder(project.id);
+    const owner = root && refreshOwner(root.path);
+    if (owner) roots.push({ owner, path: root.path });
+  }
+  const run = roots.reduce((chain, r) => chain.then(() => index(r.owner, r.path, { kind: 'refresh', wait: true })
+    .catch((err) => log.warn?.('[knowledge] refresh failed', r.path, err.message))), Promise.resolve());
+  return { count: roots.length, done: run };
 }
 
 /**
@@ -765,7 +1025,10 @@ async function deleteIndex(projectId, folderPath) {
   if (pendingTimer) { timers.clearTimeout(pendingTimer); refreshTimers.delete(folderPath); }
   // No graph any more: no refresh brings it back, and the brief stops naming it.
   markIndexed(folderPath, false);
+  moduleCache.delete(folderPath);
   for (const id of projectsWithFolder(folderPath)) { changed(id, folderPath, 'deleted'); briefChanged(id); }
+  // A folder around it reads its files again.
+  reconcileSoon();
   return { ok: true, result };
 }
 
@@ -781,12 +1044,25 @@ async function deleteIndex(projectId, folderPath) {
 function folderChanged({ projectId, folder, change } = {}) {
   if (!projectId || !folder || typeof folder.path !== 'string') return;
   if (change === 'detached') {
-    if (folder.mode !== 'worktree') return;
-    forgetting = forgetting.then(() => forgetFolder(projectId, folder.path))
-      .catch((err) => log.warn?.('[knowledge] could not delete a worktree\'s graph', folder.path, err.message));
+    // A worktree, or a folder inside another folder of the tab (whose graph
+    // takes its files back), loses its graph once no project has it.
+    if (folder.mode === 'worktree' || insideAnotherFolder(folder.path)) {
+      forgetting = forgetting.then(() => forgetFolder(projectId, folder.path))
+        .catch((err) => log.warn?.('[knowledge] could not delete a folder\'s graph', folder.path, err.message));
+    }
+    reconcileSoon();
     return;
   }
   if (change === 'attached' && settingsFor(projectId).enabled) autoIndex(projectId, folder.path);
+}
+
+/** The folder sits inside another folder of the tab (of any project). */
+function insideAnotherFolder(folderPath) {
+  const real = realOrResolved(folderPath);
+  for (const other of allKnowledgeFolders().keys()) {
+    if (other !== folderPath && isInsidePath(real, realOrResolved(other))) return true;
+  }
+  return false;
 }
 
 /**
@@ -878,16 +1154,18 @@ async function sweepOrphans() {
   const stale = [];
   for (const project of db.listProjects()) {
     const s = settingsFor(project.id);
-    const own = new Set(db.listProjectFolders(project.id).map(f => f.path));
+    const own = new Set(knowledgeFolders(project.id).map(f => f.path));
     for (const folder of Object.keys(s.names)) {
       if (own.has(folder)) continue;
       if (s.worktrees[folder] || !fs.existsSync(folder)) stale.push({ projectId: project.id, folder });
     }
   }
-  if (!stale.length && !orphans().length) return { ok: true, deleted: 0 };
+  const appGraphs = db.getSetting(APP_GRAPHS_KEY) !== true && !!appCbmDir();
+  if (!stale.length && !orphans().length && !appGraphs) return { ok: true, deleted: 0 };
   const found = client.refresh();
   if (!found || !found.ok) return { ok: false, deleted: 0 };
   let deleted = 0;
+  if (appGraphs) deleted += await sweepAppGraphs().catch((err) => { log.warn?.('[knowledge] sweep of the app\'s graphs', err.message); return 0; });
   for (const { projectId, folder } of stale) {
     const r = await forgetFolder(projectId, folder).catch((err) => { log.warn?.('[knowledge] sweep', folder, err.message); return null; });
     if (r?.deleted) deleted += 1;
@@ -901,6 +1179,308 @@ async function sweepOrphans() {
     if (await deleteGraph(orphan.name, orphan.path || '')) deleted += 1;
   }
   return { ok: true, deleted };
+}
+
+function appCbmDir() {
+  const dir = typeof cbmDir === 'function' ? cbmDir() : cbmDir;
+  return typeof dir === 'string' && path.isAbsolute(dir) ? dir : null;
+}
+
+/**
+ * Once: the graphs CBM made of the app's own cbm folder, where the app's CBM
+ * session used to start (with auto_index on, CBM reads the folder a session
+ * starts in). The session starts in the home folder now, which CBM never indexes.
+ */
+async function sweepAppGraphs() {
+  const dir = appCbmDir();
+  if (!dir) return 0;
+  let deleted = 0;
+  for (const graph of await listProjects()) {
+    if (!cleanName(graph.name) || !samePath(graph.root_path, dir)) continue;
+    await client.call('delete_project', { project: graph.name });
+    deleted += 1;
+  }
+  db.setSetting(APP_GRAPHS_KEY, true);
+  return deleted;
+}
+
+// --- One file, one graph: .cbmignore blocks ---
+
+/**
+ * The folders that sit inside it and have a graph of their own, relative to
+ * it: they are left out of its graph. Across every project, since a folder has
+ * one graph whichever project it is in. A folder without a graph (the code
+ * graph off in its projects, never indexed) stays in the graph around it.
+ */
+function foldersToLeaveOut(folderPath, known = allKnowledgeFolders()) {
+  const real = realOrResolved(folderPath);
+  const out = [];
+  for (const entry of known.values()) {
+    if (entry.path === folderPath || !entry.indexed) continue;
+    const childReal = realOrResolved(entry.path);
+    if (!isInsidePath(childReal, real)) continue;
+    out.push(path.relative(real, childReal).split(path.sep).join('/'));
+  }
+  return out.sort();
+}
+
+/** A path as an anchored .gitignore pattern for a folder: /a/b c/ with its special characters escaped. */
+function ignorePattern(rel) {
+  const escaped = rel.split('/').map(seg => seg.replace(/[\\*?[\]]/g, '\\$&').replace(/ +$/, m => m.replace(/ /g, '\\ '))).join('/');
+  return `/${escaped}/`;
+}
+
+/** The text without this module's block, and whether it had one. */
+function stripBlock(text) {
+  const lines = String(text).split('\n');
+  const start = lines.findIndex(l => l.trim() === IGNORE_START);
+  if (start < 0) return { text: String(text), had: false };
+  let end = lines.findIndex((l, i) => i > start && l.trim() === IGNORE_END);
+  if (end < 0) end = lines.length - 1;
+  const rest = [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n').replace(/\n{3,}/g, '\n\n');
+  return { text: rest, had: true };
+}
+
+function defaultRunGit(cwd, args) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      resolve(err ? null : String(stdout || ''));
+    });
+  });
+}
+
+// Folders whose block could not be written, by folder: { reason, inside: [rel] }.
+const exclusionIssues = new Map();
+
+/**
+ * Keep the block of a folder's .cbmignore that leaves out the folders inside
+ * it with a graph of their own. The block is the file's last lines (a rule of
+ * the user's after it could not take a folder back), and goes when nothing is
+ * left out. A .cbmignore that is a link, or that the repository tracks (the
+ * team's rules), is not written: the overlap is reported instead (exclusionIssues).
+ * A .cbmignore this module creates in a repository is kept out of git through
+ * info/exclude. Resolves { changed }.
+ */
+async function reconcileFolder(folderPath, known) {
+  const inside = foldersToLeaveOut(folderPath, known);
+  const file = path.join(folderPath, IGNORE_FILE);
+  let stat = null;
+  try { stat = fs.lstatSync(file); } catch {}
+  if (stat && stat.isSymbolicLink()) {
+    if (inside.length) exclusionIssues.set(folderPath, { reason: 'link', inside }); else exclusionIssues.delete(folderPath);
+    return { changed: false };
+  }
+  let text = '';
+  if (stat) {
+    try { text = fs.readFileSync(file, 'utf8'); } catch { return { changed: false }; }
+  }
+  const { text: rest, had } = stripBlock(text);
+  const block = inside.length ? [IGNORE_START, ...inside.map(ignorePattern), IGNORE_END].join('\n') : '';
+  const next = block ? `${rest.trimEnd() ? `${rest.trimEnd()}\n\n` : ''}${block}\n` : rest;
+  if (next === text) { exclusionIssues.delete(folderPath); return { changed: false }; }
+  if (!block && !had) { exclusionIssues.delete(folderPath); return { changed: false }; }
+  const isRepo = fs.existsSync(path.join(folderPath, '.git'));
+  if (stat && isRepo && (await runGit(folderPath, ['ls-files', '--error-unmatch', '--', IGNORE_FILE])) != null) {
+    if (inside.length) exclusionIssues.set(folderPath, { reason: 'tracked', inside }); else exclusionIssues.delete(folderPath);
+    return { changed: false };
+  }
+  if (!next.trim() && !stat) { exclusionIssues.delete(folderPath); return { changed: false }; }
+  if (!next.trim()) fs.rmSync(file, { force: true });
+  else fs.writeFileSync(file, next, 'utf8');
+  if (!stat && isRepo) await keepOutOfGit(folderPath).catch(() => {});
+  exclusionIssues.delete(folderPath);
+  return { changed: true };
+}
+
+/** A new .cbmignore stays out of the repository's changes: info/exclude, unless git ignores it already. */
+async function keepOutOfGit(repo) {
+  if ((await runGit(repo, ['check-ignore', '-q', '--', IGNORE_FILE])) != null) return;
+  const rel = String(await runGit(repo, ['rev-parse', '--git-path', 'info/exclude']) || '').trim();
+  if (!rel) return;
+  const exclude = path.resolve(repo, rel);
+  let text = '';
+  try { text = fs.readFileSync(exclude, 'utf8'); } catch {}
+  if (text.split('\n').some(l => l.trim() === `/${IGNORE_FILE}` || l.trim() === IGNORE_FILE)) return;
+  fs.mkdirSync(path.dirname(exclude), { recursive: true });
+  fs.writeFileSync(exclude, `${text}${text && !text.endsWith('\n') ? '\n' : ''}# codebase-memory-mcp rules, kept by Switchboard\n/${IGNORE_FILE}\n`, 'utf8');
+}
+
+/** Two folders of the tab where one holds the other, and the graph around could not leave the inner one out. */
+function overlapping(a, b) {
+  const ra = realOrResolved(a);
+  const rb = realOrResolved(b);
+  const [outer, inner, innerReal, outerReal] = isInsidePath(rb, ra) ? [a, b, rb, ra] : isInsidePath(ra, rb) ? [b, a, ra, rb] : [null];
+  if (!outer) return false;
+  const issue = exclusionIssues.get(outer);
+  if (!issue) return false;
+  const rel = path.relative(outerReal, innerReal).split(path.sep).join('/');
+  return issue.inside.includes(rel);
+}
+
+/**
+ * Every folder of the tab with a graph gets its block right; a folder whose
+ * block changed is read again (an incremental index drops what is now left
+ * out, and takes back what is not). One pass at a time.
+ */
+function reconcileExclusions() {
+  const run = reconciling.then(async () => {
+    const known = allKnowledgeFolders();
+    const refreshed = [];
+    for (const entry of known.values()) {
+      if (!entry.indexed) {
+        // Its graph comes with its first index, which writes the block first.
+        continue;
+      }
+      let result;
+      try { result = await reconcileFolder(entry.path, known); } catch (err) {
+        log.warn?.('[knowledge] could not update .cbmignore', entry.path, err.message);
+        continue;
+      }
+      if (!result.changed) continue;
+      refreshed.push(entry.path);
+      const owner = entry.projectIds.find(id => settingsFor(id).names[entry.path]) || entry.projectIds[0];
+      index(owner, entry.path, { kind: 'refresh' }).catch((err) => log.warn?.('[knowledge] refresh failed', entry.path, err.message));
+    }
+    for (const entry of known.values()) for (const id of entry.projectIds) if (refreshed.includes(entry.path)) changed(id, entry.path, 'exclusions');
+    return { ok: true, refreshed };
+  });
+  reconciling = run.catch(() => {});
+  return run;
+}
+
+function reconcileSoon() {
+  reconcileExclusions().catch((err) => log.warn?.('[knowledge] exclusions', err.message));
+}
+
+// --- Repositories inside a folder ---
+
+function hasGitEntry(dir) {
+  try { fs.lstatSync(path.join(dir, '.git')); return true; } catch { return false; }
+}
+
+/** The git dir a .git file points to (a worktree, a submodule's checkout), resolved; null for a .git directory. */
+function gitFileTarget(dir) {
+  const entry = path.join(dir, '.git');
+  try {
+    if (!fs.lstatSync(entry).isFile()) return null;
+    const m = /^gitdir:\s*(.+)\s*$/m.exec(fs.readFileSync(entry, 'utf8'));
+    return m ? realOrResolved(path.resolve(dir, m[1].trim())) : null;
+  } catch { return null; }
+}
+
+/**
+ * The repositories inside a folder (submodules, clones, checkouts of other
+ * repositories), at most MODULE_DEPTH levels down, without going into
+ * node_modules and the like or into a repository found. A checkout of the
+ * folder's own repository (a worktree of it, e.g. under .claude/worktrees) is
+ * the same code, not a module. [{ rel, kind }] and whether the walk stopped short.
+ */
+async function findModules(folderPath) {
+  const root = realOrResolved(folderPath);
+  const isRepo = fs.existsSync(path.join(root, '.git'));
+  // The folder's own repository (its common git dir, shared by its worktrees).
+  const common = isRepo ? String(await runGit(root, ['rev-parse', '--git-common-dir']) || '').trim() : '';
+  const ownGit = common ? realOrResolved(path.resolve(root, common)) : null;
+  const submodules = new Set();
+  if (isRepo && fs.existsSync(path.join(root, '.gitmodules'))) {
+    // -z: each entry is "key\nvalue\0" (a submodule's name, in its key, may hold spaces).
+    const out = await runGit(root, ['config', '-z', '-f', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$']);
+    for (const entry of String(out || '').split('\0')) {
+      const nl = entry.indexOf('\n');
+      const rel = nl >= 0 ? entry.slice(nl + 1).trim().replace(/\/+$/, '') : '';
+      if (rel && !path.isAbsolute(rel) && !rel.split('/').includes('..')) submodules.add(rel);
+    }
+  }
+  const found = [];
+  const queue = [{ dir: root, depth: 0 }];
+  let visited = 0;
+  let limited = false;
+  while (queue.length) {
+    if (visited >= MODULE_MAX_DIRS || found.length >= MODULE_MAX) { limited = true; break; }
+    const { dir, depth } = queue.shift();
+    visited += 1;
+    const rel = path.relative(root, dir).split(path.sep).join('/');
+    if (depth > 0 && hasGitEntry(dir)) {
+      if (submodules.has(rel)) { found.push({ rel, kind: 'submodule' }); continue; }
+      const target = gitFileTarget(dir);
+      // A worktree of the folder's own repository: its gitdir is under the folder's common git dir.
+      const own = target && ownGit && (target === ownGit || isInsidePath(target, ownGit));
+      if (!own) found.push({ rel, kind: target ? 'checkout' : 'clone' });
+      continue;
+    }
+    if (depth >= MODULE_DEPTH) continue;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      // A link's dirent is not a directory: links are never followed.
+      if (!entry.isDirectory() || entry.name === '.git' || MODULE_SKIP.has(entry.name)) continue;
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      // Hidden folders (tools' own, which CBM leaves out) only when a submodule lives there.
+      if (entry.name.startsWith('.') && ![...submodules].some(s => s === childRel || s.startsWith(`${childRel}/`))) continue;
+      queue.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
+    }
+  }
+  for (const rel of submodules) {
+    if (!found.some(m => m.rel === rel) && fs.existsSync(path.join(root, rel))) found.push({ rel, kind: 'submodule' });
+  }
+  return { modules: found.sort((a, b) => a.rel.localeCompare(b.rel)), limited };
+}
+
+/**
+ * The repositories inside a folder of the project, and where their code is:
+ *  - 'own': a folder of the tab with a graph of its own (left out of this one);
+ *  - 'in': in this folder's graph (gaps: what CBM flagged inside it);
+ *  - 'out': in no graph, left out by this folder's rules (ignored by git or
+ *    .cbmignore): attach it to give it a graph of its own;
+ *  - 'unknown': this folder has no graph yet.
+ */
+async function modules(projectId, folderPath) {
+  requireFolder(projectId, folderPath);
+  const { modules: found, limited } = await findModules(folderPath);
+  const settings = settingsFor(projectId);
+  const name = settings.indexed[folderPath] ? settings.names[folderPath] : null;
+  const known = allKnowledgeFolders();
+  const knownByReal = new Map([...known.values()].map(e => [realOrResolved(e.path), e]));
+  const real = realOrResolved(folderPath);
+  const list = found.map((m) => {
+    const abs = path.join(folderPath, ...m.rel.split('/'));
+    const entry = knownByReal.get(path.join(real, ...m.rel.split('/')));
+    const own = entry && entry.indexed;
+    return { path: abs, rel: m.rel, kind: m.kind, attached: !!entry, state: own ? 'own' : name ? 'in' : 'unknown', gaps: 0, graph: own ? (namesOf(entry.path) || null) : name };
+  });
+  const asked = list.filter(m => m.state === 'in');
+  for (let i = 0; i < asked.length; i += SCOPES_MAX) {
+    const chunk = asked.slice(i, i + SCOPES_MAX);
+    let r;
+    try { r = await client.call('check_index_coverage', { project: name, scopes: chunk.map(m => m.rel), scope_limit: 50 }); } catch { continue; }
+    for (const scope of Array.isArray(r?.scopes) ? r.scopes : []) {
+      const m = chunk.find(x => x.rel === (scope.requested_scope || scope.scope));
+      if (!m) continue;
+      const entries = Array.isArray(scope.entries) ? scope.entries : [];
+      if (entries.some(e => e && e.kind === 'not_indexed_dir' && String(e.path || '').replace(/\/+$/, '') === m.rel)) {
+        m.state = 'out';
+        m.graph = null;
+      } else {
+        // A repository's own .git is always left out: not a gap in its code.
+        m.gaps = entries.filter(e => e && !/(^|\/)\.git\/?$/.test(String(e.path || ''))).length;
+      }
+    }
+  }
+  const result = { ok: true, folder: folderPath, modules: list, limited, at: now() };
+  const before = JSON.stringify(moduleCache.get(folderPath)?.modules || null);
+  moduleCache.set(folderPath, result);
+  if (before !== JSON.stringify(list)) for (const id of projectsWithFolder(folderPath)) briefChanged(id);
+  return result;
+}
+
+/** A folder's CBM name, whichever project named it. */
+function namesOf(folderPath) {
+  for (const project of db.listProjects()) {
+    const n = settingsFor(project.id).names[folderPath];
+    if (n) return n;
+  }
+  return null;
 }
 
 // --- ADR and runtime traces ---
@@ -1138,24 +1718,51 @@ async function lens(projectId, folderPath, workspace) {
 function briefSection(projectId) {
   const s = settingsFor(projectId);
   if (!s.enabled) return '';
-  const rows = db.listProjectFolders(projectId).filter(f => s.names[f.path] && s.indexed[f.path]);
+  const rows = knowledgeFolders(projectId).filter(f => s.names[f.path] && s.indexed[f.path]);
   // Nothing to name yet (a new project, CBM missing): the section comes with the first graph.
   if (!rows.length) return '';
   const lines = ['## Code graph (codebase-memory-mcp)'];
   const folderCell = (f) => {
+    if (f.mode === PROJECT_MODE) return `\`${f.path}\` (project folder: plans, notes, tools)`;
     if (f.mode !== 'worktree') return `\`${f.path}\``;
     const of = f.sourcePath ? ` of \`${f.sourcePath}\`` : '';
     return `\`${f.path}\` (worktree${of}${f.branch ? `, branch \`${f.branch}\`` : ''})`;
   };
-  lines.push('The attached folders are indexed by codebase-memory-mcp (CBM), and Switchboard keeps the indexes fresh. Pass these names as `project` to every CBM tool:');
-  lines.push('', '| Folder | CBM project |', '|---|---|', ...rows.map(f => `| ${folderCell(f)} | \`${s.names[f.path]}\` |`), '');
-  lines.push('Graph first: `search_graph` to find a symbol, `trace_path` for who calls what, `get_code_snippet` to read it, `query_graph` (read-only Cypher) for questions over many hops, `get_architecture` for the layout, and `detect_changes` before a commit to see what a change reaches. Use `search_code` or grep for literal text and for the files `check_index_coverage` flags. Each folder\'s architecture decisions are in `manage_adr`.');
+  const table = rows.map(f => `| ${folderCell(f)} | \`${s.names[f.path]}\` |`);
+  // The repositories inside the folders: in the folder's graph, in a graph of their own, or in none.
+  for (const f of rows) {
+    const found = moduleCache.get(f.path);
+    for (const m of found ? found.modules : []) {
+      if (m.state === 'own' && rows.some(r => samePath(r.path, m.path))) continue; // a row of the table already
+      const what = m.kind === 'submodule' ? 'submodule' : m.kind === 'checkout' ? 'checkout of another repository' : 'repository';
+      const where = m.state === 'own' ? (m.graph ? `\`${m.graph}\` (a graph of its own)` : 'a graph of its own')
+        : m.state === 'in' ? `in \`${s.names[f.path]}\`` : m.state === 'out' ? 'not indexed: read its files directly' : 'not indexed yet';
+      table.push(`| \`${m.path}\` (${what} inside \`${path.basename(f.path)}\`) | ${where} |`);
+    }
+  }
+  lines.push('These folders are indexed by codebase-memory-mcp (CBM), each as a graph of its own, and Switchboard keeps the graphs fresh. A file belongs to one graph: the one of the innermost folder of this table that holds it. Pass that graph\'s name as `project` to every CBM tool.');
+  const root = rows.find(f => f.mode === PROJECT_MODE);
+  if (root) {
+    lines.push('', `Sessions start in the project folder, so CBM's own hints (its session hook, its skill's "the project whose root_path contains your working directory") point at \`${s.names[root.path]}\`: that graph holds plans, notes and tools, not the code. Look for code in the other graphs of this table first.`);
+  }
+  lines.push('', '| Folder | CBM project |', '|---|---|', ...table, '');
+  lines.push('To reach the code a task needs without reading files at random:');
+  lines.push('1. `search_graph` (or `search_code` for literal text) in the graph of the folder you work in; for a symbol whose folder you do not know, in each code folder\'s graph of the table, one call each, before anything else;');
+  lines.push('2. `trace_path` for who calls it and what it calls, within its graph (`query_graph`, read-only Cypher, for questions over many hops). A call from one folder into another\'s code (an import across folders, into a folder inside it too) is not an edge of either graph: find its callers with `search_code` for the name in the other folders\' graphs;');
+  lines.push('3. `get_code_snippet` to read just that symbol;');
+  lines.push('4. `check_index_coverage` on the files the answer relies on: read only the line ranges it flags (code CBM\'s parser could not read) and the files it says are not indexed.');
+  lines.push('', 'Grep, glob or read whole files only for what the graphs cannot answer: the rows of this table that say "not indexed", the flagged lines, and text that is not code.');
+  lines.push('', '`get_architecture` gives a graph\'s layout, `detect_changes` what a change reaches before a commit, and `manage_adr` each folder\'s architecture decisions. A symbol another folder defines is in that folder\'s graph, not missing from yours; paths in the project folder\'s plans and notes belong to the folders of this table.');
   if (rows.some(f => f.mode === 'worktree')) {
     lines.push('', 'A worktree has a graph of its own, of its branch: when you work in a worktree, pass its name, not the main checkout\'s. Switchboard deletes that graph when the worktree leaves the project.');
   }
-  const named = rows.filter(f => !isCopy(projectId, f));
+  const named = rows.filter(f => f.mode !== PROJECT_MODE && !isCopy(projectId, f));
   if (named.length > 1 && s.crossRepo) {
     lines.push('', 'The folders are linked with each other: `query_graph(project, "MATCH (a)-[r:CROSS_HTTP_CALLS]->(b) RETURN a.name, a.file_path, b.name, properties(r)")` finds the calls one makes into another.');
+    const failed = Object.keys(linkErrors(projectId)).filter(p => rows.some(f => f.path === p));
+    if (failed.length) {
+      lines.push(`The last link could not read ${failed.map(p => `\`${p}\``).join(', ')}: calls from there into the other folders may be missing, so look for them with \`search_code\` too.`);
+    }
   }
   return lines.join('\n') + '\n';
 }
@@ -1328,7 +1935,18 @@ module.exports = {
   startWatching,
   stopWatching,
   deleteIndex,
+  deleteInnerGraph,
+  knowledgeFolders,
+  PROJECT_MODE,
   projectCreated,
+  projectDeleted,
+  sessionEnded,
+  refreshProjectFolders,
+  reconcileExclusions,
+  foldersToLeaveOut,
+  ignorePattern,
+  modules,
+  findModules,
   folderChanged,
   forgetFolder,
   sweepOrphans,

@@ -192,6 +192,46 @@ test('index gaps: files read in part with their lines, left out with why', () =>
   assert.deepEqual(KM.indexGaps(null).partial, []);
 });
 
+test('index gaps with full diagnostics: whole counts beside the rows listed, folders by name, files by folder', () => {
+  const dirs = ['.agents', '.claude', '.git', 'backend/.claude', 'backend/src/.claude', 'frontend/.claude', 'frontend/supabase/.claude', 'frontend/src/hooks/.claude', 'frontend/supabase/migrations/.claude', 'frontend/supabase/functions/.claude', 'node_modules'];
+  const partial = [
+    { path: 'backend/script/run.sh', error_ranges: '361-361' },
+    { path: 'frontend/src/a.test.tsx', error_ranges: '11-12' },
+    { path: 'frontend/supabase/migrations/1.sql', error_ranges: '1-40' },
+    { path: 'top.sql', error_ranges: '3-3' },
+  ];
+  const g = KM.indexGaps({
+    parse_partial: { files: partial, count: 410, truncated: false },
+    parse_unusable: { files: [], count: 0 },
+    not_indexed: { dirs, dirs_count: dirs.length, files: [{ path: '.DS_Store', reason: 'gitignore' }, { path: 'a.png', reason: 'binary' }, { path: 'b.png', reason: 'binary' }], files_count: 1345, truncated: true },
+  });
+  assert.deepEqual(g.counts, { partial: 410, unusable: 0, skipped: 0, notIndexed: 1345, notIndexedDirs: 11 });
+  assert.deepEqual(g.listed, { partial: 4, unusable: 0, skipped: 0, notIndexed: 3, notIndexedDirs: 11 });
+  assert.deepEqual(g.complete, { partial: false, unusable: true, skipped: true, notIndexed: false, notIndexedDirs: true });
+  assert.equal(g.truncated, true);
+  // .claude is one rule in eight places, not a folder left out in one module only.
+  assert.deepEqual(g.dirsByName[0], { name: '.claude', count: 8, where: ['.', 'backend', 'backend/src', 'frontend', 'frontend/supabase', 'frontend/src/hooks', 'frontend/supabase/migrations', 'frontend/supabase/functions'] });
+  assert.deepEqual(g.dirsByName.slice(1).map(x => [x.name, x.count]), [['.agents', 1], ['.git', 1], ['node_modules', 1]]);
+  assert.deepEqual(g.partialByFolder, [{ folder: 'frontend', count: 2 }, { folder: '.', count: 1 }, { folder: 'backend', count: 1 }]);
+  assert.deepEqual(g.reasons, [{ reason: 'binary', count: 2 }, { reason: 'gitignore', count: 1 }]);
+  // A count CBM leaves out is never below the rows it sent.
+  assert.equal(KM.indexGaps({ parse_partial: { files: partial } }).counts.partial, 4);
+  // Directories may come as rows.
+  assert.deepEqual(KM.indexGaps({ not_indexed: { dirs: [{ path: 'x/.claude' }] } }).dirsByName, [{ name: '.claude', count: 1, where: ['x'] }]);
+});
+
+test('modules: each repository inside a folder, with where its code is', () => {
+  const m = KM.modulesModel({ modules: [
+    { path: '/w/p/libs/a', rel: 'libs/a', kind: 'submodule', state: 'in', gaps: 2, graph: 'p' },
+    { path: '/w/p/tools/x', rel: 'tools/x', kind: 'clone', state: 'out', gaps: 0, graph: null },
+    { path: '/w/p/odd', rel: 'odd', kind: 'weird', state: 'nope' },
+  ], limited: true });
+  assert.equal(m.limited, true);
+  assert.deepEqual(m.modules.map(x => [x.rel, x.kind, x.state, x.gaps]), [['libs/a', 'submodule', 'in', 2], ['tools/x', 'clone', 'out', 0], ['odd', 'clone', 'unknown', 0]]);
+  assert.match(KM.MODULE_STATE_TEXT.out, /no graph/);
+  assert.deepEqual(KM.modulesModel(null), { modules: [], limited: false });
+});
+
 test('query tables and cells', () => {
   const q = KM.queryTable({ columns: ['f.name', 'n'], rows: [['main', 3], ['x', { a: 1 }]], total: 2, has_more: false });
   assert.deepEqual(q.columns, ['f.name', 'n']);

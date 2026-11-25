@@ -17,19 +17,30 @@ export function impactArgs({ against, ref = '', scope = 'impact', depth = 2 }: {
   return args;
 }
 
-/** The attached folder the tab shows: the one picked if still attached, else the first indexed one, else the first. */
-export function chooseFolder(folders: { path: string; indexed?: boolean }[], picked: string | undefined): string | null {
+/**
+ * The folder the tab shows: the one picked if still there, else the first
+ * attached folder with a graph (the code), else the project folder's graph,
+ * else the first attached folder, else the first.
+ */
+export function chooseFolder(folders: { path: string; indexed?: boolean; mode?: string }[], picked: string | undefined): string | null {
   if (picked && folders.some((f) => f.path === picked)) return picked;
-  return folders.find((f) => f.indexed)?.path ?? folders[0]?.path ?? null;
+  const attached = folders.filter((f) => f.mode !== 'project');
+  return (attached.find((f) => f.indexed) ?? folders.find((f) => f.indexed) ?? attached[0] ?? folders[0])?.path ?? null;
 }
 
 type FolderLike = { path: string; mode?: string; sourcePath?: string | null; branch?: string | null };
 
 const lastPart = (p: string) => p.split('/').filter(Boolean).pop() || p;
 
-/** A folder's name in the tab: its last part, and "worktree" for a worktree. */
+/** A folder's name in the tab: "Project folder" for the project's own, else its last part, and "worktree" for a worktree. */
 export function folderLabel(f: FolderLike): string {
+  if (f.mode === 'project') return 'Project folder';
   return `${lastPart(f.path)}${f.mode === 'worktree' ? ' · worktree' : ''}`;
+}
+
+/** The folders "Link now" links: the attached ones, not the project folder. */
+export function linkableFolders<T extends FolderLike>(folders: T[]): T[] {
+  return folders.filter((f) => f.mode !== 'project');
 }
 
 /** What a worktree is a checkout of, and what happens to its graph; null for any other folder. */

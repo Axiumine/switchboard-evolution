@@ -880,11 +880,10 @@ const knowledge = require('./knowledge');
 const cbmClient = createCbmClient({
   locate: () => cbmLocator.locateCbm({ configured: knowledge.globalSettings().binaryPath }),
   env: () => buildPtyEnv(process.env),
-  cwd: () => {
-    const dir = path.join(app.getPath('userData'), 'cbm');
-    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-    return dir;
-  },
+  // CBM indexes the folder an MCP session starts in (auto_index). The app's own
+  // session starts in the home folder, which CBM never indexes, so no graph of
+  // an app folder is made (sessionLaunch still writes its configs in userData/cbm).
+  cwd: () => os.homedir(),
   log,
   clientInfo: { name: 'switchboard-evolution', version: app.getVersion() },
 });
@@ -900,6 +899,8 @@ projects.addBriefSection((id) => knowledge.briefSection(id));
 // as a graph of its own, which it loses when it leaves).
 projects.onProjectCreated((event) => knowledge.projectCreated(event));
 projects.onFolderChange((event) => knowledge.folderChanged(event));
+// A deleted project's folder keeps its files but loses its graph (when no other project has it).
+projects.onProjectDeleted((event) => { knowledge.projectDeleted(event).catch((err) => log.warn('[knowledge] project deleted', err.message)); });
 addSink((channel, args) => {
   if (channel === 'git-graph-repo-changed' && typeof args[0] === 'string') knowledge.scheduleRefresh(args[0]);
 });
@@ -1031,6 +1032,8 @@ ipcMain.handle('knowledge-index', knowledgeGuarded((id, folder, opts) => knowled
 ipcMain.handle('knowledge-index-all', knowledgeGuarded((id, opts) => knowledge.indexAll(id, { mode: knObject(opts).mode })));
 ipcMain.handle('knowledge-link-cross-repo', knowledgeGuarded((id) => knowledge.linkCrossRepo(id)));
 ipcMain.handle('knowledge-delete-index', knowledgeGuarded((id, folder) => knowledge.deleteIndex(id, knPath(folder))));
+ipcMain.handle('knowledge-modules', knowledgeGuarded((id, folder) => knowledge.modules(id, knPath(folder))));
+ipcMain.handle('knowledge-delete-inner-graph', knowledgeGuarded((id, folder, name) => knowledge.deleteInnerGraph(id, knPath(folder), String(name || ''))));
 ipcMain.handle('knowledge-adr', knowledgeGuarded((id, folder, opts) => knowledge.adr(id, knPath(folder), knObject(opts))));
 ipcMain.handle('knowledge-ingest-traces', knowledgeGuarded((id, folder, opts) => knowledge.ingestTraces(id, knPath(folder), knObject(opts))));
 // The traces file comes from this dialog, never as a path from the renderer.
@@ -3050,6 +3053,8 @@ function wireSessionPty(sessionId, session, harness) {
     activeSessions.delete(realId);
     // Clean up the original key too in case transition detection hasn't run yet
     activeSessions.delete(sessionId);
+    // What the session wrote in the project folder (plans, notes) gets into its graph.
+    if (!appIsQuitting && session.projectId) knowledge.sessionEnded(session.projectId);
   });
 }
 
@@ -4087,6 +4092,10 @@ function startScheduleTicker() {
     setTimeout(() => {
       knowledge.sweepOrphans().catch((err) => log.warn('[knowledge] sweep failed', err.message));
       knowledge.applyConfigDefaults().catch((err) => log.warn('[knowledge] could not apply the CBM defaults', err.message));
+      // One file, one graph: the folders inside others leave their graphs; then the project folders are read again.
+      knowledge.reconcileExclusions()
+        .catch((err) => log.warn('[knowledge] exclusions', err.message))
+        .then(() => knowledge.refreshProjectFolders());
     }, 30_000).unref?.();
     // The remote-access switch stays where it was left.
     if (remoteAccessSettings().enabled) startRemoteAccess();

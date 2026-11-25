@@ -195,6 +195,8 @@ contextBridge.exposeInMainWorld('api', {
   knowledgeIndexAll: (id, opts) => ipcRenderer.invoke('knowledge-index-all', id, opts),
   knowledgeLinkCrossRepo: (id) => ipcRenderer.invoke('knowledge-link-cross-repo', id),
   knowledgeDeleteIndex: (id, folder) => ipcRenderer.invoke('knowledge-delete-index', id, folder),
+  knowledgeModules: (id, folder) => ipcRenderer.invoke('knowledge-modules', id, folder),
+  knowledgeDeleteInnerGraph: (id, folder, name) => ipcRenderer.invoke('knowledge-delete-inner-graph', id, folder, name),
   knowledgeAdr: (id, folder, opts) => ipcRenderer.invoke('knowledge-adr', id, folder, opts),
   knowledgeIngestTraces: (id, folder, opts) => ipcRenderer.invoke('knowledge-ingest-traces', id, folder, opts),
   knowledgeImportTracesFile: (id, folder, label) => ipcRenderer.invoke('knowledge-import-traces-file', id, folder, label),

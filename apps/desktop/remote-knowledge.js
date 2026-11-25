@@ -66,6 +66,8 @@ allow('knowledge-index', [isId, isPath, optional(fields({ mode: isMode }))]);
 allow('knowledge-index-all', [isId, optional(fields({ mode: isMode }))]);
 allow('knowledge-link-cross-repo', [isId]);
 allow('knowledge-delete-index', [isId, isPath]);
+allow('knowledge-modules', [isId, isPath]);
+allow('knowledge-delete-inner-graph', [isId, isPath, isText(200)]);
 allow('knowledge-adr', [isId, isPath, optional(ADR_OPTS)]);
 allow('knowledge-ingest-traces', [isId, isPath, fields({ traces: arrayOf(TRACE, 10000), label: isText(100) }, ['traces'])]);
 
