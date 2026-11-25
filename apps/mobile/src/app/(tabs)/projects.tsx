@@ -24,6 +24,7 @@ import { saveOrder } from '@/projects/save-order';
 import { useListUi } from '@/projects/list-ui';
 import { groupProjects, projectRowStats, projectSessions, rollupState, type Project } from '@/projects/model';
 import { openSessionFromTabs } from '@/projects/open-session';
+import { useSessionMemory } from '@/processes/session-memory';
 import { act, useMinute, useProjectPlan, useProjectTree } from '@/projects/queries';
 import { relativeTime, rowState, type Folder, type Session } from '@/sessions/model';
 import { isLive, projectSearchResults, runningAmong } from '@/sessions/search-stop';
@@ -49,6 +50,8 @@ export default function ProjectsScreen() {
   const online = useConnection((s) => s.status.state === 'online');
   const live = useConnection((s) => s.live);
   const notices = useConnection((s) => s.notices);
+  // What each live session uses, at the right of its row, as on the desktop.
+  const memory = useSessionMemory();
   const navigation = useNavigation();
   const tree = useProjectTree();
   const now = useMinute();
@@ -189,6 +192,7 @@ export default function ProjectsScreen() {
             state={rowState(item.session.sessionId, live[item.session.sessionId], notices)}
             showTrack={item.showTrack}
             archived={item.archived}
+            ram={memory.get(item.session.sessionId)}
             onPress={(session) => openSession(session, item.project)}
             onLongPress={setActionsFor}
             handle={ordered}
@@ -221,6 +225,7 @@ export default function ProjectsScreen() {
             <SessionRow
               session={item.session}
               state={rowState(item.session.sessionId, live[item.session.sessionId], notices)}
+              ram={memory.get(item.session.sessionId)}
               onPress={(session) => openSession(session, item.project)}
               onLongPress={setActionsFor}
               onLeaveOut={(session) => leaveOut({ sessionId: session.sessionId })}

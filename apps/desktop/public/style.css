@@ -1153,30 +1153,6 @@ body { display: flex; flex-direction: column; }
   margin-top: 0;
 }
 
-/* The project a session belongs to, before its status: its name, cut short when long. */
-.session-footer .session-project {
-  flex: 0 1 auto;
-  min-width: 24px;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 5px;
-  border-radius: 4px;
-  line-height: 15px;
-  background: rgb(from var(--accent) r g b / 0.14);
-  color: color-mix(in srgb, var(--accent) 60%, white);
-}
-/* Where the line has room, the name gives way so the actions stay beside it,
-   and the row keeps the height of one without a project; a narrow sidebar
-   still sends the actions to the next line. */
-.session-footer { container-type: inline-size; }
-@container (min-width: 260px) {
-  .session-item .session-footer .session-meta:has(.session-project) {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-}
 
 .session-footer .session-actions {
   position: static;
@@ -9361,6 +9337,21 @@ body.tm-window #stats-viewer { position: fixed; inset: 0; display: flex; }
 .session-ram--high { color: #e05070; font-weight: 600; }
 .session-middle { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .session-middle .session-folder { flex: 1 1 auto; }
+/* The project a session belongs to, first on the middle line: its name, cut short when long. */
+.session-middle .session-project {
+  flex: 0 1 auto;
+  min-width: 24px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 15px;
+  background: rgb(from var(--accent) r g b / 0.14);
+  color: color-mix(in srgb, var(--accent) 60%, white);
+}
 .session-middle .session-ram { margin-left: auto; padding-right: 3px; }
 .session-middle--bare:not(.has-ram) { display: none; }
 

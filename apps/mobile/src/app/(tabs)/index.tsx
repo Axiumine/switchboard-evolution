@@ -12,6 +12,7 @@ import { SessionListControls } from '@/components/SessionListControls';
 import { SessionRow } from '@/components/SessionRow';
 import { projectSessions } from '@/projects/model';
 import { openSessionFromTabs } from '@/projects/open-session';
+import { useSessionMemory } from '@/processes/session-memory';
 import { useProjectTree } from '@/projects/queries';
 import { useSessionListPrefs } from '@/sessions/list-prefs';
 import { buildSections, rowState, shortProjectPath, type Folder, type Session } from '@/sessions/model';
@@ -27,6 +28,8 @@ export default function SessionsScreen() {
   const live = useConnection((s) => s.live);
   const notices = useConnection((s) => s.notices);
   const diffs = useConnection((s) => s.diffs);
+  // What each live session uses, at the right of its second line, as on the desktop.
+  const memory = useSessionMemory();
   // A change to review waits for you as much as a question does.
   const reviewing = useMemo(() => new Set(Object.values(diffs).map((d) => d.sessionId)), [diffs]);
   const status = useSessionListPrefs((s) => s.status);
@@ -74,9 +77,10 @@ export default function SessionsScreen() {
         // No folder headers in the flat list, so each row says which folder it is in.
         folder={groupByFolders ? undefined : shortProjectPath(item.projectPath)}
         project={projectOf.get(item.sessionId)?.name}
+        ram={memory.get(item.sessionId)}
       />
     ),
-    [live, notices, reviewing, open, showActions, searching, leaveOutRow, groupByFolders, projectOf],
+    [live, notices, reviewing, open, showActions, searching, leaveOutRow, groupByFolders, projectOf, memory],
   );
 
   const pull = usePullRefresh(() => projects.refetch());

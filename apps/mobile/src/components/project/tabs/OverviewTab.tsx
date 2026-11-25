@@ -11,6 +11,7 @@ import { pinnedSessions } from '@/projects/drawer';
 import { projectSessions, rollupState, scheduleSummary, type Project, type ProjectFolder, type Schedule, type Track } from '@/projects/model';
 import { useOpenSession } from '@/projects/open-session';
 import { pinnedGroup, type OrderGroup } from '@/projects/order';
+import { useSessionMemory } from '@/processes/session-memory';
 import { saveOrder } from '@/projects/save-order';
 import { relativeTime, rowState, shortProjectPath, type Session } from '@/sessions/model';
 import { projectSnoozed, snoozeWakeDescription } from '@/shared/vendor/snooze';
@@ -35,6 +36,8 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
   const pull = usePullRefresh(onRefresh);
   const live = useConnection((s) => s.live);
   const notices = useConnection((s) => s.notices);
+  // What each live session uses, as the desktop's track cards show it.
+  const memory = useSessionMemory();
   const scroll = useTabScroll(project.id, 'overview');
   const [trackActions, setTrackActions] = useState<Track | null>(null);
   const [folderActions, setFolderActions] = useState<ProjectFolder | null>(null);
@@ -50,7 +53,7 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
   const openInTab = useOpenSession();
   const openSession = (session: Session) => openInTab(session.sessionId);
   const sessionRow = (session: Session, handle = false) => (
-    <SessionRow key={session.sessionId} inset session={session} state={rowState(session.sessionId, live[session.sessionId], notices)} onPress={openSession} onLongPress={setSessionActions} handle={handle} />
+    <SessionRow key={session.sessionId} inset session={session} state={rowState(session.sessionId, live[session.sessionId], notices)} ram={memory.get(session.sessionId)} onPress={openSession} onLongPress={setSessionActions} handle={handle} />
   );
   // The pinned ones are listed once, above the tracks.
   const pinned = pinnedSessions(project);

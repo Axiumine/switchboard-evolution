@@ -4,11 +4,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ReorderHandle } from '@/components/reorder/Reorder';
 import { LeaveOutButton } from '@/components/SearchStopBar';
-import { STATE_COLORS } from '@/components/SessionRow';
+import { RamText, StarButton, STATE_COLORS } from '@/components/SessionRow';
 import { markTint, projectInitials, trackTint, type DrawerGroup } from '@/projects/drawer';
 import type { Project, RowStat } from '@/projects/model';
 import { cliLabel, relativeTime, sessionTitle, shortProjectPath, type RowState, type Session } from '@/sessions/model';
-import { starTintColor } from '@/shared/vendor/star-tints';
 import { colors, spacing } from '@/theme';
 
 // The rows of the Projects tab, drawn as the desktop's sidebar draws them
@@ -225,11 +224,11 @@ export function FolderHead({ projectPath, count, open, top, onPress, onPlus }: {
 const STATE_WORDS: Partial<Record<RowState, string>> = { attention: 'waiting for you', busy: 'working', subagent: 'a subagent is working', unread: 'unread', running: 'running' };
 
 /**
- * A session in a drawer, as the desktop's: its title over one line with its
- * state dot (when it runs or waits), its track, the CLI, when it last moved
- * and how many messages.
+ * A session in a drawer, as the desktop's: its title and star, over one line
+ * with its state dot (when it runs or waits), its track, the CLI, when it
+ * last moved, how many messages, and at its right what it uses.
  */
-export const DrawerSessionRow = memo(function DrawerSessionRow({ session, project, here, state, showTrack, archived, onPress, onLongPress, handle }: {
+export const DrawerSessionRow = memo(function DrawerSessionRow({ session, project, here, state, showTrack, archived, ram, onPress, onLongPress, handle }: {
   session: Session;
   project: Project | null;
   /** The session open on the right: highlighted, as the desktop marks the one on screen. */
@@ -237,6 +236,8 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
   state: RowState;
   showTrack: boolean;
   archived?: boolean;
+  /** What the live session uses, in bytes. */
+  ram?: number;
   onPress: (session: Session) => void;
   onLongPress: (session: Session) => void;
   /** The drag handle of a pinned one, inside a ReorderItem. */
@@ -258,7 +259,10 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
         accessibilityLabel={`${sessionTitle(session)}, ${[...words, session.starred ? 'pinned' : null].filter(Boolean).join(', ')}`}
       >
         <View style={styles.sessionText}>
-          <Text style={[styles.sessionTitle, state === 'unread' && styles.unread]} numberOfLines={1}>{sessionTitle(session)}</Text>
+          <View style={styles.sessionLine}>
+            <Text style={[styles.sessionTitle, state === 'unread' && styles.unread]} numberOfLines={1}>{sessionTitle(session)}</Text>
+            <StarButton session={session} />
+          </View>
           <View style={styles.sessionMeta}>
             {lit ? <View style={[styles.smallDot, { backgroundColor: STATE_COLORS[state] }]} /> : null}
             {showTrack && tint ? (
@@ -268,10 +272,10 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
               {[lit ? STATE_WORDS[state] : null, cliLabel(session), when].filter(Boolean).join(' · ')}
               {session.messageCount ? ` · ${session.messageCount} msgs` : ''}
             </Text>
+            <View style={styles.flex} />
+            <RamText bytes={ram} />
           </View>
         </View>
-        {/* At the right of the row, as on the Sessions tab, in the session's own color. */}
-        {session.starred ? <Text style={[styles.star, { color: starTintColor(session.starTint, session.sessionId) }]}>★</Text> : null}
         {handle ? <ReorderHandle label={sessionTitle(session)} /> : null}
       </Pressable>
     </Card>
@@ -335,11 +339,11 @@ const styles = StyleSheet.create({
   session: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm + 2, paddingVertical: 8, borderRadius: 7, minHeight: 48 },
   sessionText: { flex: 1, minWidth: 0, gap: 3 },
   here: { backgroundColor: 'rgba(128,136,255,0.16)', borderLeftWidth: 2, borderLeftColor: colors.accent },
-  sessionTitle: { color: '#c8c8dc', fontSize: 14.5 },
+  sessionLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sessionTitle: { flex: 1, color: '#c8c8dc', fontSize: 14.5 },
   unread: { color: colors.unread, fontWeight: '600' },
   sessionMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, overflow: 'hidden' },
   smallDot: { width: 7, height: 7, borderRadius: 4 },
   tag: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, overflow: 'hidden', maxWidth: 120 },
   sessionMetaText: { color: '#7a7a90', fontSize: 11.5, flexShrink: 1 },
-  star: { fontSize: 14, paddingStart: 2 },
 });
