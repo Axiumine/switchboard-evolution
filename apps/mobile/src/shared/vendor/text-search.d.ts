@@ -23,6 +23,9 @@ export function replacementFor(
   replace: string,
   context?: { line: string; column: number } | null,
 ): string;
+/** $1, $<name>, $&, \n, \t, \\ and \u \l \U \L expanded from a regular expression's match. */
 export function expandReplacement(replace: string, match: RegExpExecArray): string;
+/** The replacement in the case of the matched text (VS Code's Preserve Case). */
+export function preserveCase(matched: string, replacement: string): string;
 /** One test of a relative path ('/' separators) for a comma-separated glob list, or null for an empty list. */
 export function globListMatcher(list: string): ((relPath: string) => boolean) | null;
