@@ -10,8 +10,9 @@ import type { SessionView } from './tabs';
 
 // Opening a session that belongs to a project keeps you in the project, as on
 // the desktop: the project page shows it on its Session tab, under its header
-// and tabs. The Sessions tab, the Task Manager and notices still open the
-// session on its own screen (on a Surface Duo, chat and terminal side by side).
+// and tabs, from the Projects and Sessions tabs alike. The Task Manager and
+// notices still open the session on its own screen (on a Surface Duo, chat and
+// terminal side by side).
 
 export const PROJECT_ROUTE = 'project/[id]/index';
 
@@ -93,8 +94,9 @@ export function useOpenSession(): (sessionId: string, view?: SessionView) => voi
  * on the right: on its project's Session tab when it has a project, else on
  * its own screen, never across both screens unless asked for (Split screen).
  * Beside the sidebar of a wide window (DeX) it opens on the right the same
- * way, and the sidebar stays on its tab. On a phone a session of the Sessions
- * tab opens on its own screen, as before.
+ * way, and the sidebar stays on its tab. On a phone the Projects and Sessions
+ * tabs ask for `inProject`: a project's session opens on its project's page,
+ * which Back leaves for the list.
  */
 export function openSessionFromTabs(
   navigation: Navigator | undefined,

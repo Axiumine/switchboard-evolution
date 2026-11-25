@@ -50,16 +50,16 @@ export default function SessionsScreen() {
   const shown = useMemo(() => sections.flatMap((s) => s.data), [sections]);
   const running = useMemo(() => runningAmong(shown, (id) => isLive(live[id])), [shown, live]);
 
-  // Which project each session belongs to: on a Surface Duo a session opens on its project's Session tab.
+  // Which project each session belongs to: its row names it, and it opens on its project's Session tab.
   const navigation = useNavigation();
   const tree = useProjectTree();
   const projectOf = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const project of tree.data?.projects || []) for (const s of projectSessions(project)) map.set(s.sessionId, project.id);
+    const map = new Map<string, { id: string; name: string }>();
+    for (const project of tree.data?.projects || []) for (const s of projectSessions(project)) map.set(s.sessionId, { id: project.id, name: project.name });
     return map;
   }, [tree.data]);
   const open = useCallback((session: Session) => {
-    openSessionFromTabs(navigation, session, projectOf.get(session.sessionId) ?? session.projectId);
+    openSessionFromTabs(navigation, session, projectOf.get(session.sessionId)?.id ?? session.projectId, { inProject: true });
   }, [navigation, projectOf]);
   const showActions = useCallback((session: Session) => setSelected(session), []);
   const leaveOutRow = useCallback((session: Session) => leaveOut({ sessionId: session.sessionId }), [leaveOut]);
@@ -73,9 +73,10 @@ export default function SessionsScreen() {
         onLeaveOut={searching ? leaveOutRow : undefined}
         // No folder headers in the flat list, so each row says which folder it is in.
         folder={groupByFolders ? undefined : shortProjectPath(item.projectPath)}
+        project={projectOf.get(item.sessionId)?.name}
       />
     ),
-    [live, notices, reviewing, open, showActions, searching, leaveOutRow, groupByFolders],
+    [live, notices, reviewing, open, showActions, searching, leaveOutRow, groupByFolders, projectOf],
   );
 
   const pull = usePullRefresh(() => projects.refetch());

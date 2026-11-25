@@ -1395,8 +1395,9 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
       }
       return;
     }
-    // Leaving the Projects tab takes its page and Session tab with it.
-    if (activeTab === 'projects' && typeof leaveProjectViews === 'function') leaveProjectViews();
+    // Leaving the Projects tab takes its page and Session tab with it; so does
+    // leaving the Sessions tab, where a project's session opens on that tab too.
+    if ((activeTab === 'projects' || activeTab === 'sessions') && typeof leaveProjectViews === 'function') leaveProjectViews();
     activeTab = tabName;
     if (REMEMBERED_TABS.includes(tabName)) { try { localStorage.setItem(LAST_TAB_KEY, tabName); } catch {} }
     document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));

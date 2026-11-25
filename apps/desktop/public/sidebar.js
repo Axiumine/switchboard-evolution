@@ -869,6 +869,15 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   timeEl.className = 'session-time';
   timeEl.title = session.sessionId;
   timeEl.textContent = timeStr + (session.messageCount ? ' \u00b7 ' + session.messageCount + ' msgs' : '');
+  // A session of a project names it first, before its status (the CLI mark and its dot).
+  const owner = typeof projectForSession === 'function' ? projectForSession(session)?.project : null;
+  if (owner) {
+    const projectEl = document.createElement('span');
+    projectEl.className = 'session-project';
+    projectEl.textContent = owner.name;
+    projectEl.title = `Project: ${owner.name}`;
+    metaEl.append(projectEl);
+  }
   metaEl.append(mark, timeEl);
   // Started by a scheduled task: a clock, with which one and when in its tooltip.
   if (session.scheduleId && typeof scheduleChipHtml === 'function') {

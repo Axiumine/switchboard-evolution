@@ -1590,7 +1590,7 @@ function showProjectHome() {
   showRememberedProjectView();
 }
 
-/** Called when the user leaves the Projects tab. */
+/** Called when the user leaves the Projects tab, or the Sessions tab, which shows a project's page around its sessions. */
 function leaveProjectViews() {
   if (projectViewer) projectViewer.style.display = 'none';
   leaveWorking();
@@ -1608,7 +1608,8 @@ function leaveProjectViews() {
  */
 function refreshProjectViews({ reason = 'project' } = {}) {
   renderProjectList();
-  if (activeTab !== 'projects') return;
+  // The Sessions tab shows a project's page too, around a session of the project (onSessionShown).
+  if (activeTab !== 'projects' && activeTab !== 'sessions') return;
   if (projectsUi.working) {
     const session = activeSessionId ? sessionMap.get(activeSessionId) : null;
     const info = projectForSession(session);
@@ -1733,9 +1734,13 @@ function applySessionStatus(project) {
 
 // --- Session hook: keep the project around the terminal ---
 
-/** Called at the end of showSession(). Opens the project's Session tab, or leaves it. */
+/**
+ * Called at the end of showSession(). Opens the project's Session tab, or
+ * leaves it. From the Sessions tab too: a project's session opens under its
+ * project's header and tabs, and the sidebar stays on its list.
+ */
 function onSessionShown(sessionId) {
-  if (activeTab !== 'projects') return;
+  if (activeTab !== 'projects' && activeTab !== 'sessions') return;
   if (gridViewActive) { leaveWorking(); return; }
   const session = sessionMap.get(sessionId);
   const info = projectForSession(session);
@@ -1745,7 +1750,7 @@ function onSessionShown(sessionId) {
 
 /** Messages use the working layout too, including sessions with no live PTY. */
 function onMessagesShown(session) {
-  if (activeTab !== 'projects') return;
+  if (activeTab !== 'projects' && activeTab !== 'sessions') return;
   const info = projectForSession(session);
   if (info) enterWorking(info.project, session);
 }
@@ -2834,7 +2839,7 @@ window.api.onProjectPlanChanged?.((projectId) => {
   loadProjectFiles(project, { force: true }).then(() => {
     // The row and the drawer count plan phases and todos for any project, selected or not.
     refreshProjectCounts(projectId);
-    if (selectedProject()?.id !== projectId || activeTab !== 'projects') return;
+    if (selectedProject()?.id !== projectId || (activeTab !== 'projects' && activeTab !== 'sessions')) return;
     if (projectsUi.working) { renderPlanMeta(project); return; }
     if (projectViewer && projectViewer.style.display !== 'none') {
       if (editingInPage()) return;

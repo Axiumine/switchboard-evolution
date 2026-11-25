@@ -32,12 +32,14 @@ type Props = {
   onLeaveOut?: (session: Session) => void;
   /** The folder it runs in, short ("Code/switchboard"): shown in a list that has no folder headers. */
   folder?: string;
+  /** The name of the project it belongs to: first on the line under the title, before its state. */
+  project?: string;
   /** The drag handle of a pinned one, inside a ReorderItem. */
   handle?: boolean;
 };
 
-/** One session: its state dot, title, and the CLI, age and size underneath. */
-export const SessionRow = memo(function SessionRow({ session, state, onPress, onLongPress, inset, onLeaveOut, folder, handle }: Props) {
+/** One session: its state dot, title, and its project, state, CLI, age and size underneath. */
+export const SessionRow = memo(function SessionRow({ session, state, onPress, onLongPress, inset, onLeaveOut, folder, project, handle }: Props) {
   // The folder comes after the age, so a long path is what gets cut short.
   const meta = [cliLabel(session), relativeTime(session.modified || session.created)];
   if (folder) meta.push(folder);
@@ -49,7 +51,7 @@ export const SessionRow = memo(function SessionRow({ session, state, onPress, on
       onLongPress={() => onLongPress(session)}
       style={({ pressed }) => [styles.row, inset && styles.inset, pressed && styles.pressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${sessionTitle(session)}, ${meta.join(', ')}${session.starred ? ', pinned' : ''}`}
+      accessibilityLabel={`${sessionTitle(session)}, ${project ? `project ${project}, ` : ''}${meta.join(', ')}${session.starred ? ', pinned' : ''}`}
     >
       <View style={[styles.dot, { backgroundColor: STATE_COLORS[state], borderColor: state === 'idle' ? colors.border : STATE_COLORS[state] }]} />
       <View style={styles.text}>
@@ -57,6 +59,8 @@ export const SessionRow = memo(function SessionRow({ session, state, onPress, on
           {sessionTitle(session)}
         </Text>
         <Text style={[styles.meta, (state === 'attention' || state === 'unread') && { color: STATE_COLORS[state] }]} numberOfLines={1}>
+          {/* Its project before its state, in the accent, as the desktop's label. */}
+          {project ? <><Text style={styles.project}>{project}</Text>{' · '}</> : null}
           {meta.join(' · ')}
         </Text>
       </View>
@@ -86,5 +90,6 @@ const styles = StyleSheet.create({
   // Finished while nobody was looking, as the desktop shows it.
   unread: { color: colors.unread, fontWeight: '600' },
   meta: { color: colors.textFaint, fontSize: 12 },
+  project: { color: colors.accent, fontWeight: '600' },
   star: { fontSize: 14 },
 });
