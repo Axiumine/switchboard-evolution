@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.15.1 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.16.0 (November 2026).
 
 ## At a glance
 
@@ -38,13 +38,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 23 Nov | Switchboard Evolution 1.14.1 | The Plans tab groups its plans by project, folder or date, filters them by project, folder, date or session, and sorts them by edit, creation or title. A session row in the Projects tab can be forked, and the Task Manager and Global settings tabs light up like the others. |
 | 24 Nov | Switchboard Evolution 1.15.0 | An Actions view in the Git tab, as on GitHub, on the desktop and the phone: the workflows and their runs with filters, Run workflow with its inputs, a run's jobs graph, annotations and artifacts, each job's steps and logs, re-run, cancel and delete, and Caches, Runners and Deployments. A worktree in a project with the code graph on gets a graph of its own, and new projects start with the code graph on. |
 | 24 Nov | Switchboard Evolution 1.15.1 | A star on each project of the sidebar's Projects tab: starred projects get a section of their own above Active, on the desktop and the phone. |
+| 25 Nov | Switchboard Evolution 1.16.0 | Several repositories at once in the Git tab: History as one table of their commits by date with a Repository column, Pull Requests as one list with each repository's name after the number, and Worktrees filtered by repository, each repository in its own color, on the desktop and the phone. The Git tab opens on History, the branch each repository is on shows in its toolbar, the project header gives the folder chips the whole width, and opening a folder, the file manager, a default application or a window each have their own icon. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.15.1, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.16.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
