@@ -77,3 +77,84 @@ test('a read-only viewer\'s text can take the focus, for those keys', async () =
   assert.ok(attributes(true).some(a => a.tabindex === '0'));
   assert.ok(!attributes(false).some(a => a.tabindex === '0'));
 });
+
+// ── Column selection from the keyboard (Shift+Alt+Cmd+Arrows) ──────
+
+/** An editor state with the cursors' extensions, and a target the commands can run on. */
+async function columnEditor(doc, ranges, { tabSize = 4 } = {}) {
+  const { multipleCursors } = await editorModule('cursors');
+  const { EditorState, EditorSelection } = await codemirror();
+  let state = EditorState.create({
+    doc,
+    selection: EditorSelection.create(ranges.map(([from, to = from]) => EditorSelection.range(from, to))),
+    extensions: [multipleCursors(), EditorState.tabSize.of(tabSize)],
+  });
+  const target = { get state() { return state; }, dispatch: (tr) => { state = tr.state; } };
+  const run = async (...names) => {
+    const commands = await editorModule('cursors');
+    for (const name of names) assert.equal(commands[name](target), true, name);
+  };
+  const ranges_ = () => state.selection.ranges.map(r => [r.anchor, r.head]);
+  return { target, run, ranges: ranges_, main: () => state.selection.mainIndex, move: (pos) => { state = state.update({ selection: { anchor: pos } }).state; } };
+}
+
+test('Shift+Alt+Cmd+Down adds a cursor below in the same column, line by line; a short line gets one at its end', async () => {
+  // Lines start at 0, 5, 10 and 13; "ij" is shorter than the column.
+  const ed = await columnEditor('abcd\nefgh\nij\nklmn', [[3]]);
+  await ed.run('columnSelectDown');
+  assert.deepEqual(ed.ranges(), [[3, 3], [8, 8]]);
+  await ed.run('columnSelectDown', 'columnSelectDown');
+  assert.deepEqual(ed.ranges(), [[3, 3], [8, 8], [12, 12], [16, 16]]);
+  assert.equal(ed.main(), 3, 'the newest cursor is the main one, so the editor follows it');
+});
+
+test('Up shrinks the box back, and goes on above where it started', async () => {
+  const ed = await columnEditor('abcd\nefgh\nijkl', [[6]]);
+  await ed.run('columnSelectDown', 'columnSelectUp');
+  assert.deepEqual(ed.ranges(), [[6, 6]]);
+  await ed.run('columnSelectUp');
+  assert.deepEqual(ed.ranges(), [[1, 1], [6, 6]]);
+  assert.equal(ed.main(), 0);
+});
+
+test('Left and Right widen the box into a selection on every line', async () => {
+  const ed = await columnEditor('abcd\nefgh\nij', [[1]]);
+  await ed.run('columnSelectDown', 'columnSelectDown', 'columnSelectRight', 'columnSelectRight');
+  assert.deepEqual(ed.ranges(), [[1, 3], [6, 8], [11, 12]]);
+  await ed.run('columnSelectLeft', 'columnSelectLeft', 'columnSelectLeft');
+  assert.deepEqual(ed.ranges(), [[1, 0], [6, 5], [11, 10]]);
+});
+
+test('the box keeps visual columns across tabs', async () => {
+  // "\tx": the x is at column 4; the line below has four spaces before its y.
+  const ed = await columnEditor('\tx\n    y', [[1]]);
+  await ed.run('columnSelectDown');
+  assert.deepEqual(ed.ranges(), [[1, 1], [7, 7]]);
+});
+
+test('moving the cursor another way starts a new box', async () => {
+  const ed = await columnEditor('abcd\nefgh\nijkl\nmnop', [[0]]);
+  await ed.run('columnSelectDown');
+  ed.move(12);
+  await ed.run('columnSelectDown');
+  assert.deepEqual(ed.ranges(), [[12, 12], [17, 17]]);
+});
+
+test('PageDown takes a page of lines at once, and stops at the last line', async () => {
+  const doc = Array.from({ length: 5 }, (_, i) => `line${i}`).join('\n');
+  const ed = await columnEditor(doc, [[2]]);
+  await ed.run('columnSelectPageDown');
+  assert.equal(ed.ranges().length, 5);
+});
+
+test('the column keys are VS Code\'s, in every editor, read-only or not', async () => {
+  const { multiCursorKeymap } = await editorModule('cursors');
+  const { editorExtensions } = await editorModule('core');
+  const { EditorState, keymap } = await codemirror();
+  const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].map(k => `Mod-Shift-Alt-${k}`);
+  for (const key of keys) assert.ok(multiCursorKeymap.some(b => b.key === key), key);
+  for (const readOnly of [false, true]) {
+    const bindings = EditorState.create({ extensions: editorExtensions({ filename: 'a.md', readOnly }).extensions }).facet(keymap).flat();
+    for (const key of keys) assert.ok(bindings.some(b => b.key === key), `${key}, readOnly ${readOnly}`);
+  }
+});

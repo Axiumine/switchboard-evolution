@@ -1,7 +1,7 @@
 // The editor's right-click menu, as VS Code's: going to a symbol or a line,
 // finding, every occurrence, the clipboard, and (in an editable editor)
-// comments, the commands on lines and on case; folding everything; and
-// showing whitespace. A right-click outside the selection moves the cursor
+// comments, the commands on lines and on case; folding everything; and the
+// editor's preferences (minimap, sticky scroll, whitespace, Vim). A right-click outside the selection moves the cursor
 // there first.
 import { EditorView } from '@codemirror/view';
 import { EditorSelection } from '@codemirror/state';
@@ -15,7 +15,12 @@ import {
   sortLinesAscending, sortLinesDescending, deleteDuplicateLines, trimTrailingWhitespace, joinLines,
   upperCase, lowerCase, toTitleCase,
 } from './text-commands.mjs';
-import { showsWhitespace, setShowWhitespace } from './indentation.mjs';
+import { PREFS, readPref, togglePref, editorContext } from './prefs.mjs';
+import { goToDefinition, renameSymbol, linkOf } from './lsp-hook.mjs';
+import { formatDocument, formatSelection } from './format.mjs';
+
+/** The preferences at the foot of the menu, with a tick when on, in this order. */
+const MENU_PREFS = ['minimap', 'stickyScroll', 'whitespace', 'vim'];
 
 const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -54,7 +59,12 @@ function menuItems(view) {
   const editable = view.state.facet(EditorView.editable) && !view.state.readOnly;
   const hasSelection = view.state.selection.ranges.some(r => !r.empty);
   const run = command => () => { command(view); view.focus(); };
+  const onDisk = !!view.state.facet(editorContext).file;
+  const link = linkOf(view);
+  const canRename = editable && !!(link && link.connection && link.connection.canRename());
   const items = [
+    onDisk ? { label: 'Go to Definition', hint: 'F12', run: () => goToDefinition(view) } : null,
+    canRename ? { label: 'Rename Symbol', hint: 'F2', run: () => renameSymbol(view) } : null,
     { label: 'Go to Symbol…', hint: keyHint('⇧⌘O', 'Ctrl+Shift+O'), run: () => openSymbolPicker(view) },
     { label: 'Go to Line…', hint: 'Ctrl+G', run: () => openGotoLine(view) },
     { sep: true },
@@ -68,6 +78,9 @@ function menuItems(view) {
   ];
   if (editable) {
     items.push(
+      { sep: true },
+      { label: 'Format Document', hint: keyHint('⇧⌥F', 'Shift+Alt+F'), run: () => formatDocument(view) },
+      { label: 'Format Selection', hint: keyHint('⌘K ⌘F', 'Ctrl+K Ctrl+F'), run: () => formatSelection(view) },
       { sep: true },
       { label: 'Toggle Line Comment', hint: keyHint('⌘/', 'Ctrl+/'), run: run(toggleComment) },
       { label: 'Toggle Block Comment', hint: keyHint('⇧⌥A', 'Shift+Alt+A'), run: run(toggleBlockComment) },
@@ -88,7 +101,7 @@ function menuItems(view) {
     { label: 'Fold All', hint: keyHint('⌘K ⌘0', 'Ctrl+K Ctrl+0'), run: run(foldAll) },
     { label: 'Unfold All', hint: keyHint('⌘K ⌘J', 'Ctrl+K Ctrl+J'), run: run(unfoldAll) },
     { sep: true },
-    { label: 'Show Whitespace', checked: showsWhitespace(view.state), run: () => setShowWhitespace(!showsWhitespace(view.state)) },
+    ...MENU_PREFS.filter(name => PREFS.has(name)).map(name => ({ label: PREFS.get(name).label, checked: readPref(name), run: () => togglePref(name) })),
   );
   return items;
 }

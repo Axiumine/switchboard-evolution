@@ -309,6 +309,12 @@ Every place that shows or edits a file or a piece of code (the Files tab and a f
 | `Cmd+Shift+O` / `Ctrl+Shift+O` | Go to a symbol of the file (functions, classes, headings, keys) |
 | `Cmd+D`, `Cmd+Shift+L` / `Ctrl+D`, `Ctrl+Shift+L` | Add the next occurrence, select every occurrence |
 | `Alt+click`, `Shift+Alt+drag`, `Cmd+Alt+Up/Down` / `Ctrl+Alt+Up/Down`, `Shift+Alt+I` | More cursors: at a click, in a column, above or below, at the end of each selected line |
+| `Shift+Alt+Cmd+Arrows`, `PageUp/PageDown` / `Ctrl+Shift+Alt+Arrows` | Column selection: a cursor (or a selection) on each line of a growing box |
+| `F12`, `Cmd+click` / `F12`, `Ctrl+click` | Go to Definition (the language server's, else the code graph's) |
+| `Ctrl+-`, `Ctrl+Shift+-` / `Alt+Left`, `Alt+Right` | Go Back, Go Forward |
+| `F2` | Rename Symbol (with a language server; files not open are changed after asking) |
+| `Shift+Alt+F` | Format Document |
+| `Cmd+K Cmd+F` / `Ctrl+K Ctrl+F` | Format Selection |
 | `Ctrl+Space` | Suggestions (they also show while typing, except in Markdown) |
 | `Cmd+/`, `Shift+Alt+A` | Toggle a line comment, a block comment |
 | `Ctrl+J` (macOS) | Join lines |
@@ -316,7 +322,9 @@ Every place that shows or edits a file or a piece of code (the Files tab and a f
 | `Cmd+K Cmd+0`, `Cmd+K Cmd+J` / `Ctrl+K Ctrl+0`, `Ctrl+K Ctrl+J` | Fold all, unfold all |
 | `Cmd+S` / `Ctrl+S` | Save |
 
-The editor's right-click menu also sorts lines, deletes duplicate lines, and changes case. Its status bar shows the cursor's line and column, the indentation (found in the file; change it or convert it there), the line breaks (a CRLF file stays CRLF), the encoding and the language (change it there), and switches whitespace on and off. A file with unsaved changes has a dot after its name, and showing another file asks whether to save them. When an agent changes the file on disk, the editor takes the change in place, keeping the cursor; with unsaved changes it asks instead: Reload, Keep Mine or Compare.
+The editor's right-click menu also sorts lines, deletes duplicate lines, and changes case. Its status bar shows the cursor's line and column, the indentation (found in the file; change it or convert it there), the line breaks (a CRLF file stays CRLF), the encoding and the language (change it there), and switches whitespace, the minimap and sticky scroll on and off (the right-click menu and Settings › Editor do too, with Vim mode and the language servers). Besides the languages built in, it colours PHP, C#, Ruby, SCSS, Sass, Less, Vue, Svelte, Liquid, Jinja, Elixir, Terraform, Zig, Kotlin, Scala, Dart, Objective-C, Lua, Swift, Haskell, OCaml, F#, PowerShell, Erlang, Julia, R, Groovy and Perl, loading each the first time a file of it is shown. With Vim mode on, the status bar shows the mode and `:w` saves; the app's find, save, go to line and go to symbol keys stay the app's.
+
+The editor uses the language servers installed on the computer (TypeScript, Python, Go, Rust, C/C++, Java, Kotlin, C#, Ruby, PHP, Swift and others; nothing is downloaded) for the files of a project: each project's Settings tab lists them, turned on for the languages found when a folder joins the project, with how to install the missing ones. A server starts with the first file of its language and stops 5 minutes after the last one closes. One switch, Language servers in Settings › Editor (or the server's item in the status bar), turns them all off: none starts, in any project, and the running ones stop. They give hover, errors, suggestions, Go to Definition and Rename, and format the languages Prettier does not; Format Document uses the project's own Prettier when it has one, else the app's. JSON and YAML syntax errors show without a server. A file with unsaved changes has a dot after its name, and showing another file asks whether to save them. When an agent changes the file on disk, the editor takes the change in place, keeping the cursor; with unsaved changes it asks instead: Reload, Keep Mine or Compare.
 
 ## Development
 

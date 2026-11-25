@@ -124,6 +124,8 @@ function ensureProjectEditor() {
   const panel = new ViewerPanel(host, {
     copyPath: true, copyContent: true, language: 'auto', storageKey: 'markdownPreviewMode',
     onSave: (filePath, content) => saveProjectEditorFile(projectEditor, filePath, content),
+    // Go to Definition into another file of the same folder: opened as from the explorer.
+    openFile: (filePath, at) => openProjectEditorLocation(projectEditor, filePath, at),
   });
   projectEditor = { host, panel, projectId: null, root: null, rel: null };
   return projectEditor;
@@ -249,6 +251,20 @@ async function openFileInProjectEditor(project, rel, { allowExternal = false, ro
   ed.rel = rel;
   host.replaceChildren(ed.host);
   ed.panel.open(editorTitle(project, root, rel), result.filePath || filePath, result.content, result);
+}
+
+/**
+ * A file of the folder the editor `ed` shows, opened as the explorer opens it,
+ * at { line, column }. Another folder's file: false, and the editor opens it itself.
+ */
+async function openProjectEditorLocation(ed, filePath, { line, column } = {}) {
+  const project = selectedProject();
+  const root = ed.root;
+  const sep = root && root.includes('\\') && !root.includes('/') ? '\\' : '/';
+  if (!project || project.id !== ed.projectId || !root || !filePath.startsWith(root + sep)) return false;
+  await openFileInProjectEditor(project, filePath.slice(root.length + 1).split(sep).join('/'), { root });
+  if (ed.panel.filePath === filePath && line) ed.panel.goToLocation(line, column);
+  return true;
 }
 
 /** "Open to the Side": the file in a second editor beside the first. */

@@ -197,6 +197,32 @@ test('createProject refuses a blank name, a missing folder, an existing root fol
   } finally { t.cleanup(); }
 });
 
+test('the note is made empty; a note still holding only the title it was once made with is emptied', async () => {
+  const t = setup();
+  try {
+    const { project } = await projects.createProject({ name: 'Pad' });
+    const note = path.join(project.root, 'note.md');
+
+    const made = projects.createProjectFile(project.id, 'note.md');
+    assert.deepEqual(made, { ok: true, filePath: note, created: true });
+    assert.equal(fs.readFileSync(note, 'utf8'), '', 'nothing written in a new note');
+
+    // A note made by an older version: the generated title and nothing else.
+    fs.writeFileSync(note, '# Pad note\n\n');
+    assert.deepEqual(projects.createProjectFile(project.id, 'note.md'), { ok: true, filePath: note, created: false });
+    assert.equal(fs.readFileSync(note, 'utf8'), '', 'the old generated title is taken away');
+
+    // Anything the user wrote stays, the old title included.
+    fs.writeFileSync(note, '# Pad note\n\nCall the printer.\n');
+    projects.createProjectFile(project.id, 'note.md');
+    assert.equal(fs.readFileSync(note, 'utf8'), '# Pad note\n\nCall the printer.\n');
+
+    // The agent's files keep their title.
+    projects.createProjectFile(project.id, 'todos.md');
+    assert.equal(fs.readFileSync(path.join(project.root, 'todos.md'), 'utf8'), '# Pad todos\n\n');
+  } finally { t.cleanup(); }
+});
+
 test('snooze: a wake time in the future, kept as an overlay on an active project', async () => {
   const t = setup();
   try {

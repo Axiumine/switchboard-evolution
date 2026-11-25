@@ -1945,7 +1945,10 @@ button.cm-status-item { cursor: pointer; }
 button.cm-status-item:hover:not(:disabled) { background: rgba(255,255,255,0.08); color: #e6e6f4; }
 button.cm-status-item:disabled { cursor: default; }
 .cm-status-whitespace { font-size: 12px; }
-.cm-status-whitespace.on { color: var(--accent); }
+/* The editor's preferences switched from the bar: whitespace, minimap, sticky scroll. */
+.cm-status-toggle { display: inline-flex; align-items: center; }
+.cm-status-toggle svg { display: block; }
+.cm-status-toggle.on { color: var(--accent); }
 
 /* Go to Symbol: a list over the top of the editor, filtered as you type. */
 .cm-symbol-picker {
@@ -8321,6 +8324,14 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
 .ws-saved.on { opacity: 1; }
 
 .ws-check--switch { position: relative; cursor: pointer; }
+/* A project's language servers (project-lsp-settings.js). */
+.ws-lsp-row .ws-row-v { gap: 8px; }
+.ws-lsp-cmd { font-size: 11px; color: rgba(255,255,255,0.55); }
+.ws-lsp-missing { font-size: 11px; color: rgba(255,255,255,0.4); }
+.ws-lsp-note { color: #f1c27d; }
+.ws-lsp-off { display: flex; align-items: center; gap: 12px; color: #f1c27d; }
+.ws-lsp-off span { flex: 1; }
+.ws-lsp-others > summary { padding: 8px 12px; font-size: 12px; color: rgba(255,255,255,0.55); cursor: pointer; }
 .ws-switch-input { position: absolute; opacity: 0; width: 0; height: 0; }
 .ws-switch {
   position: relative;

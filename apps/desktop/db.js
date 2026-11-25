@@ -334,6 +334,9 @@ db.exec(`
   if (!cols.has('starred')) db.exec('ALTER TABLE projects ADD COLUMN starred INTEGER DEFAULT 0');
   // Its place in the Starred section, from a drag (pinned-order.js); null until then.
   if (!cols.has('starRank')) db.exec('ALTER TABLE projects ADD COLUMN starRank INTEGER');
+  // The editor's language servers for the project, as JSON (lsp/project-servers.js):
+  // { enabled: { [serverId]: bool }, found: { [serverId]: { files, extensions } }, scanned: [folders] }.
+  if (!cols.has('lspServers')) db.exec('ALTER TABLE projects ADD COLUMN lspServers TEXT');
 }
 // Which session started or finished a plan phase or a todo. Items are matched
 // by their text, not their line, so editing the file above an item does not
@@ -813,6 +816,17 @@ function listProjectFolders(projectId) {
   return stmts.projectFoldersList.all(projectId);
 }
 
+/** A project's language-server choices (lsp/project-servers.js), or null when none were saved. */
+function getProjectLspServers(id) {
+  const row = db.prepare('SELECT lspServers FROM projects WHERE id = ?').get(id);
+  if (!row || !row.lspServers) return null;
+  try { return JSON.parse(row.lspServers); } catch { return null; }
+}
+
+function setProjectLspServers(id, value) {
+  return db.prepare('UPDATE projects SET lspServers = ? WHERE id = ?').run(value ? JSON.stringify(value) : null, id).changes;
+}
+
 function listAllProjectFolders() {
   return stmts.projectFoldersListAll.all();
 }
@@ -995,6 +1009,7 @@ module.exports = {
   getSetting, setSetting, deleteSetting,
   listProjects, getProject, getProjectBySlug, insertProject, updateProject, deleteProject,
   listProjectFolders, listAllProjectFolders, upsertProjectFolder, deleteProjectFolder,
+  getProjectLspServers, setProjectLspServers,
   listTracks, listAllTracks, getTrack, insertTrack, updateTrack, deleteTrack,
   listSchedules, listSchedulesByProject, getSchedule, insertSchedule, updateSchedule, deleteSchedule,
   getImportedScheduleFiles, importLegacySchedule,

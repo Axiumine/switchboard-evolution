@@ -109,10 +109,15 @@ class ViewerPanel {
    * @param {boolean}   opts.copyContent  - Show copy-content button
    * @param {string}    opts.language     - 'markdown' or 'auto' (default 'markdown')
    * @param {string}    opts.storageKey   - localStorage key for preview mode persistence
+   * @param {Function}  opts.openFile     - async (filePath, { line, column }) => false | void, how the host
+   *                                        opens another file (Go to Definition); false (or none) and this viewer opens it
    */
   constructor(container, opts = {}) {
     this.container = container;
     this.opts = opts;
+    // Where Go to Definition came from, for Go Back and Go Forward: { filePath, line, column }.
+    this._navBack = [];
+    this._navForward = [];
 
     // State
     this.filePath = '';
@@ -386,6 +391,76 @@ class ViewerPanel {
     if (preview.line) this.goToLocation(preview.line, preview.column);
   }
 
+  // ── Go to Definition, Go Back, Go Forward ───────────────────────────
+
+  /** What the editor calls to open another file here and to step back and forth. */
+  _editorHooks() {
+    return {
+      openLocation: (filePath, at = {}) => this._openLocation(filePath, at),
+      remember: () => this._remember(),
+      back: () => this._step(this._navBack, this._navForward),
+      forward: () => this._step(this._navForward, this._navBack),
+    };
+  }
+
+  /** Where the cursor is now: { filePath, line, column } (1-based). */
+  _here() {
+    if (!this.editorView || !this.filePath) return null;
+    const state = this.editorView.state;
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    return { filePath: this.filePath, line: line.number, column: head - line.from + 1 };
+  }
+
+  /** Before a jump: here goes on the Back list, and Forward is forgotten. */
+  _remember() {
+    const here = this._here();
+    if (!here) return;
+    const last = this._navBack[this._navBack.length - 1];
+    if (!last || last.filePath !== here.filePath || last.line !== here.line) this._navBack.push(here);
+    if (this._navBack.length > 50) this._navBack.shift();
+    this._navForward = [];
+  }
+
+  _step(from, to) {
+    const place = from.pop();
+    if (!place) return false;
+    const here = this._here();
+    if (here) to.push(here);
+    this._openLocation(place.filePath, place);
+    return true;
+  }
+
+  /** Open `filePath` at { line, column }: the host's way when it has one, else in this viewer. */
+  async _openLocation(filePath, { line, column } = {}) {
+    if (filePath === this.filePath) {
+      this.goToLocation(line || 1, column || 1);
+      this.editorView?.focus();
+      return this.editorView;
+    }
+    if (this.opts.openFile && (await this.opts.openFile(filePath, { line, column })) !== false) {
+      if (this.filePath !== filePath) return null;
+      // The keys (Go Back, F12 again) go on in the file just opened.
+      this.editorView?.focus();
+      return this.editorView;
+    }
+    return this.openHere(filePath, { line, column });
+  }
+
+  /** Open `filePath` in this viewer, at { line, column }, after Save / Don't Save for unsaved changes. */
+  async openHere(filePath, { line, column } = {}) {
+    if (!(await this.confirmLeave())) return null;
+    let result;
+    try { result = await window.api.readFileForPanel(filePath); } catch (err) { result = { ok: false, error: err.message }; }
+    if (!result?.ok || typeof result.content !== 'string') {
+      alert(result?.error || `Could not open ${filePath}`);
+      return null;
+    }
+    this.open(filePath.split(/[\\/]/).pop(), filePath, result.content, { line, column });
+    this.editorView?.focus();
+    return this.editorView;
+  }
+
   goToLocation(line, column = 1) {
     if (!this.editorView || !Number.isSafeInteger(line) || line < 1) return;
     const doc = this.editorView.state.doc;
@@ -416,6 +491,9 @@ class ViewerPanel {
         language: this.opts.language === 'auto' ? 'auto' : 'markdown',
         wrap: this.wrapMode,
         onChange,
+        // A file on disk: its language server and Go to Definition, which opens other files here.
+        file: /^(\/|[A-Za-z]:[\\/])/.test(filePath || '') ? filePath : null,
+        hooks: this._editorHooks(),
       });
     } else if (this.opts.language === 'auto') {
       this.editorView = window.createEditableViewer(

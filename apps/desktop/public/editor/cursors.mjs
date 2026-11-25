@@ -1,6 +1,6 @@
 // Several cursors and selections, with VS Code's mouse gestures and keys.
 import { EditorView, keymap, drawSelection, rectangularSelection } from '@codemirror/view';
-import { EditorState, EditorSelection } from '@codemirror/state';
+import { EditorState, EditorSelection, StateField, StateEffect, countColumn, findColumn } from '@codemirror/state';
 import { selectLine, simplifySelection, addCursorAbove, addCursorBelow } from '@codemirror/commands';
 import { selectNextOccurrence, selectSelectionMatches } from '@codemirror/search';
 
@@ -9,7 +9,8 @@ import { selectNextOccurrence, selectSelectionMatches } from '@codemirror/search
 // the next occurrence of the selection, Cmd/Ctrl+Shift+L all of them (of
 // the word under the cursor when nothing is selected),
 // Shift+Alt+I a cursor at the end of every selected line, Cmd/Ctrl+L selects
-// the line. defaultKeymap and historyKeymap already have the rest with VS
+// the line, Shift+Alt+Cmd+Arrows (Ctrl+Shift+Alt+Arrows elsewhere) and
+// PageUp/PageDown select a column from the keyboard. defaultKeymap and historyKeymap already have the rest with VS
 // Code's keys: Cmd+Alt+Up/Down (Ctrl+Alt elsewhere) a cursor above or below,
 // Esc back to one cursor, Cmd/Ctrl+U the last cursor undone, Alt+Up/Down and
 // Shift+Alt+Up/Down move and copy lines, Shift+Cmd+K deletes them, Cmd+/
@@ -45,6 +46,87 @@ function backToOneCursor(view) {
   return view.state.selection.ranges.length > 1 && simplifySelection(view);
 }
 
+// ── Column selection from the keyboard, as VS Code's ────────────────
+// Shift+Alt+Cmd+Arrows (Ctrl+Shift+Alt+Arrows on Windows and Linux) and
+// PageUp/PageDown grow a box from where the selection was: a line more above
+// or below, a column more left or right. Every line in the box gets a cursor,
+// or a selection once the box is wider than a column; a shorter line gets its
+// cursor at its end. Columns are visual, so tabs line up with spaces. Any other
+// change of the selection, or an edit, ends the box: the next key starts anew.
+
+const setColumnBox = StateEffect.define(); // { anchorLine, anchorCol, headLine, headCol }
+
+const columnBox = StateField.define({
+  create: () => null,
+  update(box, tr) {
+    for (const effect of tr.effects) if (effect.is(setColumnBox)) return effect.value;
+    return box && !tr.docChanged && !tr.selection ? box : null;
+  },
+});
+
+function lineAndColumn(state, pos) {
+  const line = state.doc.lineAt(pos);
+  return { line: line.number, col: countColumn(line.text, state.tabSize, pos - line.from) };
+}
+
+/** The box being grown, or a new one from the main selection's anchor and head. */
+function currentBox(state) {
+  const box = state.field(columnBox, false);
+  if (box) return box;
+  const { anchor, head } = state.selection.main;
+  const a = lineAndColumn(state, anchor);
+  const h = lineAndColumn(state, head);
+  return { anchorLine: a.line, anchorCol: a.col, headLine: h.line, headCol: h.col };
+}
+
+/** A range on each line of the box, from its anchor column to its head column; the head line's is the main one. */
+function boxSelection(state, box) {
+  const ranges = [];
+  const step = box.headLine >= box.anchorLine ? 1 : -1;
+  for (let n = box.anchorLine; ; n += step) {
+    const line = state.doc.line(n);
+    const at = col => line.from + findColumn(line.text, col, state.tabSize);
+    ranges.push(EditorSelection.range(at(box.anchorCol), at(box.headCol)));
+    if (n === box.headLine) break;
+  }
+  return EditorSelection.create(ranges, ranges.length - 1);
+}
+
+/** The widest line between two lines, in columns: the box goes no further right. */
+function widestColumn(state, fromLine, toLine) {
+  let widest = 0;
+  for (let n = Math.min(fromLine, toLine); n <= Math.max(fromLine, toLine); n++) {
+    widest = Math.max(widest, countColumn(state.doc.line(n).text, state.tabSize));
+  }
+  return widest;
+}
+
+/** A page of lines in an editor on screen; 20 for a state without a view. */
+function pageLines(target) {
+  const height = target.scrollDOM && target.scrollDOM.clientHeight;
+  return height && target.defaultLineHeight ? Math.max(1, Math.floor(height / target.defaultLineHeight) - 1) : 20;
+}
+
+function columnSelect(lines, cols) {
+  return (target) => {
+    const { state } = target;
+    const box = currentBox(state);
+    const down = typeof lines === 'function' ? lines(target) : lines;
+    const headLine = Math.max(1, Math.min(state.doc.lines, box.headLine + down));
+    const headCol = Math.max(0, Math.min(widestColumn(state, box.anchorLine, headLine), box.headCol + cols));
+    const next = { ...box, headLine, headCol };
+    target.dispatch(state.update({ selection: boxSelection(state, next), effects: setColumnBox.of(next), scrollIntoView: true, userEvent: 'select' }));
+    return true;
+  };
+}
+
+const columnSelectUp = columnSelect(-1, 0);
+const columnSelectDown = columnSelect(1, 0);
+const columnSelectLeft = columnSelect(0, -1);
+const columnSelectRight = columnSelect(0, 1);
+const columnSelectPageUp = columnSelect(target => -pageLines(target), 0);
+const columnSelectPageDown = columnSelect(target => pageLines(target), 0);
+
 const multiCursorKeymap = [
   // Also in defaultKeymap: here for the viewers, which do not have it.
   { key: 'Mod-Alt-ArrowUp', run: addCursorAbove, preventDefault: true },
@@ -53,6 +135,12 @@ const multiCursorKeymap = [
   { key: 'Mod-d', run: selectNextOccurrence, preventDefault: true },
   { key: 'Mod-Shift-l', run: selectAllOccurrences, preventDefault: true },
   { key: 'Mod-l', run: selectLine, preventDefault: true },
+  { key: 'Mod-Shift-Alt-ArrowUp', run: columnSelectUp, preventDefault: true },
+  { key: 'Mod-Shift-Alt-ArrowDown', run: columnSelectDown, preventDefault: true },
+  { key: 'Mod-Shift-Alt-ArrowLeft', run: columnSelectLeft, preventDefault: true },
+  { key: 'Mod-Shift-Alt-ArrowRight', run: columnSelectRight, preventDefault: true },
+  { key: 'Mod-Shift-Alt-PageUp', run: columnSelectPageUp, preventDefault: true },
+  { key: 'Mod-Shift-Alt-PageDown', run: columnSelectPageDown, preventDefault: true },
 ];
 
 // Shift+Alt+I by its key, not its character: on a Mac it types ˆ, and
@@ -70,6 +158,7 @@ const lineEndsKey = EditorView.domEventHandlers({
 function multipleCursors() {
   return [
     EditorState.allowMultipleSelections.of(true),
+    columnBox,
     drawSelection(),
     EditorView.clickAddsSelectionRange.of(event => event.altKey && !event.shiftKey),
     rectangularSelection({ eventFilter: event => event.altKey && event.shiftKey }),
@@ -78,4 +167,7 @@ function multipleCursors() {
   ];
 }
 
-export { multipleCursors, addCursorsAtLineEnds, selectAllOccurrences, backToOneCursor, multiCursorKeymap };
+export {
+  multipleCursors, addCursorsAtLineEnds, selectAllOccurrences, backToOneCursor, multiCursorKeymap,
+  columnSelectUp, columnSelectDown, columnSelectLeft, columnSelectRight, columnSelectPageUp, columnSelectPageDown,
+};

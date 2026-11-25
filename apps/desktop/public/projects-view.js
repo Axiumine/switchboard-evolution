@@ -3119,6 +3119,9 @@ function renderSettings(project, body) {
       <div class="ws-sec"><span>Tracks</span><button type="button" class="ws-ghost ws-ghost--sm ws-ghost--accent" id="ws-set-new-track">${PICONS.plus(11)}<span>New track</span></button></div>
       <div class="ws-card" id="ws-set-tracks"></div>
 
+      <div class="ws-sec"><span>Language servers</span><button type="button" class="ws-ghost ws-ghost--sm" id="ws-set-lsp-detect" title="Look at the project's folders again and turn on the servers of new languages">Detect again</button></div>
+      <div class="ws-card" id="ws-set-lsp"></div>
+
       <div class="ws-foot">
         ${isProjectSnoozed(project) ? `<button type="button" class="ws-btn" id="ws-set-wake" title="Wakes ${escapeHtml(snoozeWakeDescription(project.snoozedUntil))}">Wake now</button>` : ''}
         <button type="button" class="ws-btn" id="ws-set-status">${project.status === 'done' ? 'Reopen project' : 'Mark as done'}</button>
@@ -3150,6 +3153,9 @@ function renderSettings(project, body) {
     if (result?.error) { alert(result.error); return; }
     loadProjects();
   }));
+
+  // The editor's language servers for this project (project-lsp-settings.js).
+  if (typeof renderProjectLanguageServers === 'function') renderProjectLanguageServers(project, q('#ws-set-lsp'), q('#ws-set-lsp-detect'));
 
   const foldersEl = q('#ws-set-folders');
   if (!(project.folders || []).length) foldersEl.innerHTML = '<div class="ws-item ws-item--empty">None attached. Sessions run in the project folder.</div>';

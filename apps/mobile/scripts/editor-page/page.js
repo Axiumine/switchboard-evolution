@@ -9,6 +9,14 @@
 //   state { dirty, canUndo, canRedo, cursors }
 //                                    after every change of these
 //   text { id, text }                the answer to getText(id)
+//   find { count, current, limited, error?, replaced? }
+//                                    after a find call, and when the text or the
+//                                    selection changes while something is searched
+//   openFind                         Cmd/Ctrl+F on a hardware keyboard
+//
+// Find and replace (find.js): find(query, options), findNext(direction),
+// replace(text, options), replaceAll(text, options), clearFind(). The query
+// outlives load() and revert(), as the bar over the editor does.
 //
 // setFontSize(px) sets the text size; it outlives load() and revert().
 //
@@ -36,10 +44,23 @@ import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { diff } from '@codemirror/legacy-modes/mode/diff';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
+import { kotlin, scala, dart, objectiveC } from '@codemirror/legacy-modes/mode/clike';
+import { lua } from '@codemirror/legacy-modes/mode/lua';
+import { swift } from '@codemirror/legacy-modes/mode/swift';
+import { haskell } from '@codemirror/legacy-modes/mode/haskell';
+import { oCaml, fSharp } from '@codemirror/legacy-modes/mode/mllike';
+import { powerShell } from '@codemirror/legacy-modes/mode/powershell';
+import { erlang } from '@codemirror/legacy-modes/mode/erlang';
+import { julia } from '@codemirror/legacy-modes/mode/julia';
+import { r } from '@codemirror/legacy-modes/mode/r';
+import { groovy } from '@codemirror/legacy-modes/mode/groovy';
+import { perl } from '@codemirror/legacy-modes/mode/perl';
+import { grammar, shareModules, setLanguageHost, whenLoaded, languageReady } from './languages.js';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
 import { unifiedMergeView } from '@codemirror/merge';
 
 import { CURSOR_ACTIONS, multipleCursors } from './cursors.js';
+import { findExtension, findSummary, setFind, findNext, replaceOne, replaceAll } from './find.js';
 
 // ── Languages ────────────────────────────────────────────────────────
 // The same table as the desktop's public/codemirror-setup.js (CODE_LANGUAGES):
@@ -70,22 +91,64 @@ const CODE_LANGUAGES = [
   { name: 'Diff', alias: ['patch'], extensions: ['diff', 'patch'], support: legacy(diff) },
   { name: 'TOML', extensions: ['toml'], support: legacy(toml) },
   { name: 'Dockerfile', alias: ['docker'], filename: /^Dockerfile$/, support: legacy(dockerFile) },
+  // The desktop's languages of its add-ons (public/editor/languages.mjs). A
+  // Lezer grammar is a script of its own, which the app puts in the page the
+  // first time a file of it is shown (languages.js); the legacy modes, light,
+  // are here.
+  { name: 'PHP', extensions: ['php', 'phtml'], support: grammar('php') },
+  { name: 'C#', alias: ['csharp', 'cs'], extensions: ['cs', 'csx'], support: grammar('csharp') },
+  { name: 'Ruby', alias: ['rb'], extensions: ['rb', 'rake', 'gemspec', 'ru'], filename: /^(Gemfile|Rakefile)$/, support: grammar('ruby') },
+  { name: 'SCSS', extensions: ['scss'], support: grammar('scss', 'sass') },
+  { name: 'Sass', extensions: ['sass'], support: grammar('sass') },
+  { name: 'Less', extensions: ['less'], support: grammar('less') },
+  { name: 'Vue', extensions: ['vue'], support: grammar('vue') },
+  { name: 'Svelte', extensions: ['svelte'], support: grammar('svelte') },
+  { name: 'Liquid', extensions: ['liquid'], support: grammar('liquid') },
+  { name: 'Jinja', alias: ['j2', 'jinja2'], extensions: ['jinja', 'jinja2', 'j2'], support: grammar('jinja') },
+  { name: 'Elixir', alias: ['ex'], extensions: ['ex', 'exs'], support: grammar('elixir') },
+  { name: 'Terraform', alias: ['hcl', 'tf'], extensions: ['tf', 'tfvars', 'hcl'], support: grammar('hcl') },
+  { name: 'Zig', extensions: ['zig', 'zon'], support: grammar('zig') },
+  { name: 'Kotlin', alias: ['kt'], extensions: ['kt', 'kts'], support: legacy(kotlin) },
+  { name: 'Scala', extensions: ['scala', 'sc', 'sbt'], support: legacy(scala) },
+  { name: 'Dart', extensions: ['dart'], support: legacy(dart) },
+  { name: 'Objective-C', alias: ['objc'], extensions: ['m', 'mm'], support: legacy(objectiveC) },
+  { name: 'Lua', extensions: ['lua'], support: legacy(lua) },
+  { name: 'Swift', extensions: ['swift'], support: legacy(swift) },
+  { name: 'Haskell', alias: ['hs'], extensions: ['hs', 'lhs'], support: legacy(haskell) },
+  { name: 'OCaml', alias: ['ml'], extensions: ['ml', 'mli'], support: legacy(oCaml) },
+  { name: 'F#', alias: ['fsharp'], extensions: ['fs', 'fsi', 'fsx'], support: legacy(fSharp) },
+  { name: 'PowerShell', alias: ['ps1', 'pwsh'], extensions: ['ps1', 'psm1'], support: legacy(powerShell) },
+  { name: 'Erlang', alias: ['erl'], extensions: ['erl', 'hrl'], support: legacy(erlang) },
+  { name: 'Julia', alias: ['jl'], extensions: ['jl'], support: legacy(julia) },
+  { name: 'R', extensions: ['r'], support: legacy(r) },
+  { name: 'Groovy', alias: ['gradle'], extensions: ['groovy', 'gradle'], support: legacy(groovy) },
+  { name: 'Perl', alias: ['pl'], extensions: ['pl', 'pm'], support: legacy(perl) },
   { name: 'Markdown', alias: ['md'], extensions: ['md', 'mdx', 'markdown'], support: () => markdownSupport() },
 ];
 
+// The grammars' scripts take the page's CodeMirror (languages.js).
+shareModules();
+
+// A code block of a language whose grammar is not in the page yet waits for it.
 const CODE_BLOCK_LANGUAGES = CODE_LANGUAGES.map(({ name, alias, extensions, filename, support }) =>
-  LanguageDescription.of({ name, alias, extensions, filename, load: async () => support() }));
+  LanguageDescription.of({ name, alias, extensions, filename, load: async () => { if (support.addon) await whenLoaded(support.addon); return support(); } }));
 
 function markdownSupport() {
   return markdown({ base: markdownLanguage, codeLanguages: CODE_BLOCK_LANGUAGES });
 }
 
-/** The language of a file by its name, then its extension; none (plain text) when it is neither. */
-function languageFor(filename) {
+/** The entry of a file's language by its name, then its extension; null when it is neither. */
+function languageEntry(filename) {
   const base = (filename || '').split(/[\\/]/).pop();
   const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : '';
-  const lang = CODE_LANGUAGES.find((l) => l.filename && l.filename.test(base))
-    || CODE_LANGUAGES.find((l) => l.extensions && l.extensions.includes(ext));
+  return CODE_LANGUAGES.find((l) => l.filename && l.filename.test(base))
+    || CODE_LANGUAGES.find((l) => l.extensions && l.extensions.includes(ext))
+    || null;
+}
+
+/** The language of a file; none (plain text) when it has none, or its grammar is not in the page yet (asked for then). */
+function languageFor(filename) {
+  const lang = languageEntry(filename);
   return lang ? lang.support() : [];
 }
 
@@ -165,6 +228,17 @@ function postState(state) {
   post(message);
 }
 
+let currentFind = null; // the bar's { query, matchCase, wholeWord, isRegex, preserveCase }, or null
+let lastFind = '';
+
+function postFind(summary) {
+  const message = { type: 'find', ...summary };
+  const key = JSON.stringify(message);
+  if (key === lastFind && summary.replaced === undefined) return;
+  lastFind = key;
+  post(message);
+}
+
 function createState(text, filename, wrap, base) {
   return EditorState.create({
     doc: text,
@@ -174,8 +248,10 @@ function createState(text, filename, wrap, base) {
       history(),
       indentOnInput(),
       bracketMatching(),
-      // Shortcuts for a hardware keyboard.
+      // Shortcuts for a hardware keyboard; Cmd/Ctrl+F opens the app's find bar.
+      keymap.of([{ key: 'Mod-f', run: () => { post({ type: 'openFind' }); return true; }, preventDefault: true }]),
       keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+      findExtension(),
       multipleCursors(),
       languageCompartment.of(languageFor(filename)),
       wrapCompartment.of(wrap ? EditorView.lineWrapping : []),
@@ -189,12 +265,22 @@ function createState(text, filename, wrap, base) {
       EditorView.updateListener.of((update) => {
         if (update.docChanged || update.selectionSet) postState(update.state);
         if (update.docChanged) post({ type: 'changed' });
+        if (currentFind && (update.docChanged || update.selectionSet)) postFind(findSummary(update.state));
       }),
     ],
   });
 }
 
 const view = new EditorView({ state: createState('', '', false), parent: document.getElementById('editor') });
+
+// A grammar the page asked for arrived: the file shown, if it is of that language, gets its colours.
+setLanguageHost({
+  post,
+  onReady: (addon) => {
+    const lang = languageEntry(shown.filename);
+    if (lang && lang.support.addon === addon) view.dispatch({ effects: languageCompartment.reconfigure(lang.support()) });
+  },
+});
 
 /** Shows a file: its text, highlighted by its name; `line` marks a line and scrolls it into view. */
 function load(text, filename, options) {
@@ -204,6 +290,7 @@ function load(text, filename, options) {
   view.setState(createState(text, filename, wrap, base));
   lastState = '';
   postState(view.state);
+  if (currentFind) postFind(setFind(view, currentFind, { stay: true }));
   if (Number.isInteger(line) && line >= 1 && line <= view.state.doc.lines) {
     const at = view.state.doc.line(line);
     view.dispatch({ effects: setMark.of(Decoration.set([Decoration.line({ class: 'cm-marked-line' }).range(at.from)])) });
@@ -243,6 +330,21 @@ function revert() {
   view.scrollDOM.scrollTop = scrollTop;
   lastState = '';
   postState(view.state);
+  if (currentFind) postFind(setFind(view, currentFind, { stay: true }));
+}
+
+// ── Find and replace (find.js) ───────────────────────────────────────
+
+function find(query, options) {
+  currentFind = query ? { ...(options || {}), query: String(query) } : null;
+  postFind(setFind(view, currentFind));
+}
+
+function withOptions(options) {
+  if (options && currentFind) {
+    currentFind = { ...currentFind, ...options };
+    setFind(view, currentFind, { stay: true });
+  }
 }
 
 // The keyboard came up (the page got shorter): keep the cursor in view.
@@ -275,6 +377,12 @@ window.sb = {
   undo: () => undo(view),
   redo: () => redo(view),
   getText: (id) => post({ type: 'text', id, text: view.state.doc.toString() }),
+  find,
+  findNext: (direction) => postFind(findNext(view, direction)),
+  replace: (text, options) => { withOptions(options); postFind(replaceOne(view, String(text ?? ''))); },
+  replaceAll: (text, options) => { withOptions(options); postFind(replaceAll(view, String(text ?? ''))); },
+  clearFind: () => { currentFind = null; postFind(setFind(view, null)); },
+  languageReady,
 };
 
 post({ type: 'ready' });

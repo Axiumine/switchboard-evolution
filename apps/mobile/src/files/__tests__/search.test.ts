@@ -19,10 +19,10 @@ describe('search options', () => {
 
   it('sends the toggles, the globs that are filled in, and the phone limit', () => {
     expect(searchOpts(form({ query: 'color', matchCase: true, include: ' src, *.ts ' }))).toEqual({
-      query: 'color', isRegex: false, matchCase: true, wholeWord: false, include: 'src, *.ts', maxResults: 2000,
+      query: 'color', isRegex: false, matchCase: true, wholeWord: false, preserveCase: false, include: 'src, *.ts', maxResults: 2000,
     });
     expect(searchOpts(form({ query: 'a.c', isRegex: true, wholeWord: true, exclude: 'dist' }))).toEqual({
-      query: 'a.c', isRegex: true, matchCase: false, wholeWord: true, exclude: 'dist', maxResults: 2000,
+      query: 'a.c', isRegex: true, matchCase: false, wholeWord: true, preserveCase: false, exclude: 'dist', maxResults: 2000,
     });
   });
 
@@ -90,6 +90,12 @@ describe('what a match is replaced with', () => {
     expect(replacementText(form({ query: 'color', replace: 'colour $1' }), files[0].matches[0])).toBe('colour $1');
   });
 
+  it('keeps the case of the match with Preserve Case, as the desktop does', () => {
+    const f = form({ query: 'color', replace: 'shade', preserveCase: true });
+    expect(replacementText(f, match(1, 0, 'Color', '', ' x'))).toBe('Shade');
+    expect(replacementText(f, match(1, 0, 'COLOR', '', ''))).toBe('SHADE');
+  });
+
   it('expands $1 and $& for a regular expression', () => {
     const f = form({ query: '(\\w+)@(\\w+)', isRegex: true, replace: '$2:$1' });
     expect(replacementText(f, match(1, 6, 'ann@lab', 'mail: ', '!'))).toBe('lab:ann');
@@ -129,7 +135,7 @@ describe('replacing', () => {
   it('builds the request', () => {
     const f = form({ query: 'color', matchCase: true, replace: 'colour', include: 'src' });
     expect(replaceOpts(f, replaceTargets(files, { path: 'README.md' }))).toEqual({
-      query: 'color', isRegex: false, matchCase: true, wholeWord: false, replace: 'colour',
+      query: 'color', isRegex: false, matchCase: true, wholeWord: false, preserveCase: false, replace: 'colour',
       files: [{ path: 'README.md', matches: [{ line: 1, column: 2, length: 5, text: 'Color' }] }],
     });
   });

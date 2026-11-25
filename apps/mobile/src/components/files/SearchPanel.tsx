@@ -1,9 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { FileIcon } from '@/components/files/FileIcon';
+import { SearchIconButton as IconButton, SearchToggle as Toggle } from '@/components/search/SearchControls';
 import {
   dismissFile, dismissMatch, EMPTY_SEARCH, matchParts, NO_DISMISSED, replaceOpts, replaceReport, replacementText, replaceTargets, resultRows,
   searchOpts, splitPath, summaryText, visibleFiles, type Dismissed, type ReplaceResult, type ResultRow, type SearchFile, type SearchForm,
@@ -202,6 +203,9 @@ export function SearchPanel({ root, folderName, canReplace, onOpen, onClose }: {
                 style={styles.input}
                 accessibilityLabel="Replace with"
               />
+              <Toggle on={form.preserveCase} label="Preserve case" onPress={() => setForm({ preserveCase: !form.preserveCase })}>
+                <Text style={[styles.toggleText, form.preserveCase && styles.toggleTextOn]}>AB</Text>
+              </Toggle>
             </View>
             <Pressable
               onPress={replaceAll}
@@ -305,21 +309,6 @@ const MatchRow = memo(function MatchRow({ path, match, replacement, canReplace, 
   );
 });
 
-function Toggle({ on, label, onPress, children }: { on: boolean; label: string; onPress: () => void; children: ReactNode }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={4}
-      style={[styles.toggle, on && styles.toggleOn]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: on }}
-    >
-      {children}
-    </Pressable>
-  );
-}
-
 function GlobField({ label, placeholder, value, onChange }: { label: string; placeholder: string; value: string; onChange: (value: string) => void }) {
   return (
     <View style={styles.formRow}>
@@ -341,26 +330,10 @@ function GlobField({ label, placeholder, value, onChange }: { label: string; pla
   );
 }
 
-function IconButton({ icon, label, onPress, small, active }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; small?: boolean; active?: boolean }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={small ? 4 : 6}
-      style={({ pressed }) => [small ? styles.iconSmall : styles.icon, active && styles.toggleOn, pressed && styles.pressed]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-    >
-      <Ionicons name={icon} size={small ? 16 : 18} color={active ? colors.accent : colors.textDim} />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   panel: { flex: 1, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: spacing.lg, paddingRight: spacing.sm, height: 44 },
   title: { flex: 1, color: colors.textDim, fontSize: 12.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  icon: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  iconSmall: { width: 30, height: 30, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   form: { gap: 6, paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
   formRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   chevron: { width: 22, height: 36, alignItems: 'center', justifyContent: 'center' },
@@ -368,8 +341,6 @@ const styles = StyleSheet.create({
   field: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 38, paddingRight: 4, gap: 2, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   fieldError: { borderColor: colors.danger },
   input: { flex: 1, minWidth: 0, color: colors.text, fontSize: 14.5, paddingHorizontal: spacing.md, paddingVertical: 6 },
-  toggle: { width: 28, height: 28, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'transparent' },
-  toggleOn: { backgroundColor: 'rgba(128,136,255,0.2)', borderColor: 'rgba(128,136,255,0.5)' },
   toggleText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   toggleTextOn: { color: '#e4e4fa' },
   underline: { textDecorationLine: 'underline' },
