@@ -1969,8 +1969,11 @@ function renderOverview() {
         ${tabWithWindow('settings', `<button type="button" class="ws-tab ${tabName === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>`)}
       </div>
     </div>`;
+  // The tab bar keeps where it was scrolled to when the page is drawn again.
+  const tabsScroll = projectViewer.querySelector('.ws-tabs')?.scrollLeft || 0;
   projectViewer.innerHTML = `${header}
     <div class="ws-body" id="ws-body"></div>`;
+  bindWorkspaceTabs(projectViewer.querySelector('.ws-tabs'), tabsScroll);
 
   const body = projectViewer.querySelector('#ws-body');
   // The Session tab's content is the terminal area, laid out under the header by CSS.
@@ -2070,6 +2073,55 @@ function projectWindowHeaderHtml(project, tabName) {
         <button type="button" id="tool-window-pin" class="tool-window-btn" aria-pressed="false"></button>
       </div>
     </div>`;
+}
+
+// --- The project page's tab bar: it scrolls sideways in a narrow window ---
+
+let workspaceTabsObserver = null;
+
+/**
+ * When the window is too narrow for every tab, the bar scrolls sideways (its
+ * scrollbar hidden, as the app's other tab rows): a trackpad swipe or the
+ * mouse wheel moves it, a fade shows on the side that has more tabs, and the
+ * open tab is kept in sight, as the page is drawn again or the window gets
+ * narrower. `scrollLeft` is where the bar was before the page was drawn again.
+ */
+function bindWorkspaceTabs(tabs, scrollLeft = 0) {
+  workspaceTabsObserver?.disconnect();
+  workspaceTabsObserver = null;
+  if (!tabs) return;
+  const sync = () => {
+    const max = tabs.scrollWidth - tabs.clientWidth;
+    tabs.classList.toggle('more-left', tabs.scrollLeft > 1);
+    tabs.classList.toggle('more-right', tabs.scrollLeft < max - 1);
+  };
+  // The open tab in sight, clear of the fade at that side.
+  const reveal = () => {
+    const active = tabs.querySelector('.ws-tab.active');
+    if (!active) return;
+    const item = active.closest('.ws-tab-group') || active;
+    const bar = tabs.getBoundingClientRect();
+    const rect = item.getBoundingClientRect();
+    if (rect.left < bar.left) tabs.scrollLeft -= bar.left - rect.left + 28;
+    else if (rect.right > bar.right) tabs.scrollLeft += rect.right - bar.right + 28;
+  };
+  tabs.scrollLeft = scrollLeft;
+  reveal();
+  tabs.onscroll = sync;
+  // A wheel that only turns up and down moves the bar sideways; a sideways swipe scrolls it as it is.
+  tabs.onwheel = (e) => {
+    if (tabs.scrollWidth <= tabs.clientWidth || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    tabs.scrollLeft += e.deltaY;
+  };
+  if (typeof ResizeObserver !== 'undefined') {
+    // A window made narrower keeps the open tab in sight, and so does a tab
+    // that grows (the plan and todo counts arrive after the page is drawn).
+    workspaceTabsObserver = new ResizeObserver(() => { reveal(); sync(); });
+    workspaceTabsObserver.observe(tabs);
+    for (const item of tabs.children) workspaceTabsObserver.observe(item);
+  }
+  sync();
 }
 
 /** A Compare window's page (main.js openGitCompareWindow): the comparison of its commits, filling the window. */
