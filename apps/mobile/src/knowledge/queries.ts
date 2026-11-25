@@ -14,8 +14,12 @@ export const QUERY_TIMEOUT_MS = 90_000;
 /** Linking the folders cross-repo scans them all. */
 export const SLOW_TIMEOUT_MS = 10 * 60_000;
 
+/** Another CBM graph of a folder inside a folder of the tab (made by a session that started there). */
+export type InnerGraph = { name: string; path: string; rel: string };
+
 export type KnowledgeFolder = {
   path: string;
+  /** 'project' (the project folder, listed first), 'in-place' or 'worktree'. */
   mode: string;
   /** A worktree's main checkout and branch (null for other folders; missing from older desktops). */
   sourcePath?: string | null;
@@ -26,6 +30,8 @@ export type KnowledgeFolder = {
   index: Record<string, any> | null;
   job: IndexJob | null;
   error: string | null;
+  /** Missing from older desktops. */
+  inner?: InnerGraph[];
 };
 
 export type KnowledgeSettings = {
@@ -86,6 +92,17 @@ export function useKnowledgeQuery<T = any>(projectId: string, folder: string | n
     queryKey: ['knowledge-data', projectId, folder, tool, JSON.stringify(args)],
     queryFn: () => knowledgeQuery<T>(projectId, folder as string, tool, args),
     enabled: online && enabled && !!folder,
+  });
+}
+
+/** The repositories inside a folder and where their code is (missing from older desktops: no query then). */
+export function useKnowledgeModules(projectId: string, folder: string | null | undefined, enabled = true) {
+  const online = useConnection((s) => s.status.state === 'online');
+  const supported = useCapability('knowledge-modules');
+  return useQuery({
+    queryKey: ['knowledge-data', projectId, folder, 'modules'],
+    queryFn: () => act<unknown>('knowledge-modules', [projectId, folder], { timeoutMs: QUERY_TIMEOUT_MS }),
+    enabled: online && supported && enabled && !!folder,
   });
 }
 

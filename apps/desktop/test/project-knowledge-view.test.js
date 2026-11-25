@@ -24,7 +24,7 @@ function load() {
     window: {},
     console,
   });
-  vm.runInContext(`${escapeAttrSource}\n${source}\nthis.api = { knState, knFolder, knRelPath, knGateHtml, knGateSignature, knSubnavHtml, knTableHtml, knFolderCardHtml, knStatusSignature, knowledgeTabs };`, context);
+  vm.runInContext(`${escapeAttrSource}\n${source}\nthis.api = { knState, knFolder, knFolders, knRelPath, knGateHtml, knGateSignature, knSubnavHtml, knTableHtml, knFolderCardHtml, knStatusSignature, knowledgeTabs };`, context);
   return context.api;
 }
 
@@ -43,7 +43,10 @@ test('the tab shows the folder picked, else the first indexed one, else the firs
   assert.equal(api.knFolder(proj, s), '/work/api');
   s.folder = '/gone';
   assert.equal(api.knFolder(proj, s), '/work/web', 'a detached folder falls back');
-  assert.equal(api.knFolder(project([]), api.knState(project([]))), null);
+  const empty = { id: 'p-empty', root: '/work/proj', folders: [] };
+  assert.equal(api.knFolder(empty, api.knState(empty)), '/work/proj', 'nothing attached: the project folder');
+  const bare = { id: 'p-bare', folders: [] };
+  assert.equal(api.knFolder(bare, api.knState(bare)), null);
 });
 
 test('paths for the Files tab are relative to the folder; other absolute paths are refused', () => {
@@ -93,10 +96,36 @@ test('a folder without a graph asks to index it; a running job says so; an index
   s.status.folders[1].job = null;
   s.view = 'settings';
   assert.equal(api.knGateHtml(proj, s, '/work/api'), null, 'Settings opens even before a first index');
-  const none = project([]);
+  // A project with no attached folder still has its project folder to index.
+  const none = { id: 'p-none', root: '/work/proj', folders: [] };
   const sn = api.knState(none);
-  sn.status = { binary: BIN, folders: [] };
-  assert.match(api.knGateHtml(none, sn, null), /No folders to index/);
+  sn.status = { binary: BIN, folders: [{ path: '/work/proj', mode: 'project', indexed: false, job: null }] };
+  assert.match(api.knGateHtml(none, sn, '/work/proj'), /has no code graph yet/);
+  // An old project row without a folder of its own and nothing attached has none.
+  const bare = { id: 'p9', folders: [] };
+  const sb = api.knState(bare);
+  sb.status = { binary: BIN, folders: [] };
+  assert.match(api.knGateHtml(bare, sb, null), /No folders to index/);
+});
+
+test('the project folder is listed first as "Project folder", but the tab opens on the code', () => {
+  const api = load();
+  const proj = project(['/work/api', '/work/web']);
+  const s = api.knState(proj);
+  // Before the status comes: the project folder, then the attached ones; the first attached one shown.
+  assert.deepEqual(JSON.parse(JSON.stringify(api.knFolders(proj).map(f => [f.path, f.mode]))), [['/work/proj', 'project'], ['/work/api', 'in-place'], ['/work/web', 'in-place']]);
+  assert.equal(api.knFolder(proj, s), '/work/api');
+  s.status = { binary: BIN, folders: [{ ...ready('/work/proj', 'work-proj'), mode: 'project' }, { path: '/work/api', mode: 'in-place', indexed: false }, { ...ready('/work/web', 'web'), mode: 'in-place' }] };
+  assert.equal(api.knFolder(proj, s), '/work/web', 'the first attached folder with a graph');
+  s.status.folders[2].indexed = false;
+  assert.equal(api.knFolder(proj, s), '/work/proj', 'else the project folder\'s graph');
+  const bar = api.knSubnavHtml(proj, s);
+  assert.match(bar, /<option value="\/work\/proj"[^>]*>Project folder<\/option>/);
+  const card = api.knFolderCardHtml(proj, s, s.status.folders[0]);
+  assert.match(card, /<span class="ws-card-title" title="\/work\/proj">Project folder<\/span>/);
+  assert.match(card, />project folder<\/span>/);
+  s.status.folders[0].inner = [{ name: 'work-proj-tools', path: '/work/proj/tools', rel: 'tools' }];
+  assert.match(api.knFolderCardHtml(proj, s, s.status.folders[0]), /1 other graph of folders inside it repeats part of this one/);
 });
 
 test('the view bar lists the views drawn, the folders and the folder\'s size', () => {

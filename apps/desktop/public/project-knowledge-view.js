@@ -1,5 +1,5 @@
-// project-knowledge-view.js — the Node Knowledge tab: each attached folder of
-// the project as a codebase-memory-mcp (CBM) code graph. The main process
+// project-knowledge-view.js — the Node Knowledge tab: the project folder and
+// each attached folder of the project as a codebase-memory-mcp (CBM) code graph. The main process
 // (knowledge.js) runs CBM and fills in the CBM project of every call; this
 // file only names the folder. What CBM answers is read with KnowledgeModel
 // (packages/shared/knowledge-model.js), shared with the phone.
@@ -23,9 +23,37 @@ function knState(project) {
   return s;
 }
 
-/** The folders the tab offers: the project's attached folders, in their order. */
+/**
+ * The folders the tab offers: the status's (the project folder first, then the
+ * attached ones, a root also attached once), else, before it comes, the
+ * project folder and the attached ones.
+ */
 function knFolders(project) {
-  return (project.folders || []).filter(f => f && f.path);
+  const rows = (project.folders || []).filter(f => f && f.path);
+  const listed = knowledgeTabs.get(project.id)?.status?.folders;
+  if (Array.isArray(listed) && listed.length) {
+    // The status's own fields first; a worktree's from the project's row when the status lacks them.
+    return listed.filter(f => f && f.path).map(f => {
+      const row = rows.find(r => r.path === f.path);
+      return row && f.mode !== 'project' ? { ...row, ...f, mode: f.mode || row.mode } : f;
+    });
+  }
+  const attached = rows.filter(f => f.path !== project.root);
+  return project.root ? [{ path: project.root, mode: 'project' }, ...attached] : attached;
+}
+
+/** The attached folders among them (not the project folder): those "Link now" links. */
+function knAttachedFolders(project) {
+  return knFolders(project).filter(f => f.mode !== 'project');
+}
+
+/** A folder's name in the tab: the project folder says what it is. */
+function knFolderLabel(f) {
+  return f && f.mode === 'project' ? 'Project folder' : pathBasename(f?.path || '');
+}
+
+function knProjectTag(f) {
+  return f && f.mode === 'project' ? `<span class="kn-label kn-label--muted" title="${escapeAttr(`${f.path}: the project's own folder (plans, notes, tools), where its sessions start. Its graph keeps out the folders inside it that have one of their own.`)}">project folder</span>` : '';
 }
 
 /** What a worktree folder is a checkout of, and what happens to its graph. */
@@ -39,13 +67,19 @@ function knWorktreeTag(f) {
   return f && f.mode === 'worktree' ? `<span class="kn-label kn-label--muted" title="${escapeAttr(knWorktreeTitle(f))}">worktree</span>` : '';
 }
 
-/** The folder the tab shows: the one picked, else the first indexed one, else the first. */
+/**
+ * The folder the tab shows: the one picked, else the first attached folder with
+ * a graph (the code), else the project folder's graph, else the first attached
+ * folder, else the project folder.
+ */
 function knFolder(project, s = knState(project)) {
   const folders = knFolders(project);
   if (s.folder && folders.some(f => f.path === s.folder)) return s.folder;
   const status = s.status?.folders || [];
-  const indexed = status.find(f => f.indexed && folders.some(x => x.path === f.path));
-  return indexed ? indexed.path : (folders[0]?.path || null);
+  const indexed = (f) => status.some(x => x.path === f.path && x.indexed);
+  const attached = folders.filter(f => f.mode !== 'project');
+  const pick = attached.find(indexed) || folders.find(indexed) || attached[0] || folders[0];
+  return pick ? pick.path : null;
 }
 
 function knFolderStatus(s, folderPath) {
@@ -118,7 +152,7 @@ function knSubnavHtml(project, s) {
     const st = knFolderStatus(s, f.path);
     const mark = st?.job && KnowledgeModel.jobActive(st.job) ? ' (indexing)' : st?.indexed ? '' : ' (not indexed)';
     const kind = f.mode === 'worktree' ? ' · worktree' : '';
-    return `<option value="${escapeAttr(f.path)}"${f.path === folder ? ' selected' : ''}>${escapeHtml(pathBasename(f.path))}${kind}${mark}</option>`;
+    return `<option value="${escapeAttr(f.path)}"${f.path === folder ? ' selected' : ''}>${escapeHtml(knFolderLabel(f))}${kind}${mark}</option>`;
   }).join('');
   let meta = '';
   if (fstatus?.job && KnowledgeModel.jobActive(fstatus.job)) meta = `<span class="kn-busy" aria-hidden="true"></span>${escapeHtml(KnowledgeModel.jobText(fstatus.job))}`;
@@ -129,7 +163,7 @@ function knSubnavHtml(project, s) {
   return `<div class="git-workspace-subnav kn-subnav">
     <div class="git-workspace-nav kn-nav" role="tablist" aria-label="Node Knowledge view">${views.map(button).join('')}</div>
     <div class="kn-subnav-side">
-      ${folders.length > 1 ? `<select class="ws-select kn-folder-select" aria-label="Folder">${options}</select>` : folders.length ? `<span class="kn-folder-one" title="${escapeAttr(folder)}">${PICONS.folder(12)}${escapeHtml(pathBasename(folder))}</span>` : ''}
+      ${folders.length > 1 ? `<select class="ws-select kn-folder-select" aria-label="Folder">${options}</select>` : folders.length ? `<span class="kn-folder-one" title="${escapeAttr(folder)}">${PICONS.folder(12)}${escapeHtml(knFolderLabel(folders.find(f => f.path === folder)))}</span>` : ''}
       ${meta ? `<span class="kn-subnav-meta">${meta}</span>` : ''}
       ${fstatus?.indexed ? `<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="reindex" title="Read the folder again (only what changed)">${PICONS.refresh(12)}<span>Refresh</span></button>` : ''}
     </div>
@@ -215,7 +249,7 @@ function knGateHtml(project, s, folder) {
     return knNoticeHtml('codebase-memory-mcp keeps stopping', status.client.error || '', `<button type="button" class="ws-btn" data-kn-act="restart">${PICONS.refresh(12)}<span>Start it again</span></button>`);
   }
   if (!knFolders(project).length) {
-    return knNoticeHtml('No folders to index', 'Node Knowledge turns each folder attached to the project into a code graph. Attach the repositories this project works in.', `<button type="button" class="ws-btn ws-btn--primary" data-kn-act="attach">${PICONS.plus(12)}<span>Attach folder…</span></button>`);
+    return knNoticeHtml('No folders to index', 'Node Knowledge turns the project folder and each folder attached to the project into a code graph. Attach the repositories this project works in.', `<button type="button" class="ws-btn ws-btn--primary" data-kn-act="attach">${PICONS.plus(12)}<span>Attach folder…</span></button>`);
   }
   if (s.view === 'settings' || s.view === 'lens') return null;
   const fstatus = knFolderStatus(s, folder);
@@ -398,8 +432,8 @@ function knFolderCardHtml(project, s, f) {
   return `<div class="ws-card kn-folder-card${current ? ' kn-folder-card--current' : ''}" data-kn-folder="${escapeAttr(f.path)}">
     <div class="ws-card-h">
       ${PICONS.folder(13)}
-      <span class="ws-card-title" title="${escapeAttr(f.path)}">${escapeHtml(pathBasename(f.path))}</span>
-      ${knWorktreeTag(f)}
+      <span class="ws-card-title" title="${escapeAttr(f.path)}">${escapeHtml(knFolderLabel(f))}</span>
+      ${knWorktreeTag(f)}${knProjectTag(f)}
       ${st.name && st.name !== pathBasename(f.path) ? `<span class="ws-card-meta mono" title="The name codebase-memory-mcp knows it by">${escapeHtml(st.name)}</span>` : ''}
       <span class="kn-spacer"></span>
       ${busy ? '' : `<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="index-folder" title="${sum ? 'Read the folder again (only what changed)' : 'Build its code graph'}">${sum ? PICONS.refresh(11) : PICONS.play(11)}<span>${sum ? 'Refresh' : 'Index'}</span></button>`}
@@ -407,6 +441,7 @@ function knFolderCardHtml(project, s, f) {
     <div class="ws-card-text kn-folder-line">${line}</div>
     ${crossText ? `<div class="ws-card-text muted">${crossText}</div>` : ''}
     ${gapText ? `<div class="ws-card-text muted" title="See the Coverage view">${escapeHtml(gapText)}</div>` : ''}
+    ${st.inner?.length ? `<div class="ws-card-text muted" title="See the Coverage view">${knNumber(st.inner.length)} other graph${st.inner.length === 1 ? '' : 's'} of folders inside it repeat${st.inner.length === 1 ? 's' : ''} part of this one</div>` : ''}
   </div>`;
 }
 
@@ -571,12 +606,12 @@ function renderKnowledgeSettings(project, view, body) {
     const st = knFolderStatus(s, f.path) || {};
     const busy = st.job && KnowledgeModel.jobActive(st.job);
     return `<div class="ws-row kn-set-folder" data-kn-folder="${escapeAttr(f.path)}">
-      <div class="ws-row-k"><b>${escapeHtml(pathBasename(f.path))}${knWorktreeTag(f)}</b><span class="mono" title="${escapeAttr(f.path)}">${escapeHtml(st.name ? `CBM name: ${st.name}` : 'Not indexed yet')}</span></div>
+      <div class="ws-row-k"><b>${escapeHtml(knFolderLabel(f))}${knWorktreeTag(f)}${knProjectTag(f)}</b><span class="mono" title="${escapeAttr(f.path)}">${escapeHtml(st.name ? `CBM name: ${st.name}` : 'Not indexed yet')}</span></div>
       <div class="ws-row-v">
-        <label class="ws-check" title="Write the graph to .codebase-memory/graph.db.zst in the repository at each index, so a teammate who clones it starts from it"><input type="checkbox" data-kn-share${st.shared ? ' checked' : ''}>Share with the team</label>
+        ${f.mode === 'project' ? '' : `<label class="ws-check" title="Write the graph to .codebase-memory/graph.db.zst in the repository at each index, so a teammate who clones it starts from it"><input type="checkbox" data-kn-share${st.shared ? ' checked' : ''}>Share with the team</label>`}
         <button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="ignore" title="The files codebase-memory-mcp leaves out (.cbmignore, as .gitignore)">${PICONS.file(11)}<span>Ignore rules</span></button>
         ${busy ? `<span class="kn-busy" aria-hidden="true"></span><span class="ws-help">${escapeHtml(KnowledgeModel.jobText(st.job))}</span>` : `<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="index-folder">${st.indexed ? PICONS.refresh(11) : PICONS.play(11)}<span>${st.indexed ? 'Re-index' : 'Index'}</span></button>`}
-        ${st.indexed ? '<button type="button" class="ws-link-danger" data-kn-act="delete">Delete graph…</button>' : ''}
+        ${st.indexed && f.mode !== 'project' ? '<button type="button" class="ws-link-danger" data-kn-act="delete">Delete graph…</button>' : ''}
       </div>
     </div>`;
   }).join('');
@@ -585,7 +620,7 @@ function renderKnowledgeSettings(project, view, body) {
     <div class="ws-sec"><span>Code graph</span><span class="ws-saved" id="kn-set-saved">${PICONS.check(11)}<span>Saved</span></span></div>
     <div class="ws-card">
       <div class="ws-row">
-        <div class="ws-row-k"><b>Use the code graph</b><span>On in new projects. Index the project's folders (each one that joins it, and those without a graph when you turn this on), keep the graphs fresh as the repositories change, tell its agents about them (a Code graph section in CLAUDE.md and AGENTS.md), and give its Claude and Codex sessions the graph's tools. A worktree that joins the project gets a graph of its own, deleted when it leaves.</span></div>
+        <div class="ws-row-k"><b>Use the code graph</b><span>On in new projects. Index the project folder and the attached folders (each one that joins it, and those without a graph when you turn this on), one graph each, with a folder inside another left out of the one around it, keep the graphs fresh as the repositories change, tell its agents about them (a Code graph section in CLAUDE.md and AGENTS.md), and give its Claude and Codex sessions the graph's tools. A worktree that joins the project gets a graph of its own, deleted when it leaves.</span></div>
         <div class="ws-row-v">${knSwitchHtml('kn-set-enabled', settings.enabled)}</div>
       </div>
       <div class="ws-row">
@@ -598,7 +633,7 @@ function renderKnowledgeSettings(project, view, body) {
       </div>
       <div class="ws-row">
         <div class="ws-row-k"><b>Link the repositories</b><span>Find the calls one folder makes into another (HTTP, gRPC, queues) after each index.</span></div>
-        <div class="ws-row-v">${knSwitchHtml('kn-set-cross', settings.crossRepo)}<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="link"${folders.length < 2 ? ' disabled title="Needs two indexed folders"' : ''}>${PICONS.link(11)}<span>Link now</span></button></div>
+        <div class="ws-row-v">${knSwitchHtml('kn-set-cross', settings.crossRepo)}<button type="button" class="ws-ghost ws-ghost--sm" data-kn-act="link"${knAttachedFolders(project).length < 2 ? ' disabled title="Needs two attached folders with a graph"' : ''}>${PICONS.link(11)}<span>Link now</span></button></div>
       </div>
     </div>
 
@@ -665,7 +700,8 @@ function renderKnowledgeSettings(project, view, body) {
   on('restart', async () => { await window.api.knowledgeRestart(); s.stale = true; knRedraw(project); });
   view.querySelectorAll('.kn-set-folder').forEach(row => {
     const folder = row.dataset.knFolder;
-    row.querySelector('[data-kn-share]').onchange = (e) => save({ share: { [folder]: e.target.checked } });
+    const share = row.querySelector('[data-kn-share]');
+    if (share) share.onchange = (e) => save({ share: { [folder]: e.target.checked } });
     row.querySelector('[data-kn-act="index-folder"]')?.addEventListener('click', () => knIndex(project, folder, body));
     row.querySelector('[data-kn-act="ignore"]').onclick = () => knEditIgnore(project, folder);
     row.querySelector('[data-kn-act="delete"]')?.addEventListener('click', () => knConfirmDelete(project, folder, body));

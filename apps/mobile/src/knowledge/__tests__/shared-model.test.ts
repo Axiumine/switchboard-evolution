@@ -3,6 +3,8 @@ import { expect, test } from '@jest/globals';
 import {
   VIEWS,
   impactModel,
+  indexGaps,
+  modulesModel,
   searchResults,
   traceLayout,
   type TraceTree,
@@ -31,4 +33,16 @@ test('impact keeps the edge each symbol was reached by', () => {
   const r = impactModel({ impacted: [{ qn: 'shop.web.cart', hop: 2, via_qn: 'shop.api.orders.create', via_edge: 'HTTP_CALLS' }] });
   expect(r.impacted[0].viaName).toBe('create');
   expect(r.impacted[0].viaEdge).toBe('HTTP_CALLS');
+});
+
+test('the phone counts a left-out folder by name and keeps whole counts beside the rows listed', () => {
+  const g = indexGaps({
+    parse_partial: { files: [{ path: 'db/1.sql', error_ranges: '1-2' }], count: 410 },
+    not_indexed: { dirs: ['.claude', 'backend/.claude', 'frontend/.claude'], dirs_count: 3, files: [], files_count: 12 },
+  });
+  expect(g.counts.partial).toBe(410);
+  expect(g.listed.partial).toBe(1);
+  expect(g.truncated).toBe(true);
+  expect(g.dirsByName).toEqual([{ name: '.claude', count: 3, where: ['.', 'backend', 'frontend'] }]);
+  expect(modulesModel({ modules: [{ path: '/w/a/x', rel: 'x', kind: 'submodule', state: 'out' }] }).modules[0].state).toBe('out');
 });

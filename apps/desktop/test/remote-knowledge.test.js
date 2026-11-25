@@ -22,6 +22,9 @@ const VALID = {
   'knowledge-index-all': ['p1', { mode: 'full' }],
   'knowledge-link-cross-repo': ['p1'],
   'knowledge-delete-index': ['p1', API],
+  // The project folder is a folder like any other here: knowledge.js checks it belongs to the project.
+  'knowledge-modules': ['p1', '/code/projects/p1'],
+  'knowledge-delete-inner-graph': ['p1', API, 'code-api-backend'],
   'knowledge-adr': ['p1', API, { mode: 'set_sections', section_updates: { Context: 'Why' } }],
   'knowledge-ingest-traces': ['p1', API, { traces: [{ path: ['a.main', 'a.run'], count: 2 }], label: 'phone' }],
 };
@@ -64,6 +67,9 @@ test('wrong parameters are refused before the handler runs', async () => {
     ['knowledge-ingest-traces', ['p1', API, { traces: 'from a file' }]],
     ['knowledge-ingest-traces', ['p1', API, { filePath: '/etc/passwd' }]],
     ['knowledge-compare', ['p1', API]],
+    ['knowledge-modules', ['p1', 'code/api']],
+    ['knowledge-delete-inner-graph', ['p1', API, { name: 'x' }]],
+    ['knowledge-delete-inner-graph', ['p1', API, 'x'.repeat(201)]],
   ];
   for (const [method, params] of refused) {
     const reply = await api.call(method, params);

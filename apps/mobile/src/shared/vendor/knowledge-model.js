@@ -441,34 +441,110 @@
     };
   }
 
+  /** The first folder of a path in a graph ('.' for a file at its top). */
+  function topFolder(p) {
+    const parts = String(p || '').split('/').filter(Boolean);
+    return parts.length > 1 ? parts[0] : '.';
+  }
+
+  /** Paths counted by their first folder, most first. */
+  function byTopFolder(paths) {
+    const counts = new Map();
+    for (const p of paths) counts.set(topFolder(p), (counts.get(topFolder(p)) || 0) + 1);
+    return [...counts].map(([folder, count]) => ({ folder, count })).sort((a, b) => b.count - a.count || a.folder.localeCompare(b.folder));
+  }
+
+  /**
+   * Left-out folders by their name, most first: ".claude" in eight places is
+   * one rule, not eight. `where` holds each place's parent ('.' at the top).
+   */
+  function dirsByName(dirs) {
+    const groups = new Map();
+    for (const d of dirs) {
+      const parts = String(d).replace(/\/+$/, '').split('/').filter(Boolean);
+      if (!parts.length) continue;
+      const name = parts[parts.length - 1];
+      const where = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+      const g = groups.get(name) || { name, count: 0, where: [] };
+      g.count += 1;
+      g.where.push(where);
+      groups.set(name, g);
+    }
+    return [...groups.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }
+
   /**
    * index_status with verbose: the files the graph holds in part (with the
    * lines it could not read), could not read, skipped, and leaves out on
-   * purpose (ignore rules, binary files), with why.
+   * purpose (ignore rules, binary files), with why. Ask for `diagnostics:
+   * 'full'`: 'summary' gives five rows of each list. CBM lists at most 500 rows
+   * of each, so `counts` (whole) can exceed the lists; `listed` says how many
+   * rows came, and `complete` whether a list is the whole of it.
    */
   function indexGaps(status) {
     const s = status || {};
     const entry = (f) => (typeof f === 'string' ? { path: f } : f || {});
     const files = (block, fn) => (block && Array.isArray(block.files) ? block.files.map(f => fn(entry(f))) : []);
     const blocks = [s.parse_partial, s.parse_unusable, s.skipped, s.not_indexed];
+    const partial = files(s.parse_partial, f => ({ path: String(f.path || ''), ranges: f.error_ranges ? String(f.error_ranges) : null }));
+    const unusable = files(s.parse_unusable, f => ({ path: String(f.path || ''), reason: f.reason || f.error || null }));
+    const skipped = files(s.skipped, f => ({ path: String(f.path || ''), reason: f.reason || null }));
+    const notIndexed = files(s.not_indexed, f => ({ path: String(f.path || ''), reason: f.reason || null }));
+    const notIndexedDirs = Array.isArray(s.not_indexed?.dirs) ? s.not_indexed.dirs.map(d => String(typeof d === 'string' ? d : d?.path || '')).filter(Boolean) : [];
+    // The lists can be cut short; the counts are whole (never below what was listed).
+    const counts = {
+      partial: Math.max(countOf(s.parse_partial), partial.length),
+      unusable: Math.max(countOf(s.parse_unusable), unusable.length),
+      skipped: Math.max(countOf(s.skipped), skipped.length),
+      notIndexed: Math.max(countOf(s.not_indexed, 'files_count'), notIndexed.length),
+      notIndexedDirs: Math.max(countOf(s.not_indexed, 'dirs_count'), notIndexedDirs.length),
+    };
+    const listed = { partial: partial.length, unusable: unusable.length, skipped: skipped.length, notIndexed: notIndexed.length, notIndexedDirs: notIndexedDirs.length };
+    const complete = {};
+    for (const key of Object.keys(counts)) complete[key] = listed[key] >= counts[key];
+    // Why files were left out, from the rows listed.
+    const reasons = new Map();
+    for (const f of notIndexed) reasons.set(f.reason || 'other', (reasons.get(f.reason || 'other') || 0) + 1);
     return {
-      partial: files(s.parse_partial, f => ({ path: String(f.path || ''), ranges: f.error_ranges ? String(f.error_ranges) : null })),
-      unusable: files(s.parse_unusable, f => ({ path: String(f.path || ''), reason: f.reason || f.error || null })),
-      skipped: files(s.skipped, f => ({ path: String(f.path || ''), reason: f.reason || null })),
-      notIndexed: files(s.not_indexed, f => ({ path: String(f.path || ''), reason: f.reason || null })),
-      notIndexedDirs: Array.isArray(s.not_indexed?.dirs) ? s.not_indexed.dirs.map(String) : [],
-      truncated: blocks.some(b => b && b.truncated),
-      // The lists can be cut short; the counts are whole.
-      counts: {
-        partial: countOf(s.parse_partial),
-        unusable: countOf(s.parse_unusable),
-        skipped: countOf(s.skipped),
-        notIndexed: countOf(s.not_indexed, 'files_count'),
-        notIndexedDirs: countOf(s.not_indexed, 'dirs_count'),
-      },
+      partial,
+      unusable,
+      skipped,
+      notIndexed,
+      notIndexedDirs,
+      truncated: blocks.some(b => b && b.truncated) || Object.values(complete).some(c => !c),
+      counts,
+      listed,
+      complete,
+      dirsByName: dirsByName(notIndexedDirs),
+      partialByFolder: byTopFolder(partial.map(f => f.path)),
+      reasons: [...reasons].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count),
       note: s.coverage_note || null,
     };
   }
+
+  /** knowledge.modules(): each repository inside a folder and where its code is. */
+  function modulesModel(result) {
+    const r = result || {};
+    const list = (Array.isArray(r.modules) ? r.modules : []).map(m => ({
+      path: String(m.path || ''),
+      rel: String(m.rel || ''),
+      kind: ['submodule', 'clone', 'checkout'].includes(m.kind) ? m.kind : 'clone',
+      state: ['own', 'in', 'out', 'unknown'].includes(m.state) ? m.state : 'unknown',
+      gaps: Number(m.gaps) || 0,
+      graph: m.graph ? String(m.graph) : null,
+      attached: !!m.attached,
+    }));
+    return { modules: list, limited: !!r.limited };
+  }
+
+  const MODULE_STATE_TEXT = Object.freeze({
+    own: 'a graph of its own',
+    in: 'in this graph',
+    out: 'in no graph: this folder\'s rules leave it out',
+    unknown: 'this folder has no graph yet',
+  });
+
+  const MODULE_KIND_TEXT = Object.freeze({ submodule: 'submodule', clone: 'repository', checkout: 'checkout of another repository' });
 
   /** check_index_coverage: each path asked about, and what to do with it. */
   function coverageModel(result) {
@@ -642,6 +718,11 @@
     schemaModel,
     indexSummary,
     indexGaps,
+    dirsByName,
+    byTopFolder,
+    modulesModel,
+    MODULE_STATE_TEXT,
+    MODULE_KIND_TEXT,
     coverageModel,
     queryTable,
     cellText,

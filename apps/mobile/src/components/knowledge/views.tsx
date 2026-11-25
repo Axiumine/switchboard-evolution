@@ -6,10 +6,10 @@ import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 're
 import { MarkdownPreview } from '@/components/files/MarkdownPreview';
 import { Sheet } from '@/components/Sheet';
 import { act } from '@/projects/queries';
-import { knowledgeAction, knowledgeQuery, useKnowledgeQuery, type KnowledgeStatus } from '@/knowledge/queries';
+import { knowledgeAction, knowledgeQuery, useKnowledgeModules, useKnowledgeQuery, type KnowledgeStatus } from '@/knowledge/queries';
 import { impactArgs, type ImpactAgainst } from '@/knowledge/model';
 import {
-  ambiguity, cellText, codeResults, compareModel, CYPHER_EXAMPLES, expandTrace, impactModel, indexGaps, queryTable, searchResults,
+  ambiguity, cellText, codeResults, compareModel, CYPHER_EXAMPLES, expandTrace, impactModel, indexGaps, MODULE_KIND_TEXT, MODULE_STATE_TEXT, modulesModel, queryTable, searchResults,
   shortName, testImpactModel, TRACE_MODES, traceSides, utf8Bytes,
   type Impact, type KnowledgeSymbol, type QueryTable, type TestImpact, type TraceLayoutNode, type TraceSides, type TraceTree,
 } from '@/shared/vendor/knowledge-model';
@@ -383,13 +383,24 @@ export function AdrView({ projectId, folder }: ViewProps) {
 
 // --- Coverage ---
 
-export function CoverageView({ projectId, folder }: ViewProps) {
-  const q = useKnowledgeQuery(projectId, folder, 'index_status', { verbose: true, diagnostics: 'summary' });
+/** "410", or "500 of 1,345 listed" when codebase-memory-mcp sent fewer rows than there are. */
+function countText(total: number, listed: number): string {
+  return listed < total ? `${listed.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} listed` : total.toLocaleString('en-US');
+}
+
+export function CoverageView({ projectId, folder, status }: ViewProps) {
+  // 'full': every row CBM keeps (up to 500 of each list); 'summary' would give five.
+  const q = useKnowledgeQuery(projectId, folder, 'index_status', { verbose: true, diagnostics: 'full' });
+  const mq = useKnowledgeModules(projectId, folder);
   if (q.isLoading) return <View style={kstyles.page}><KLoading text="Reading the index…" /></View>;
   if (q.error) return <View style={kstyles.page}><KError error={q.error} /></View>;
   const g = indexGaps(q.data);
-  const list = (title: string, items: { path: string; ranges?: string | null; reason?: string | null }[]) => (items.length ? (
-    <KCard title={title} meta={String(items.length)}>
+  const mods = mq.data ? modulesModel(mq.data) : null;
+  const inner = status.folders.find((f) => f.path === folder)?.inner || [];
+  const list = (title: string, items: { path: string; ranges?: string | null; reason?: string | null }[], total: number, hint?: string, groups?: { folder: string; count: number }[]) => (total ? (
+    <KCard title={title} meta={`${countText(total, items.length)} file${total === 1 ? '' : 's'}`}>
+      {hint ? <Text style={[kstyles.help, styles.pad]}>{hint}</Text> : null}
+      {groups && groups.length > 1 ? <Chips items={groups.slice(0, 16).map((x) => ({ key: x.folder, label: x.folder === '.' ? '(top)' : `${x.folder}/`, count: x.count }))} /> : null}
       {items.slice(0, 200).map((f, i) => (
         <View key={`${f.path}${i}`} style={[styles.pad, styles.gap]}>
           <Text style={styles.file} numberOfLines={1} ellipsizeMode="head">{f.path}</Text>
@@ -397,18 +408,50 @@ export function CoverageView({ projectId, folder }: ViewProps) {
           {f.reason ? <Text style={kstyles.help}>{f.reason}</Text> : null}
         </View>
       ))}
+      {items.length > 200 ? <Text style={[kstyles.help, styles.pad]}>The first 200 shown; the desktop lists them all.</Text> : null}
     </KCard>
   ) : null);
+  const attach = (path: string) => {
+    knowledgeAction('attach-project-folder', [projectId, { path, mode: 'in-place' }]).catch((err) => Alert.alert('Could not attach it', String(err?.message || err)));
+  };
+  const deleteInner = (name: string) => {
+    knowledgeAction('knowledge-delete-inner-graph', [projectId, folder, name]).catch((err) => Alert.alert('Could not delete it', String(err?.message || err)));
+  };
   return (
     <ScrollView contentContainerStyle={kstyles.page}>
-      {list('Read in part', g.partial)}
-      {list('Could not read', g.unusable)}
-      {list('Skipped', g.skipped)}
-      <KCard title="Left out on purpose" meta={`${Math.max(g.counts.notIndexed, g.notIndexed.length)} files · ${Math.max(g.counts.notIndexedDirs, g.notIndexedDirs.length)} folders`}>
-        {g.notIndexedDirs.length ? <Text style={[styles.file, styles.pad]}>{g.notIndexedDirs.join(' · ')}</Text> : null}
-        <Chips items={Object.entries(g.notIndexed.reduce<Record<string, number>>((acc, f) => { const r = f.reason || 'other'; acc[r] = (acc[r] || 0) + 1; return acc; }, {})).map(([key, count]) => ({ key, label: key, count }))} />
+      {inner.length ? (
+        <KCard title="Other graphs inside this folder" meta={String(inner.length)}>
+          <Text style={[kstyles.help, styles.pad]}>codebase-memory-mcp made these when an agent&apos;s session started in a subfolder. Their files are in this folder&apos;s graph already, so they only repeat it.</Text>
+          {inner.map((x) => (
+            <View key={x.name} style={[styles.pad, styles.gap]}>
+              <Text style={styles.file} numberOfLines={1} ellipsizeMode="head">{x.rel}</Text>
+              <KButton label="Delete" onPress={() => deleteInner(x.name)} />
+            </View>
+          ))}
+        </KCard>
+      ) : null}
+      {mods && (mods.modules.length || mods.limited) ? (
+        <KCard title="Repositories inside" meta={`${mods.modules.length}${mods.limited ? '+' : ''}`}>
+          <Text style={[kstyles.help, styles.pad]}>Submodules and repositories cloned inside this folder: in this graph, in a graph of their own, or in none when this folder&apos;s rules leave them out (attach one of those to read it).</Text>
+          {mods.modules.map((m) => (
+            <View key={m.rel} style={[styles.pad, styles.gap]}>
+              <Text style={styles.file} numberOfLines={1} ellipsizeMode="head">{m.rel}</Text>
+              <Text style={kstyles.help}>{MODULE_KIND_TEXT[m.kind]} · {MODULE_STATE_TEXT[m.state]}{m.state === 'in' && m.gaps ? ` · ${m.gaps} gaps flagged` : ''}</Text>
+              {m.state === 'out' && !m.attached ? <KButton label="Attach" onPress={() => attach(m.path)} /> : null}
+            </View>
+          ))}
+        </KCard>
+      ) : null}
+      {g.truncated ? <Text style={[kstyles.help, styles.pad]}>codebase-memory-mcp lists at most 500 rows of each list; the counts are whole.</Text> : null}
+      {list('Read in part', g.partial, g.counts.partial, 'In the graph, but codebase-memory-mcp\'s parser could not read the lines shown: what is on them may be missing. Read those lines in the file.', g.partialByFolder)}
+      {list('Could not read', g.unusable, g.counts.unusable, 'None of their code is in the graph: read them directly.')}
+      {list('Skipped', g.skipped, g.counts.skipped)}
+      <KCard title="Left out on purpose" meta={`${countText(g.counts.notIndexed, g.listed.notIndexed)} files · ${countText(g.counts.notIndexedDirs, g.listed.notIndexedDirs)} folders`}>
+        <Text style={[kstyles.help, styles.pad]}>The same rule leaves a folder out wherever it is: the folders are counted by name.</Text>
+        <Chips items={g.dirsByName.slice(0, 40).map((d) => ({ key: d.name, label: d.name, count: d.count }))} />
+        <Chips items={g.reasons.map((r) => ({ key: r.reason, label: r.reason, count: r.count }))} />
       </KCard>
-      {!g.partial.length && !g.unusable.length && !g.skipped.length ? <KEmpty>Every source file was read whole. (A clean index means no recorded gap, not proof that nothing is missing.)</KEmpty> : null}
+      {!g.counts.partial && !g.counts.unusable && !g.counts.skipped ? <KEmpty>Every source file was read whole. (A clean index means no recorded gap, not proof that nothing is missing.)</KEmpty> : null}
     </ScrollView>
   );
 }

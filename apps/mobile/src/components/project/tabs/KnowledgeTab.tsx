@@ -4,7 +4,7 @@ import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { KButton, KCard, KEmpty, KError, KLoading, KSection, KSeg, kstyles, SymbolRow, Chips } from '@/components/knowledge/parts';
 import { AdrView, CompareView, CoverageView, ImpactView, openSymbol, QueryView, SearchView, TraceView } from '@/components/knowledge/views';
 import { Sheet } from '@/components/Sheet';
-import { chooseFolder, folderLabel, worktreeNote } from '@/knowledge/model';
+import { chooseFolder, folderLabel, linkableFolders, worktreeNote } from '@/knowledge/model';
 import { knowledgeAction, SLOW_TIMEOUT_MS, useKnowledgeQuery, useKnowledgeStatus, useKnowledgeSupported, type KnowledgeFolder, type KnowledgeStatus } from '@/knowledge/queries';
 import type { Project } from '@/projects/model';
 import { KNOWLEDGE_VIEWS, parseKnowledgeView, type KnowledgeView } from '@/projects/tabs';
@@ -71,7 +71,7 @@ function Gate({ project, status, view, folder }: { project: Project; status: Kno
       </View>
     );
   }
-  if (!folder) return <View style={kstyles.page}><KEmpty>No folders are attached to this project.</KEmpty></View>;
+  if (!folder) return <View style={kstyles.page}><KEmpty>This project has no folder to index yet.</KEmpty></View>;
   if (view === 'settings') return <SettingsView project={project} status={status} />;
   // Only a first index takes the page; a refresh of a graph there leaves the view as it is.
   if (folder.job && jobActive(folder.job) && !folder.indexed) {
@@ -130,6 +130,7 @@ function OverviewView({ project, status, folder }: { project: Project; status: K
           <KCard key={f.path} title={folderLabel(f)} meta={busy ? jobText(f.job) : sum ? `${sum.nodes.toLocaleString('en-US')} nodes · ${ago(sum.indexedAt)}` : 'not indexed'} right={busy ? null : <KButton label={sum ? 'Refresh' : 'Index'} onPress={() => refresh(f.path)} />}>
             {sum && sum.crossRepo.status === 'ran' ? <Text style={[kstyles.help, styles.pad]}>Linked with {sum.crossRepo.targets.join(', ') || 'nothing'} · {sum.crossRepo.edges} cross-repo calls</Text> : null}
             {sum && (sum.gaps.files || sum.gaps.partial) ? <Text style={[kstyles.help, styles.pad]}>{sum.gaps.files} files left out · {sum.gaps.partial} read in part</Text> : null}
+            {f.inner?.length ? <Text style={[kstyles.help, styles.pad]}>{f.inner.length} other graph{f.inner.length === 1 ? '' : 's'} of folders inside it repeat part of this one (see Coverage)</Text> : null}
           </KCard>
         );
       })}
@@ -173,7 +174,7 @@ function SettingsView({ project, status }: { project: Project; status: Knowledge
     <ScrollView contentContainerStyle={kstyles.page}>
       <KSection>Code graph</KSection>
       <KCard>
-        {row('Use the code graph', 'On in new projects. Index the folders (each one that joins, and those without a graph when turned on), keep the graphs fresh, tell the project\'s agents about them, and give their sessions the graph\'s tools.', <Switch value={settings.enabled} onValueChange={(v) => save({ enabled: v })} accessibilityLabel="Use the code graph" />)}
+        {row('Use the code graph', 'On in new projects. Index the project folder and the attached folders (each one that joins, and those without a graph when turned on), one graph each, keep the graphs fresh, tell the project\'s agents about them, and give their sessions the graph\'s tools.', <Switch value={settings.enabled} onValueChange={(v) => save({ enabled: v })} accessibilityLabel="Use the code graph" />)}
         {row('Refresh automatically', 'After a commit, a checkout or saved files.', <Switch value={settings.autoRefresh} onValueChange={(v) => save({ autoRefresh: v })} accessibilityLabel="Refresh automatically" />)}
         {row('Link the repositories', 'Find the calls one folder makes into another.', <Switch value={settings.crossRepo} onValueChange={(v) => save({ crossRepo: v })} accessibilityLabel="Link the repositories" />)}
         {row('How much to read', INDEX_MODES.find((m) => m.id === settings.mode)?.hint || '', <KButton label={INDEX_MODES.find((m) => m.id === settings.mode)?.label || 'Full'} onPress={() => setMode(true)} />)}
@@ -186,17 +187,19 @@ function SettingsView({ project, status }: { project: Project; status: Knowledge
             <Text style={styles.rowLabel}>{folderLabel(f)}</Text>
             <Text style={kstyles.help}>{f.name ? `CBM name: ${f.name}` : 'Not indexed yet'}</Text>
             {worktreeNote(f) ? <Text style={kstyles.help}>{worktreeNote(f)}</Text> : null}
-            <View style={kstyles.bar}>
-              <Switch value={!!settings.share[f.path]} onValueChange={(v) => save({ share: { [f.path]: v } })} accessibilityLabel="Share with the team" />
-              <Text style={kstyles.help}>Share with the team</Text>
-            </View>
+            {f.mode === 'project' ? <Text style={kstyles.help}>The project&apos;s own folder (plans, notes, tools), where its sessions start. Its graph keeps out the folders inside it that have one of their own.</Text> : (
+              <View style={kstyles.bar}>
+                <Switch value={!!settings.share[f.path]} onValueChange={(v) => save({ share: { [f.path]: v } })} accessibilityLabel="Share with the team" />
+                <Text style={kstyles.help}>Share with the team</Text>
+              </View>
+            )}
             <View style={kstyles.bar}>
               <KButton label={f.indexed ? 'Re-index' : 'Index'} onPress={() => knowledgeAction('knowledge-index', [project.id, f.path, {}]).catch((err) => Alert.alert('Not started', err.message))} />
-              {f.indexed ? <KButton label="Delete graph…" danger onPress={() => remove(f)} /> : null}
+              {f.indexed && f.mode !== 'project' ? <KButton label="Delete graph…" danger onPress={() => remove(f)} /> : null}
             </View>
           </View>
         ))}
-        {status.folders.length > 1 ? <View style={styles.pad}><KButton label="Link now" onPress={() => knowledgeAction('knowledge-link-cross-repo', [project.id], { timeoutMs: SLOW_TIMEOUT_MS }).catch((err) => Alert.alert('Not linked', err.message))} /></View> : null}
+        {linkableFolders(status.folders).length > 1 ? <View style={styles.pad}><KButton label="Link now" onPress={() => knowledgeAction('knowledge-link-cross-repo', [project.id], { timeoutMs: SLOW_TIMEOUT_MS }).catch((err) => Alert.alert('Not linked', err.message))} /></View> : null}
       </KCard>
       {status.agents ? (
         <>
