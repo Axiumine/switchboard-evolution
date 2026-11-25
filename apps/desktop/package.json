@@ -1,7 +1,7 @@
 {
   "name": "switchboard-e",
   "productName": "Switchboard Evolution",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "private": true,
   "description": "Switchboard Evolution: a desktop app for running and managing coding-agent sessions across projects",
   "homepage": "https://github.com/vivi7/switchboard-evolution",
