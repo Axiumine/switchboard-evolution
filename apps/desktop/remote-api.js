@@ -73,6 +73,8 @@ allow('read-session-tail', [isId, isInt(1, 5000)]);
 allow('search', [isString(20), isString(500), optional(isBool)]);
 allow('search-session-ids', [isString(500), optional(arrayOf(isId, 5000))]);
 allow('toggle-star', [isId]);
+// A project's pinned sessions, in the order they were dragged into.
+allow('set-pinned-order', [arrayOf(isId, 1000)]);
 allow('rename-session', [isId, optional(isString(200))]);
 allow('archive-session', [isId, isInt(0, 1)]);
 allow('stop-session', [isId]);
@@ -114,6 +116,8 @@ allow('update-project', [isId, fields({
   name: isName, status: oneOf('active', 'done'), sharedBranch: isBool, branchName: optional(isName),
   defaultCwd: optional(isPath), snoozedUntil: optional(isString(40)), starred: isBool,
 })]);
+// The Starred section, in the order it was dragged into.
+allow('set-starred-order', [arrayOf(isId, 1000)]);
 // Forgets the project; its folder stays on disk.
 allow('delete-project', [isId]);
 allow('create-track', [isId, fields({ name: isName, cwd: optional(isPath), cli: optional(isString(40)) }, ['name'])]);

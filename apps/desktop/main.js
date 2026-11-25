@@ -123,7 +123,7 @@ if ((app.isPackaged && fs.existsSync(path.join(process.resourcesPath, 'app-updat
   });
 }
 const {
-  getMeta, getAllMeta, toggleStar, setName, setArchived,
+  getMeta, getAllMeta, toggleStar, setPinnedOrder, setName, setArchived,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedSession, upsertCachedSessions,
   updateCachedAiTitle,
   deleteCachedSession, deleteCachedFolder,
@@ -625,6 +625,8 @@ ipcMain.handle('create-project', guarded(async (spec) => {
   return result;
 }));
 ipcMain.handle('update-project', guarded((id, patch) => projects.updateProject(id, patch || {})));
+// The Starred section in the order it was dragged into (pinned-order.js).
+ipcMain.handle('set-starred-order', guarded((ids) => projects.setStarredOrder(ids)));
 ipcMain.handle('delete-project', guarded((id) => projects.deleteProject(id)));
 ipcMain.handle('attach-project-folder', guarded(trustingNewFolders((id, spec) => projects.attachFolder(id, spec || {}))));
 ipcMain.handle('detach-project-folder', guarded((id, folderPath, opts) => projects.detachFolder(id, folderPath, opts || {})));
@@ -2306,6 +2308,16 @@ ipcMain.handle('toggle-star', (_event, sessionId) => {
   // A pin from a phone shows in the window, and the other way round.
   notifyRendererProjectsChanged('sessions');
   return result;
+});
+
+// --- IPC: set-pinned-order ---
+// A project's pinned sessions in the order they were dragged into
+// (pinned-order.js), from the sidebar or a phone.
+ipcMain.handle('set-pinned-order', (_event, sessionIds) => {
+  if (!Array.isArray(sessionIds) || !sessionIds.every(id => typeof id === 'string')) return { error: 'The order is a list of sessions' };
+  setPinnedOrder(sessionIds);
+  notifyRendererProjectsChanged('sessions');
+  return { ok: true };
 });
 
 // --- IPC: rename-session ---

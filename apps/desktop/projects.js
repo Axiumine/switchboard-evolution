@@ -699,6 +699,8 @@ function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
     snoozedUntil: row.snoozedUntil || null,
     snoozedAt: row.snoozedAt || null,
     starred: !!row.starred,
+    // Its place in the Starred section (pinned-order.js), null until a drag.
+    starRank: row.starred && Number.isInteger(row.starRank) ? row.starRank : null,
     created: row.created, modified: row.modified,
     lastActivity: null, sessionCount: 0,
     addedFilesPath: added.dirPath,
@@ -806,7 +808,11 @@ function updateProject(id, patch) {
     clean.status = patch.status;
   }
   if (patch?.sharedBranch !== undefined) clean.sharedBranch = !!patch.sharedBranch;
-  if (patch?.starred !== undefined) clean.starred = !!patch.starred;
+  if (patch?.starred !== undefined) {
+    clean.starred = !!patch.starred;
+    // Starred or unstarred, it loses its place: starred again, it comes after the ordered ones.
+    if (clean.starred !== !!row.starred) clean.starRank = null;
+  }
   if (patch?.branchName !== undefined) {
     clean.branchName = typeof patch.branchName === 'string' && patch.branchName.trim() ? patch.branchName.trim() : null;
   }
@@ -826,12 +832,26 @@ function updateProject(id, patch) {
   }
   if (!Object.keys(clean).length) return { ok: true, project: loadProjectNode(id) };
   // A star is not work on the project: it leaves the modified time alone.
-  if (Object.keys(clean).some(key => key !== 'starred')) clean.modified = new Date().toISOString();
+  if (Object.keys(clean).some(key => key !== 'starred' && key !== 'starRank')) clean.modified = new Date().toISOString();
   db.updateProject(id, clean);
   // The brief's title comes from the project name, so a rename rewrites it.
   if (clean.name) syncProjectBrief(id).catch(err => log.error?.('[projects] could not retitle the brief', err));
   notifyRendererProjectsChanged();
   return { ok: true, project: loadProjectNode(id) };
+}
+
+/**
+ * The Starred section in the order given, from a drag in the sidebar or on a
+ * phone (pinned-order.js): the first one is 0. A project not starred keeps no
+ * place. Like a star, an order is not work on a project.
+ */
+function setStarredOrder(ids) {
+  if (!Array.isArray(ids)) return { error: 'The order is a list of projects' };
+  const rows = ids.map(id => (typeof id === 'string' ? db.getProject(id) : null));
+  if (rows.some(row => !row)) return { error: 'Unknown project in the order' };
+  rows.forEach((row, rank) => { if (row.starred) db.updateProject(row.id, { starRank: rank }); });
+  notifyRendererProjectsChanged();
+  return { ok: true };
 }
 
 /**
@@ -2239,7 +2259,7 @@ async function saveProjectActionsLog(projectId, folderPath, opts) {
 module.exports = {
   init,
   projectsRoot, slugify, uniqueSlug, defaultBrief, managedBlock, addBriefSection, onFolderChange, onProjectCreated,
-  createProject, updateProject, deleteProject, attachFolder, detachFolder, requireAttachedFolder,
+  createProject, updateProject, setStarredOrder, deleteProject, attachFolder, detachFolder, requireAttachedFolder,
   folderGitStatus, folderGitInfo, projectGitInfo, projectGitDiff, stageProjectGitFiles, stageProjectGitLines, discardProjectGitFiles, ignoreProjectGitPaths, readProjectGitEditFile, saveProjectGitEditFile,
   projectGitGraph, projectGitGraphCommitDetail, projectGitGraphCompareDetail,
   projectGitGraphFileAtRevision, projectGitGraphFileDiffBetween,

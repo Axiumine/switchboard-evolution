@@ -299,6 +299,9 @@ db.exec(`
   // The color of a pinned session's star (an index into star-tints.js), so
   // several pinned sessions tell apart. Null while not pinned.
   if (!cols.has('starTint')) db.exec('ALTER TABLE session_meta ADD COLUMN starTint INTEGER');
+  // A pinned session's place among its project's pinned ones, from a drag
+  // (pinned-order.js). Null until the first drag, and again once unpinned.
+  if (!cols.has('pinRank')) db.exec('ALTER TABLE session_meta ADD COLUMN pinRank INTEGER');
 }
 {
   // Sessions pinned before tints existed, or by an older Switchboard sharing
@@ -329,6 +332,8 @@ db.exec(`
   if (!cols.has('snoozedAt')) db.exec('ALTER TABLE projects ADD COLUMN snoozedAt TEXT');
   // A starred project sits above the others in the sidebar, as a starred session does.
   if (!cols.has('starred')) db.exec('ALTER TABLE projects ADD COLUMN starred INTEGER DEFAULT 0');
+  // Its place in the Starred section, from a drag (pinned-order.js); null until then.
+  if (!cols.has('starRank')) db.exec('ALTER TABLE projects ADD COLUMN starRank INTEGER');
 }
 // Which session started or finished a plan phase or a todo. Items are matched
 // by their text, not their line, so editing the file above an item does not
@@ -371,13 +376,17 @@ const stmts = {
     INSERT INTO session_meta (sessionId, name) VALUES (?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET name = excluded.name
   `),
-  // A pin takes the tint given; an unpin drops its tint, so the next pin draws again.
+  // A pin takes the tint given; an unpin drops its tint, so the next pin draws
+  // again. Either way the session loses its place in the pinned order: pinned
+  // again, it comes after the ordered ones.
   upsertStar: db.prepare(`
     INSERT INTO session_meta (sessionId, starred, starTint) VALUES (@sessionId, 1, @tint)
     ON CONFLICT(sessionId) DO UPDATE SET
       starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END,
-      starTint = CASE WHEN starred = 1 THEN NULL ELSE @tint END
+      starTint = CASE WHEN starred = 1 THEN NULL ELSE @tint END,
+      pinRank = NULL
   `),
+  setPinRank: db.prepare('UPDATE session_meta SET pinRank = ? WHERE sessionId = ? AND starred = 1'),
   starTints: db.prepare('SELECT starTint FROM session_meta WHERE starred = 1 AND starTint IS NOT NULL AND sessionId != ?'),
   upsertArchived: db.prepare(`
     INSERT INTO session_meta (sessionId, archived) VALUES (?, ?)
@@ -552,6 +561,13 @@ function toggleStar(sessionId) {
   return { starred: row.starred, starTint: row.starTint ?? null };
 }
 
+/** The pinned sessions in the order given, the first one 0. Sessions not pinned are left alone. */
+const setPinnedOrder = db.transaction((sessionIds) => {
+  let changed = 0;
+  sessionIds.forEach((sessionId, rank) => { changed += stmts.setPinRank.run(rank, sessionId).changes; });
+  return changed;
+});
+
 function setArchived(sessionId, archived) {
   stmts.upsertArchived.run(sessionId, archived ? 1 : 0);
 }
@@ -720,7 +736,7 @@ function deleteSetting(key) {
 
 // --- Project functions ---
 
-const PROJECT_PATCH_KEYS = ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'starred', 'modified'];
+const PROJECT_PATCH_KEYS = ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'starred', 'starRank', 'modified'];
 const TRACK_PATCH_KEYS = ['name', 'cwd', 'cli', 'status', 'sortOrder'];
 const SCHEDULE_PATCH_KEYS = ['name', 'trackId', 'cwd', 'prompt', 'every', 'atHour', 'atMinute', 'weekday', 'cron', 'cli', 'enabled', 'catchUp', 'lastRunAt', 'lastSessionId', 'sessionConfig'];
 
@@ -969,7 +985,7 @@ function withImmediateTransaction(fn) {
 }
 
 module.exports = {
-  getMeta, getAllMeta, setName, toggleStar, setArchived,
+  getMeta, getAllMeta, setName, toggleStar, setPinnedOrder, setArchived,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedSession, upsertCachedSessions,
   updateCachedAiTitle, getSlugSessions,
   deleteCachedSession, deleteCachedFolder,

@@ -4,6 +4,7 @@ import type { Folder, Session } from '@/sessions/model';
 import {
   DEFAULT_LIST_UI,
   drawerGroups,
+  pinnedSessions,
   projectInitials,
   projectListRows,
   sessionsWithoutProject,
@@ -192,5 +193,59 @@ describe('projectListRows', () => {
     expect(closed.at(-1)).toMatchObject({ kind: 'toggle', section: 'other', count: 2, open: false });
     const open = projectListRows(input({ other, ui: { ...DEFAULT_LIST_UI, otherOpen: true } }));
     expect(open.slice(-4).map((r) => (r.kind === 'folder' ? `folder:${r.projectPath}:${r.open}` : r.kind))).toEqual(['folder:/fresh:true', 'session', 'folder:/stale:false', 'end']);
+  });
+});
+
+describe('the pinned sessions of a project', () => {
+  const pinnedProject = () => project('app', {
+    sessions: [session('loose', HOUR), session('pin-b', HOUR, { starred: 1, pinRank: 1 }), session('old-pin', 40 * DAY, { starred: 1 })],
+    tracks: [track('api', [session('pin-a', 2 * HOUR, { starred: 1, pinRank: 0 }), session('api-1', HOUR), session('gone', HOUR, { starred: 1, archived: 1 })])],
+  });
+
+  it('lists them in their order, then the ones without a place newest first, without the archived', () => {
+    expect(pinnedSessions(pinnedProject()).map((s) => s.sessionId)).toEqual(['pin-a', 'pin-b', 'old-pin']);
+  });
+
+  it('come first in every grouping, in a Pinned group, and nowhere else', () => {
+    for (const mode of ['time', 'track', 'state'] as const) {
+      const groups = drawerGroups(pinnedProject(), mode, (id) => (id === 'api-1' ? 'running' : ''), NOW);
+      expect(groups[0]).toMatchObject({ key: 'pinned', title: 'Pinned', unlimited: true, ordered: true });
+      expect(groups[0].sessions.map((s) => s.sessionId)).toEqual(['pin-a', 'pin-b', 'old-pin']);
+      const below = groups.slice(1).flatMap((g) => g.sessions.map((s) => s.sessionId));
+      expect(below.filter((id) => id.includes('pin') || id === 'gone')).toEqual([]);
+    }
+  });
+
+  it('leave no Pinned group when there are none', () => {
+    const groups = drawerGroups(project('app', { sessions: [session('loose', HOUR)] }), 'time', quiet, NOW);
+    expect(groups.map((g) => g.key)).not.toContain('pinned');
+  });
+
+  it('show their track in the drawer, as in the other groups but Track', () => {
+    const rows = projectListRows({
+      groups: { active: [pinnedProject()], snoozed: [], done: [] }, found: null, other: [],
+      ui: { ...DEFAULT_LIST_UI, groupMode: 'track', expanded: { app: true } }, stateOf: quiet, archivedOf: () => [], now: NOW,
+    });
+    const pinRows = rows.filter((r): r is Extract<ListRow, { kind: 'session' }> => r.kind === 'session' && r.key.includes(':pinned:'));
+    expect(pinRows.map((r) => r.session.sessionId)).toEqual(['pin-a', 'pin-b', 'old-pin']);
+    expect(pinRows.every((r) => r.showTrack && r.ordered)).toBe(true);
+    const others = rows.filter((r) => r.kind === 'session' && !r.key.includes(':pinned:'));
+    expect(others.every((r) => r.kind === 'session' && !r.ordered)).toBe(true);
+  });
+});
+
+describe('the rows ordered by dragging', () => {
+  const input = (found: ListInput['found']): ListInput => ({
+    groups: { starred: [project('s1', { starred: true }), project('s2', { starred: true })], active: [project('a1'), project('a2'), project('a3')], snoozed: [], done: [] },
+    found, other: [], ui: DEFAULT_LIST_UI, stateOf: quiet, archivedOf: () => [], now: NOW,
+  });
+  const ordered = (rows: ListRow[]) => rows.filter((r) => r.kind === 'project' && r.ordered).map((r) => r.key);
+
+  it('are the Starred section, and only it', () => {
+    expect(ordered(projectListRows(input(null)))).toEqual(['p:s1', 'p:s2']);
+  });
+
+  it('are none while a search shows only some', () => {
+    expect(ordered(projectListRows(input(new Map([['s1', []], ['s2', []], ['a2', []]]))))).toEqual([]);
   });
 });

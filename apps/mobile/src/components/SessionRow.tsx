@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { cliLabel, relativeTime, sessionTitle, type RowState, type Session } from '@/sessions/model';
 import { starTintColor } from '@/shared/vendor/star-tints';
+import { ReorderHandle } from './reorder/Reorder';
 import { LeaveOutButton } from './SearchStopBar';
 import { colors, spacing } from '@/theme';
 
@@ -31,10 +32,12 @@ type Props = {
   onLeaveOut?: (session: Session) => void;
   /** The folder it runs in, short ("Code/switchboard"): shown in a list that has no folder headers. */
   folder?: string;
+  /** The drag handle of a pinned one, inside a ReorderItem. */
+  handle?: boolean;
 };
 
 /** One session: its state dot, title, and the CLI, age and size underneath. */
-export const SessionRow = memo(function SessionRow({ session, state, onPress, onLongPress, inset, onLeaveOut, folder }: Props) {
+export const SessionRow = memo(function SessionRow({ session, state, onPress, onLongPress, inset, onLeaveOut, folder, handle }: Props) {
   // The folder comes after the age, so a long path is what gets cut short.
   const meta = [cliLabel(session), relativeTime(session.modified || session.created)];
   if (folder) meta.push(folder);
@@ -60,6 +63,7 @@ export const SessionRow = memo(function SessionRow({ session, state, onPress, on
       {/* Each pinned session in its own color, so several tell apart. */}
       {session.starred ? <Text style={[styles.star, { color: starTintColor(session.starTint, session.sessionId) }]}>★</Text> : null}
       {onLeaveOut ? <LeaveOutButton label={sessionTitle(session)} onPress={() => onLeaveOut(session)} /> : null}
+      {handle ? <ReorderHandle label={sessionTitle(session)} /> : null}
     </Pressable>
   );
 });

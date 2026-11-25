@@ -35,6 +35,7 @@ const modules = {
   'repo-colors.js': 'apps/desktop/public/repo-colors.js',
   'repo-selection.js': 'apps/desktop/public/repo-selection.js',
   'action-icons.js': 'apps/desktop/public/action-icons.js',
+  'pinned-order.js': 'apps/desktop/public/pinned-order.js',
 };
 
 const header = (file) =>

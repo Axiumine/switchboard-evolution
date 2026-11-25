@@ -41,6 +41,17 @@ test('starred projects at work go above Active; snoozed and done ones stay on th
   expect(groups.done.map((p) => p.id)).toEqual(['old-fav', 'old']);
 });
 
+test('the Starred section keeps the order it was dragged into; one starred since comes after, in the order it came', () => {
+  const projects = [
+    project('new-a', { starred: true }),
+    project('second', { starred: true, starRank: 1 }),
+    project('new-b', { starred: true, starRank: null }),
+    project('first', { starred: true, starRank: 0 }),
+  ];
+  const groups = groupProjects(projects, { now, live: {}, notices: noticesFrom({}) });
+  expect(groups.starred.map((p) => p.id)).toEqual(['first', 'second', 'new-a', 'new-b']);
+});
+
 test('a project reads as its most urgent session', () => {
   const p = project('web', {
     sessions: [{ sessionId: 'a', projectPath: '/p' }],
