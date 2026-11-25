@@ -6,6 +6,7 @@ const KEYWORD = '#FF79C6';
 const STRING = '#F1FA8C';
 const COMMENT = '#6272A4';
 const TYPE = '#8BE9FD';
+const NUMBER = '#BD93F9';
 
 /** The colour of the first piece that reads `text`, on a line. */
 const colourOf = (line: CodePiece[] | null | undefined, text: string) => line?.find((piece) => piece.text === text)?.style?.color;
@@ -15,8 +16,8 @@ test('a file\'s language comes from its name, then its extension', () => {
   expect(languageOf('src/app/index.tsx')?.name).toBe('TSX');
   expect(languageOf('README.MD')?.name).toBe('Markdown');
   expect(languageOf('locales/de.json')?.name).toBe('JSON');
-  // The editor reads these with stream modes: no colours here.
-  expect(languageOf('scripts/build.sh')).toBeNull();
+  expect(languageOf('scripts/build.sh')?.name).toBe('Shell');
+  expect(languageOf('docker/Dockerfile')?.name).toBe('Dockerfile');
   expect(languageOf('Makefile')).toBeNull();
 });
 
@@ -42,8 +43,40 @@ test('other languages: JSON, Python, YAML, Markdown with a code block', () => {
   expect(colourOf(md[2], 'const')).toBe(KEYWORD);
 });
 
+test('Shell, TOML and Dockerfile are coloured by their stream modes, as in the editor', () => {
+  const sh = highlightCodeLines('# build\nif [ -n "$NAME" ]; then\n  echo "hi $USER"\nfi', 'run.sh')!;
+  expect(sh[0]).toEqual([{ text: '# build', style: { color: COMMENT } }]);
+  expect(colourOf(sh[1], 'if')).toBe(KEYWORD);
+  expect(textOf(sh[2])).toBe('  echo "hi $USER"');
+  expect(sh[2].some((piece) => piece.style?.color === STRING)).toBe(true);
+  const toml = highlightCodeLines('[server]\nport = 8080 # web\nhost = "x"', 'config.toml')!;
+  expect(toml[1].some((piece) => piece.style?.color === NUMBER)).toBe(true);
+  expect(colourOf(toml[2], '"x"')).toBe(STRING);
+  const docker = highlightCodeLines('FROM node:20\nRUN npm ci', 'Dockerfile')!;
+  expect(colourOf(docker[0], 'FROM')).toBe(KEYWORD);
+  expect(colourOf(docker[1], 'RUN')).toBe(KEYWORD);
+});
+
+test('SQL takes the editor\'s words: keywords, types, a table\'s column left plain', () => {
+  const lines = highlightCodeLines("SELECT u.id FROM users u\nLEFT JOIN t ON t.id = u.id WHERE x IS NOT NULL AND d > DATE '2024-01-01'", 'q.sql')!;
+  expect(colourOf(lines[0], 'SELECT')).toBe(KEYWORD);
+  // CodeMirror 5's SQL would make ".id" a type; the editor's leaves it plain.
+  expect(lines[0].some((piece) => piece.text.includes('.id') && piece.style)).toBe(false);
+  expect(colourOf(lines[1], 'LEFT')).toBe(KEYWORD);
+  expect(colourOf(lines[1], 'NULL')).toBe(KEYWORD);
+  expect(colourOf(lines[1], 'DATE')).toBe(TYPE);
+  expect(colourOf(lines[1], "'2024-01-01'")).toBe(STRING);
+});
+
+test('a stream mode goes on from line to line, and from a diff\'s context into its removed and added lines', () => {
+  const code = diffCodeLines(['@@ -1,3 +1,3 @@', ' /* a', '-old */', '+new */', ' SELECT 1;'], 'q.sql')!;
+  expect(code[2]).toEqual([{ text: 'old */', style: { color: COMMENT } }]);
+  expect(code[3]).toEqual([{ text: 'new */', style: { color: COMMENT } }]);
+  expect(colourOf(code[4], 'SELECT')).toBe(KEYWORD);
+});
+
 test('a language that is not highlighted, or code too long, gives null', () => {
-  expect(highlightCodeLines('echo hi', 'run.sh')).toBeNull();
+  expect(highlightCodeLines('all: build', 'Makefile')).toBeNull();
   expect(highlightCodeLines('x'.repeat(600 * 1024), 'a.js')).toBeNull();
 });
 
