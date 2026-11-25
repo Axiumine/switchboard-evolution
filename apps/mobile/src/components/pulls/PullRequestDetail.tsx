@@ -6,7 +6,8 @@ import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Tex
 import { create } from 'zustand';
 
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
-import { LINE_STYLES, mono } from '@/components/git/diff-style';
+import { DiffLines } from '@/components/git/DiffLines';
+import { mono } from '@/components/git/diff-style';
 import { usePullRefresh } from '@/components/PullRefresh';
 import { CommitFiles, PullRequestFiles } from '@/components/pulls/PullRequestFiles';
 import { openInAppBrowser } from '@/components/pulls/PullRequestWebPage';
@@ -465,7 +466,7 @@ function ThreadCard({ thread, prAuthor, onMenu, onReact, onAddReaction, onReply,
       {open ? (
         <>
           <ScrollView horizontal style={styles.hunk} contentContainerStyle={styles.hunkContent}>
-            <View>{lines.map((line, i) => <Text key={i} style={[styles.hunkLine, LINE_STYLES[line.kind]]}>{line.text || ' '}</Text>)}</View>
+            <View><DiffLines lines={lines} filename={thread.path} style={styles.hunkLine} /></View>
           </ScrollView>
           {thread.comments.map((comment) => <MessageCard key={comment.id} message={comment} prAuthor={prAuthor} compact onMenu={onMenu} onReact={onReact} onAddReaction={onAddReaction} />)}
           <View style={styles.threadActions}>

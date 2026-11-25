@@ -2,7 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { LINE_STYLES, mono } from '@/components/git/diff-style';
+import { DiffLines } from '@/components/git/DiffLines';
+import { mono } from '@/components/git/diff-style';
 import { diffLines } from '@/git/model';
 import { FILE_TOOLS, fileLetter, fileRows, noPatchText, type PullRequestFile } from '@/pulls/model';
 import { setPullFileView, useCommitFiles, usePullFileView, usePullRequestFiles, type PullRef } from '@/pulls/queries';
@@ -205,7 +206,7 @@ function FileDiff({ file, tree, depth, open, onToggle, viewed, onToggleViewed }:
         file.patch ? (
           <ScrollView horizontal style={styles.diff} contentContainerStyle={styles.diffContent}>
             <View>
-              {lines.map((line, i) => <Text key={i} style={[styles.line, LINE_STYLES[line.kind]]}>{line.text || ' '}</Text>)}
+              <DiffLines lines={lines} filename={file.path} style={styles.line} />
             </View>
           </ScrollView>
         ) : <Text style={styles.noPatch}>{noPatchText(file)}</Text>
