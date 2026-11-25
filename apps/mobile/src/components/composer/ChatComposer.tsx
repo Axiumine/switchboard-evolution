@@ -10,7 +10,7 @@ import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import { AttachButton } from './AttachButton';
 import { AttachmentStrip } from './AttachmentStrip';
-import { CommandsButton } from './CommandsButton';
+import { useCommandsPanel } from './CommandsButton';
 import { CommandSuggestions } from './CommandSuggestions';
 import { ComposerField } from './ComposerField';
 import { SendButton, StopButton } from './SendButton';
@@ -46,6 +46,15 @@ export function ChatComposer({ sessionId, session, cli, state, working, onOpenTe
   const [sending, setSending] = useState(false);
 
   const write = useCallback((data: string) => request('terminal-input', [sessionId, data]), [sessionId]);
+  const commands = useCommandsPanel({
+    sessionId,
+    session,
+    state,
+    write,
+    onInsert: (text) => setDraftText(sessionId, applyToDraft(draft.text, text)),
+    // A command that opens a picker shows it in the terminal.
+    onRan: (entry) => { if (entry.flags?.includes('opensMenu')) onOpenTerminal(); },
+  });
   const shown = canAttach ? attachments.items : [];
   const empty = !draft.text.trim() && shown.length === 0;
   const stop = state === 'busy' && empty;
@@ -70,17 +79,11 @@ export function ChatComposer({ sessionId, session, cli, state, working, onOpenTe
         <StateStrip state={state} cli={cli} working={working} stopShown={stop} onStop={interrupt} onOpenTerminal={onOpenTerminal} />
         {canAttach ? <AttachmentStrip attachments={attachments} hint={uploadHint(attachments.items, computer)} /> : null}
         <CommandSuggestions sessionId={sessionId} session={session} text={draft.text} onPick={(text) => setDraftText(sessionId, text)} />
+        {/* The Commands panel pinned in the page, over the row it types into. */}
+        {commands.dock}
         <View style={styles.row}>
           {canAttach ? <AttachButton attachments={attachments} /> : null}
-          <CommandsButton
-            sessionId={sessionId}
-            session={session}
-            state={state}
-            write={write}
-            onInsert={(text) => setDraftText(sessionId, applyToDraft(draft.text, text))}
-            // A command that opens a picker shows it in the terminal.
-            onRan={(entry) => { if (entry.flags?.includes('opensMenu')) onOpenTerminal(); }}
-          />
+          {commands.button}
           <ComposerField
             value={draft.text}
             onChangeText={(text) => setDraftText(sessionId, text)}

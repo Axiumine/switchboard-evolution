@@ -187,3 +187,31 @@ test('Mod+Shift+K is the palette key', () => {
   assert.equal(key({ metaKey: false, ctrlKey: true }), false);
   assert.equal(key({ code: 'KeyJ' }), false);
 });
+
+test('pinned, the palette stays open after a pick and when the click is outside it', async () => {
+  const { context, calls } = setup({ sessions: { s1: { sessionId: 's1', runtime: 'claude' } } });
+  open(context);
+  vm.runInContext('commandPalette.pinned = true', context);
+  await context.commandPaletteAct('primary');
+  assert.deepEqual(calls, [['input', 's1', '/compact '], ['focus', 's1']]);
+  assert.notEqual(palette(context), null);
+  context.commandPaletteOutside({ target: {} });
+  assert.notEqual(palette(context), null);
+  vm.runInContext('commandPalette.pinned = false', context);
+  context.commandPaletteOutside({ target: {} });
+  assert.equal(palette(context), null);
+});
+
+test('in a window of its own, the palette is the window: a pick, Escape or the key never close it', async () => {
+  const { context, calls } = setup({ sessions: { s1: { sessionId: 's1', runtime: 'claude' } } });
+  open(context);
+  vm.runInContext('commandPalette.window = true', context);
+  await context.commandPaletteAct('run');
+  assert.deepEqual(calls.slice(0, 2), [['input', 's1', '/compact '], ['input', 's1', '\r']]);
+  context.commandPaletteKey({ key: 'Escape', preventDefault() {} });
+  context.commandPaletteOutside({ target: {} });
+  assert.notEqual(palette(context), null);
+  vm.runInContext('var COMMANDS_WINDOW = { sessionId: "s1" }', context);
+  context.toggleCommandPalette();
+  assert.notEqual(palette(context), null);
+});

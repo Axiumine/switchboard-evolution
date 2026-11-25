@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import ProcessesScreen from '@/app/(tabs)/processes';
 import StatsScreen from '@/app/(tabs)/stats';
+import { CommandsWindow } from '@/components/composer/CommandsWindow';
 import { NoteEditor } from '@/components/notes/NoteEditor';
 import { PullRequestWebPage } from '@/components/pulls/PullRequestWebPage';
 import { useProject } from '@/projects/queries';
@@ -58,6 +59,7 @@ function Window({ spec }: { spec: WindowSpec }) {
         {spec.kind === 'stats' ? <StatsScreen /> : null}
         {spec.kind === 'processes' ? <ProcessesScreen /> : null}
         {spec.kind === 'web' ? <PullRequestWebPage url={spec.url} /> : null}
+        {spec.kind === 'commands' ? <CommandsWindow sessionId={spec.sessionId} runtime={spec.runtime} type={spec.type} /> : null}
       </View>
     </WindowNavigation>
   );

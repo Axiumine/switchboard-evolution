@@ -307,7 +307,7 @@ function createWindow() {
     taskManager.shutdown();
     // They close with the main window, and open again with the next one.
     freezeOpenWindows();
-    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows, ...viewerFileWindows, ...webWindows.keys()]) if (!win.isDestroyed()) win.close();
+    for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows, ...viewerFileWindows, ...webWindows.keys(), ...commandsWindows.values()]) if (!win.isDestroyed()) win.close();
     mainWindow = null;
   });
 }
@@ -2331,6 +2331,44 @@ function openWebWindow(url, title) {
 }
 
 ipcMain.handle('open-web-window', (_event, url, title) => openWebWindow(url, title));
+
+// --- The terminal's Commands palette in a window of its own ---
+// From the palette's window button (public/command-catalog-view.js):
+// commands.html for one session, filling the window and kept open, above the
+// others until its pin says otherwise. A pick types into that session. The
+// same session's window comes forward; another session's opens a new one, a
+// little lower and to the right. Not opened again at the next start; they
+// close with the main window.
+const commandsWindows = new Map(); // session id → BrowserWindow
+const COMMANDS_WINDOW_SPEC = { title: 'Commands', width: 760, height: 600, minWidth: 420, minHeight: 300, onTop: true };
+// What the palette's rules read of the session: whether its CLI works or waits for an answer.
+const COMMANDS_WINDOW_EVENTS = new Set(['cli-busy-state', 'terminal-notification', 'command-catalog-updated']);
+
+addSink((channel, args) => {
+  if (!COMMANDS_WINDOW_EVENTS.has(channel)) return;
+  for (const win of commandsWindows.values()) if (!win.isDestroyed()) win.webContents.send(channel, ...args);
+});
+
+function openCommandsWindow(info) {
+  const sessionId = typeof info?.sessionId === 'string' ? info.sessionId.trim() : '';
+  if (!sessionId) return false;
+  const open = commandsWindows.get(sessionId);
+  if (open && !open.isDestroyed()) {
+    bringForward(open);
+    return true;
+  }
+  const text = (value, max) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+  const title = text(info.title, 200);
+  const win = createPageWindow('commands', { ...COMMANDS_WINDOW_SPEC, title: title ? `Commands · ${title}` : COMMANDS_WINDOW_SPEC.title }, { offset: 24 * commandsWindows.size });
+  commandsWindows.set(sessionId, win);
+  const query = { session: sessionId, title };
+  for (const key of ['runtime', 'type', 'cli']) if (text(info[key], 40)) query[key] = text(info[key], 40);
+  win.loadFile(path.join(__dirname, 'public', 'commands.html'), { query });
+  win.on('closed', () => { if (commandsWindows.get(sessionId) === win) commandsWindows.delete(sessionId); });
+  return true;
+}
+
+ipcMain.handle('open-commands-window', (_event, info) => openCommandsWindow(info));
 
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When

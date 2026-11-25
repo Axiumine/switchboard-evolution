@@ -15,11 +15,37 @@
 // and in each card of the grid view; Mod+Shift+K opens it too. The entries come from the main process
 // (command-catalog.js), the rules from command-catalog-model.js, which the
 // phone's sheet shares.
+//
+// At the top right of the palette: the pin keeps it open in the page (a click
+// outside or a pick no longer closes it, and it follows the session in front),
+// the next button opens it in a window of its own for that session
+// (commands.html, commands-window.js), and the last one closes it. In its own
+// window the palette fills the window and stays open; its pin keeps the
+// window above the others, as the Task Manager's does.
 
 const ENTER_AFTER_MS = 80;
+const COMMAND_PALETTE_PIN_KEY = 'commandPalette.pinned';
 let commandCatalogClis = [];
 let commandCatalogBtn = null;
 let commandPalette = null;
+
+/** The palette fills a window of its own (commands.html), for one session. */
+function commandPaletteInWindow() {
+  return typeof COMMANDS_WINDOW !== 'undefined' && !!COMMANDS_WINDOW;
+}
+
+/** Pinned in the page, as left the last time. */
+function commandPalettePinned() {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem(COMMAND_PALETTE_PIN_KEY) === '1'; } catch { return false; }
+}
+
+function setCommandPalettePinned(pinned) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (pinned) localStorage.setItem(COMMAND_PALETTE_PIN_KEY, '1');
+    else localStorage.removeItem(COMMAND_PALETTE_PIN_KEY);
+  } catch {}
+}
 
 function catalogModel() {
   return window.CommandCatalogModel;
@@ -71,16 +97,24 @@ async function initCommandCatalog() {
   updateCommandCatalogButton();
 }
 
-/** Show the button for the session in front, and close a palette left open on another session. */
+/**
+ * Show the button for the session in front. A palette left open on another
+ * session closes, or, pinned, moves to the session now in front when it has
+ * a catalog.
+ */
 function updateCommandCatalogButton() {
   if (!commandCatalogBtn) return;
   const target = commandCatalogTarget();
   const shown = !!target && sessionHasCommandCatalog(target.session);
   commandCatalogBtn.style.display = shown ? '' : 'none';
-  if (commandPalette && (!target || target.sessionId !== commandPalette.sessionId)) closeCommandPalette();
+  if (!commandPalette || (target && target.sessionId === commandPalette.sessionId)) return;
+  if (commandPalette.pinned && shown) openCommandPalette();
+  else closeCommandPalette();
 }
 
 function toggleCommandPalette() {
+  // In a window of its own the palette is the window: the key does not close it.
+  if (commandPaletteInWindow()) return;
   if (commandPalette) closeCommandPalette();
   else openCommandPalette();
 }
@@ -93,13 +127,17 @@ async function openCommandPalette(options = {}) {
   const cli = options.cli || (isShell ? (commandPalette && commandPalette.cli) || commandCatalogClis[0] : undefined);
   // What the window knows of the session's CLI, for one main has no row of yet.
   const runtime = isShell ? 'terminal' : target.session.runtime || 'claude';
+  const inWindow = commandPaletteInWindow();
   const el = document.createElement('div');
-  el.className = 'cmdp';
+  el.className = inWindow ? 'cmdp cmdp--window' : 'cmdp';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', 'Commands');
   el.innerHTML = '<div class="cmdp-loading">Loading commands…</div>';
   document.body.appendChild(el);
-  commandPalette = { el, sessionId: target.sessionId, catalog: null, tab: null, query: '', selected: 0, cli, confirm: null, anchor: options.anchor || null };
+  commandPalette = {
+    el, sessionId: target.sessionId, catalog: null, tab: null, query: '', selected: 0, cli, confirm: null, anchor: options.anchor || null,
+    window: inWindow, pinned: !inWindow && commandPalettePinned(),
+  };
   placeCommandPalette();
   commandCatalogBtn && commandCatalogBtn.setAttribute('aria-expanded', 'true');
   commandCatalogBtn && commandCatalogBtn.classList.add('active');
@@ -136,7 +174,8 @@ function closeCommandPalette() {
 }
 
 function commandPaletteOutside(event) {
-  if (!commandPalette) return;
+  // Pinned, or in a window of its own, it stays until closed.
+  if (!commandPalette || commandPalette.pinned || commandPalette.window) return;
   const anchor = commandPalette.anchor || commandCatalogBtn;
   if (commandPalette.el.contains(event.target) || (anchor && anchor.contains(event.target))) return;
   closeCommandPalette();
@@ -147,7 +186,8 @@ function commandPaletteOutside(event) {
  * again at every render: a grid card may still be moving when it opens.
  */
 function placeCommandPalette() {
-  if (!commandPalette) return;
+  // In a window of its own it fills the window (command-catalog.css).
+  if (!commandPalette || commandPalette.window) return;
   const el = commandPalette.el;
   const button = commandPalette.anchor || commandCatalogBtn;
   const anchor = button && button.offsetParent ? button.getBoundingClientRect() : null;
@@ -252,6 +292,7 @@ function renderCommandPalette({ focusSearch = false } = {}) {
     '<div class="cmdp-head">' +
       `<input class="cmdp-search" type="search" placeholder="Search ${escapeHtml(M.cliLabel(catalog.cli))} commands" aria-label="Search commands" spellcheck="false">` +
       clis +
+      commandPaletteToolsHtml(p) +
     '</div>' +
     (p.query ? '' : `<div class="kn-seg cmdp-tabs" role="tablist">${tabs.map((t) =>
       `<button type="button" role="tab" class="kn-seg-btn${t.id === p.tab ? ' active' : ''}" aria-selected="${t.id === p.tab}" data-tab="${t.id}">${escapeHtml(t.label)}</button>`).join('')}</div>`) +
@@ -260,7 +301,7 @@ function renderCommandPalette({ focusSearch = false } = {}) {
         '<div class="cmdp-empty">Nothing matches.</div>'}</div>` +
       `<div class="cmdp-details">${commandDetailsHtml(entries[p.selected], catalog, state)}</div>` +
     '</div>' +
-    `<div class="cmdp-foot"><span>${footer}</span><span>↑↓ choose · ↵ ${catalog.target === 'agent' ? 'insert' : 'insert or copy'} · ${isMac ? '⌘↵' : 'Ctrl+↵'} run · Tab next tab · Esc close</span></div>` +
+    `<div class="cmdp-foot"><span>${footer}</span><span>↑↓ choose · ↵ ${catalog.target === 'agent' ? 'insert' : 'insert or copy'} · ${isMac ? '⌘↵' : 'Ctrl+↵'} run · Tab next tab · Esc ${p.window ? 'clear' : 'close'}</span></div>` +
     (catalog.notes && catalog.notes.length ? `<div class="cmdp-notes">${catalog.notes.map(escapeHtml).join('<br>')}</div>` : '');
   const search = p.el.querySelector('.cmdp-search');
   search.value = searchValue;
@@ -280,6 +321,7 @@ function renderCommandPalette({ focusSearch = false } = {}) {
     });
   });
   p.el.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => commandPaletteAct(b.dataset.act)));
+  bindCommandPaletteTools(p);
   placeCommandPalette();
   const selectedRow = p.el.querySelector('.cmdp-row.selected');
   if (selectedRow && selectedRow.scrollIntoView) selectedRow.scrollIntoView({ block: 'nearest' });
@@ -290,6 +332,60 @@ function renderCommandPalette({ focusSearch = false } = {}) {
   }
 }
 
+/**
+ * The buttons at the top right: the pin and a window of its own in the page,
+ * then close; in a window of its own, the pin that keeps the window above the
+ * others (tool-window.js), then close.
+ */
+function commandPaletteToolsHtml(p) {
+  const close = '<button type="button" class="cmdp-tool" data-tool="close" title="Close" aria-label="Close">' +
+    '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg></button>';
+  if (p.window) return `<div class="cmdp-tools"><button type="button" class="cmdp-tool" data-tool="on-top" aria-pressed="false"></button>${close}</div>`;
+  const pinTitle = p.pinned ? 'Pinned: stays open. Click to let a click outside close it' : 'Pin: keep it open in the page';
+  return '<div class="cmdp-tools">' +
+    `<button type="button" class="cmdp-tool${p.pinned ? ' on' : ''}" data-tool="pin" title="${pinTitle}" aria-label="${pinTitle}" aria-pressed="${!!p.pinned}">${ICONS.pin(14)}</button>` +
+    `<button type="button" class="cmdp-tool" data-tool="window" title="Open in a window of its own" aria-label="Open in a window of its own">${ICONS.popOut(14)}</button>` +
+    close + '</div>';
+}
+
+function bindCommandPaletteTools(p) {
+  const tool = (name) => p.el.querySelector(`[data-tool="${name}"]`);
+  const pin = tool('pin');
+  if (pin) pin.addEventListener('click', () => {
+    p.pinned = !p.pinned;
+    setCommandPalettePinned(p.pinned);
+    renderCommandPalette({ focusSearch: true });
+  });
+  const own = tool('window');
+  if (own) own.addEventListener('click', () => openCommandsWindow(p));
+  const onTop = tool('on-top');
+  if (onTop && typeof setupWindowPin === 'function') setupWindowPin(onTop);
+  const close = tool('close');
+  if (close) close.addEventListener('click', () => {
+    if (p.window) { window.close(); return; }
+    const sessionId = p.sessionId;
+    closeCommandPalette();
+    focusCommandTerminal(sessionId);
+  });
+}
+
+/** The palette's session in a window of its own (main.js openCommandsWindow); the one in the page closes. */
+function openCommandsWindow(p) {
+  const target = commandCatalogTarget();
+  const session = target && target.sessionId === p.sessionId ? target.session : (sessionMap.get(p.sessionId) || {});
+  const title = typeof cleanDisplayName === 'function'
+    ? cleanDisplayName(session.name || session.aiTitle || session.summary || '')
+    : String(session.name || session.aiTitle || session.summary || '');
+  window.api.openCommandsWindow({
+    sessionId: p.sessionId,
+    runtime: session.runtime || null,
+    type: session.type || null,
+    title: title || '',
+    cli: p.catalog && p.catalog.target === 'terminal' ? p.catalog.cli : null,
+  });
+  closeCommandPalette();
+}
+
 function commandPaletteKey(event) {
   const p = commandPalette;
   if (!p) return;
@@ -298,6 +394,11 @@ function commandPaletteKey(event) {
   if (event.key === 'Escape') {
     event.preventDefault();
     if (p.confirm) { p.confirm = null; renderCommandPalette({ focusSearch: true }); return; }
+    // In a window of its own Escape clears the search; the window stays.
+    if (p.window) {
+      if (p.query) { p.query = ''; p.selected = 0; const search = p.el.querySelector('.cmdp-search'); if (search) search.value = ''; renderCommandPalette({ focusSearch: true }); }
+      return;
+    }
     const sessionId = p.sessionId;
     closeCommandPalette();
     focusCommandTerminal(sessionId);
@@ -369,7 +470,9 @@ async function commandPaletteAct(action) {
   // The session's id now: a fork or a resume may have changed it since the palette opened.
   const target = commandCatalogTarget();
   const sessionId = target ? target.sessionId : p.sessionId;
-  closeCommandPalette();
+  // Pinned, or in a window of its own, the palette stays for the next pick.
+  const stays = p.pinned || p.window;
+  if (stays) { p.confirm = null; renderCommandPalette(); } else closeCommandPalette();
   sendCatalogCommand(sessionId, insertion.text, { run: action === 'run' });
   focusCommandTerminal(sessionId);
 }
