@@ -7,9 +7,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CodeEditor, type CodeEditorHandle } from '@/components/files/CodeEditor';
 import { CursorBar } from '@/components/files/CursorBar';
+import { FindBar } from '@/components/files/FindBar';
 import { LINE_STYLES, mono } from '@/components/git/diff-style';
 import { HeaderButton } from '@/components/HeaderButton';
-import type { EditorState } from '@/editor/bridge';
+import type { EditorState, FindResult } from '@/editor/bridge';
 import { lineDiff } from '@/git/history';
 import { diffLines } from '@/git/model';
 import { readEditFile, refreshGit, saveEditFile, stageFiles, stageLines, useCanEdit, useCanStage, type EditFile } from '@/git/stage-requests';
@@ -260,7 +261,10 @@ function GitFileEditor({ projectId, folder, path, note, onExit }: {
   const [error, setError] = useState('');
   const [edit, setEdit] = useState<EditorState>(CLEAN);
   const [saving, setSaving] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [found, setFound] = useState<FindResult | null>(null);
   const name = path.split('/').pop() || path;
+  const closeFind = () => { setFindOpen(false); setFound(null); };
 
   // Read once: reading again would put the computer's text over the edits.
   useEffect(() => {
@@ -309,6 +313,7 @@ function GitFileEditor({ projectId, folder, path, note, onExit }: {
           title: name,
           headerRight: () => (
             <View style={styles.headerButtons}>
+              <HeaderButton icon="search-outline" accessibilityLabel={findOpen ? 'Close find' : 'Find in file'} onPress={() => (findOpen ? closeFind() : setFindOpen(true))} disabled={!file} />
               <HeaderButton icon="arrow-undo-outline" accessibilityLabel="Undo" onPress={() => editor.current?.undo()} disabled={!edit.canUndo || saving} />
               <HeaderButton icon="arrow-redo-outline" accessibilityLabel="Redo" onPress={() => editor.current?.redo()} disabled={!edit.canRedo || saving} />
             </View>
@@ -320,7 +325,8 @@ function GitFileEditor({ projectId, folder, path, note, onExit }: {
       {file ? (
         <>
           <Text style={styles.editNote}>{note}</Text>
-          <CodeEditor ref={editor} text={file.content} base={file.base} filename={name} editable onState={setEdit} />
+          {findOpen ? <FindBar editor={editor} result={found} canReplace textLength={file.content.length} onClose={closeFind} /> : null}
+          <CodeEditor ref={editor} text={file.content} base={file.base} filename={name} editable onState={setEdit} onFind={setFound} onOpenFind={() => setFindOpen(true)} />
           <CursorBar cursors={edit.cursors} onAction={(action) => editor.current?.cursors(action)} />
         </>
       ) : <View style={styles.body} />}

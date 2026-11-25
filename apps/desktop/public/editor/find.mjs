@@ -19,71 +19,19 @@ import { EditorView, ViewPlugin, Decoration, keymap, runScopeHandlers } from '@c
 import { StateField, StateEffect, EditorSelection } from '@codemirror/state';
 import TextSearchLib from '../text-search.js';
 
-const MATCH_LIMIT = 20000;
+const MATCH_LIMIT = TextSearchLib.MATCH_LIMIT;
 const HISTORY_LIMIT = 50;
 const LARGE_DOC = 1024 * 1024;
 const KEY_SCOPE = 'sb-editor-keys';
 
 const isMacPlatform = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** The query as a regular expression for a whole document: ^ and $ at every line, as VS Code. */
-function editorRegExp(options) {
-  const regex = TextSearchLib.buildSearchRegExp(options);
-  return regex.flags.includes('m') ? regex : new RegExp(regex.source, `${regex.flags}m`);
-}
-
-/**
- * The matches of `regex` (global) in `text`, as [{ from, to }]: inside the
- * ranges of `scope` when it is given (Find in Selection), at most `limit`.
- * Empty matches are skipped. The regex sees the whole text, so lookbehinds
- * and ^ work at a scope's edges as they do elsewhere.
- */
-function findMatches(text, regex, scope = null, limit = MATCH_LIMIT) {
-  const out = [];
-  const ranges = scope && scope.length ? scope : [{ from: 0, to: text.length }];
-  for (const { from, to } of ranges) {
-    regex.lastIndex = from;
-    let m;
-    while (out.length < limit && (m = regex.exec(text)) !== null) {
-      if (m.index >= to) break;
-      if (m[0].length === 0) {
-        regex.lastIndex = m.index + 1;
-        if (regex.lastIndex > text.length) break;
-        continue;
-      }
-      if (m.index + m[0].length <= to) out.push({ from: m.index, to: m.index + m[0].length });
-    }
-    if (out.length >= limit) break;
-  }
-  regex.lastIndex = 0;
-  return out;
-}
-
-/** The index of the first match that ends after `pos`. */
-function firstMatchAfter(matches, pos) {
-  let lo = 0;
-  let hi = matches.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (matches[mid].to <= pos) lo = mid + 1; else hi = mid;
-  }
-  return lo;
-}
-
-/**
- * Where to go from the selection [from, to]: the first match that starts at
- * or after `to` (direction 1), or the last that starts before `from` (-1),
- * round the end of the document.
- */
-function nextMatchIndex(matches, from, to, direction) {
-  if (!matches.length) return -1;
-  if (direction > 0) {
-    const idx = matches.findIndex(m => m.from >= to && !(m.from === from && m.to === to));
-    return idx < 0 ? 0 : idx;
-  }
-  for (let i = matches.length - 1; i >= 0; i--) if (matches[i].from < from) return i;
-  return matches.length - 1;
-}
+// The document's matches and where to go next are text-search.js's (shared with
+// the phone's editor, scripts/editor-page/find.js there).
+const editorRegExp = TextSearchLib.documentRegExp;
+const findMatches = TextSearchLib.findAllMatches;
+const firstMatchAfter = TextSearchLib.firstMatchAfter;
+const nextMatchIndex = TextSearchLib.nextMatchIndex;
 
 // ── The query in the editor's state ─────────────────────────────────
 
@@ -472,14 +420,7 @@ function createFindBar(parent, target, { onReplaceInSource = null } = {}) {
   }
 
   function replacementFor(match, text) {
-    let replacement = replaceInput.value;
-    if (options.isRegex) {
-      const sticky = new RegExp(regex.source, `${regex.flags.replace('g', '')}y`);
-      sticky.lastIndex = match.from;
-      const m = sticky.exec(text);
-      if (m) replacement = TextSearchLib.expandReplacement(replacement, m);
-    }
-    return options.preserveCase ? TextSearchLib.preserveCase(text.slice(match.from, match.to), replacement) : replacement;
+    return TextSearchLib.documentReplacement(regex, options, text, match, replaceInput.value);
   }
 
   function replaceOne() {

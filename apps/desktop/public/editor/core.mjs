@@ -8,12 +8,13 @@
 // Every editor: line numbers, the current line, folding, matching brackets,
 // the other occurrences of the selection, several cursors, indentation
 // guides, find and replace, go to line, go to symbol, the status bar, the
-// right-click menu, Cmd/Ctrl+S. An editable one also: undo, indentation on
+// right-click menu, Cmd/Ctrl+S; for a file on disk (`file`), its language
+// server and Go to Definition (lsp-hook.mjs). An editable one also: undo, indentation on
 // typing, closing brackets and quotes, suggestions (the language's and the
 // words of the file; in Markdown only with Ctrl+Space, as in VS Code),
 // dragging text, and the commands on lines and case.
 import {
-  EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, highlightSpecialChars,
+  EditorView, ViewPlugin, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, highlightSpecialChars,
   scrollPastEnd, dropCursor,
 } from '@codemirror/view';
 import { EditorState, Compartment } from '@codemirror/state';
@@ -25,16 +26,21 @@ import { MergeView, unifiedMergeView } from '@codemirror/merge';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
 import { tags } from '@lezer/highlight';
 import {
-  getLanguageExt, markdownSupport, languageName, languageNameField, languageCompartment,
+  getLanguageExt, markdownSupport, languageName, languageNameField, languageCompartment, CODE_LANGUAGES,
 } from './languages.mjs';
+import { loadAddon, loadedAddon } from './addons.mjs';
 import { multipleCursors } from './cursors.mjs';
 import { findSupport, findKeymap, frameKeys } from './find.mjs';
 import { symbolKeymap } from './symbols.mjs';
 import { textCommandsKeymap, foldChordsKeymap } from './text-commands.mjs';
 import {
   detectIndentation, detectEol, eolField, setEol, textOf, normalizeEol, indentCompartment, indentationConfig,
-  indentGuides, whitespaceCompartment, whitespaceExtension, whitespaceSync, readShowWhitespace,
+  indentGuides,
 } from './indentation.mjs';
+import { prefExtensions, firstPrefExtensions, vimMode } from './prefs.mjs';
+import { languageServerSupport } from './lsp-hook.mjs';
+import { formatKeymap } from './format.mjs';
+import { syntaxLint, syntaxLintCompartment } from './syntax-lint.mjs';
 import { statusBar } from './status-bar.mjs';
 import { editorContextMenu } from './context-menu.mjs';
 
@@ -55,6 +61,28 @@ const appThemePatch = EditorView.theme({
 // focusable), so that after a click in it the keys work there, and copying
 // takes every selection.
 const focusableText = EditorView.contentAttributes.of({ tabindex: '0' });
+
+/**
+ * A file of a language the languages add-on colours (Kotlin, C#, Ruby …):
+ * plain at first, coloured once the add-on is loaded; also after the status
+ * bar switches to such a language.
+ */
+const lazyLanguage = ViewPlugin.fromClass(class {
+  constructor(view) { this.check(view); }
+  update(update) {
+    if (update.state.field(languageNameField, false) !== update.startState.field(languageNameField, false)) this.check(update.view);
+  }
+  check(view) {
+    const name = view.state.field(languageNameField, false);
+    const entry = CODE_LANGUAGES.find(l => l.name === name);
+    if (!entry || !entry.support.lazy || typeof document === 'undefined') return;
+    const colour = () => {
+      if (view.state.field(languageNameField, false) === name) view.dispatch({ effects: languageCompartment.reconfigure(entry.support()) });
+    };
+    if (loadedAddon(entry.support.addon)) Promise.resolve().then(colour);
+    else loadAddon(entry.support.addon).then(colour, () => {});
+  }
+});
 
 /** Calls `onChange` after every edit of the text (typing, undo, a reload), not on cursor moves. */
 function docChangeListener(onChange) {
@@ -96,17 +124,25 @@ async function mergedCompletions(context) {
  * 'markdown' forces Markdown, as the Plans and Notes editors do); `doc` is
  * the text it opens with, for the indentation and line breaks it finds there;
  * `readOnly` leaves out what edits; `statusBar` false leaves out the status
- * bar (a small query box, the original side of a diff); `merge` true for a
- * diff's editors. Returns { extensions, wrapCompartment }.
+ * bar (a small query box, the original side of a diff); `compact` (by
+ * default the same as no status bar) leaves out the minimap and sticky
+ * scroll; `merge` true for a diff's editors. `file`, the absolute path of the
+ * file on disk the editor shows, opts in to its language server and Go to
+ * Definition; `hooks` ({ openLocation, back, forward, remember }) lets them
+ * open another file where the editor is. Returns { extensions, wrapCompartment }.
  */
 function editorExtensions({
   filename = '', language = 'auto', doc = '', readOnly = false, wrap = false, onChange = null,
-  statusBar: withStatusBar = true, merge = false,
+  statusBar: withStatusBar = true, merge = false, compact = !withStatusBar, file = null, hooks = null,
 } = {}) {
   const markdownOnly = language === 'markdown';
   const name = markdownOnly ? 'Markdown' : languageName(filename);
   const wrapCompartment = new Compartment();
+  const context = { compact, readOnly, merge, file, hooks, filename };
   const extensions = [
+    // Vim, when it is on, before anything else: it takes the keys first.
+    firstPrefExtensions(context),
+    vimMode,
     lineNumbers(),
     highlightActiveLineGutter(),
     highlightSpecialChars(),
@@ -119,10 +155,13 @@ function editorExtensions({
     merge ? [] : scrollPastEnd(),
     languageCompartment.of(markdownOnly ? markdownSupport() : getLanguageExt(filename)),
     languageNameField.init(() => name),
+    lazyLanguage,
     indentCompartment.of(indentationConfig(detectIndentation(doc))),
     eolField.init(() => detectEol(doc)),
-    whitespaceCompartment.of(whitespaceExtension(readShowWhitespace())),
-    whitespaceSync,
+    prefExtensions(context),
+    languageServerSupport(),
+    // JSON and YAML syntax errors, while no language server gives the file's own.
+    syntaxLintCompartment.of(compact ? [] : syntaxLint()),
     findSupport,
     findKeymap(),
     symbolKeymap,
@@ -160,6 +199,7 @@ function editorExtensions({
         ...foldKeymap,
       ]),
       textCommandsKeymap,
+      formatKeymap,
       docChangeListener(onChange),
     );
   }

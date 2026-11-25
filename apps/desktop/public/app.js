@@ -39,6 +39,11 @@ const memoryPanel = new ViewerPanel(memoryViewer, {
   language: 'auto', storageKey: 'markdownPreviewMode',
   onSave: (filePath, content) => saveFilesViewFile(filePath, content),
   onPopOut: () => popOutCurrentFile(),
+  // Go to Definition into another file: opened as a click in the Files tab would.
+  openFile: async (filePath, { line, column }) => {
+    await openFileHere(filePath);
+    if (memoryPanel.filePath === filePath && line) memoryPanel.goToLocation(line, column);
+  },
 });
 const terminalArea = document.getElementById('terminal-area');
 const settingsViewer = document.getElementById('settings-viewer');

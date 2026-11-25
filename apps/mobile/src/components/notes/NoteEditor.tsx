@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CodeEditor } from '@/components/files/CodeEditor';
+import { FindBar } from '@/components/files/FindBar';
 import { FontSizeButtons } from '@/components/files/FontSizeButtons';
 import { MarkdownPreview } from '@/components/files/MarkdownPreview';
 import { ShareButton } from '@/components/files/ShareButton';
 import { HeaderButton } from '@/components/HeaderButton';
+import type { FindResult } from '@/editor/bridge';
 import { NOTE_FILE } from '@/notes/model';
 import { registerNoteFlush } from '@/notes/panel';
 import { useNote } from '@/notes/useNote';
@@ -21,6 +23,9 @@ import { colors, spacing } from '@/theme';
 export function NoteEditor({ projectId, floating = false }: { projectId: string; floating?: boolean }) {
   const { project, note, retry, editor, edit, saving, problem, onState, onChange, flush } = useNote(projectId);
   const [raw, setRaw] = useState(true);
+  const [findOpen, setFindOpen] = useState(false);
+  const [found, setFound] = useState<FindResult | null>(null);
+  const closeFind = () => { setFindOpen(false); setFound(null); };
   /** The text shown formatted: taken from the editor when the toggle is pressed. */
   const [preview, setPreview] = useState('');
   const root = project?.root;
@@ -57,6 +62,7 @@ export function NoteEditor({ projectId, floating = false }: { projectId: string;
           accessibilityLabel={raw ? 'Show formatted' : 'Show raw Markdown'}
           onPress={toggle}
         />
+        {raw ? <HeaderButton icon="search-outline" accessibilityLabel={findOpen ? 'Close find' : 'Find in note'} onPress={() => (findOpen ? closeFind() : setFindOpen(true))} /> : null}
         {root ? <ShareButton root={root} path={NOTE_FILE} name={NOTE_FILE} known={async () => ({ text: await editor.current?.getText() ?? '' })} /> : null}
         <HeaderButton icon="arrow-undo-outline" accessibilityLabel="Undo" onPress={() => editor.current?.undo()} disabled={!raw || !edit.canUndo} />
         <HeaderButton icon="arrow-redo-outline" accessibilityLabel="Redo" onPress={() => editor.current?.redo()} disabled={!raw || !edit.canRedo} />
@@ -66,7 +72,8 @@ export function NoteEditor({ projectId, floating = false }: { projectId: string;
       <View style={styles.fill}>
         {/* Kept while the formatted text shows, with its edits and history. */}
         <View style={[styles.fill, !raw && styles.hidden]}>
-          <CodeEditor ref={editor} text={note.text} filename={NOTE_FILE} editable wrap onState={onState} onChange={onChange} />
+          {findOpen && raw ? <FindBar editor={editor} result={found} canReplace textLength={note.text.length} onClose={closeFind} /> : null}
+          <CodeEditor ref={editor} text={note.text} filename={NOTE_FILE} editable wrap onState={onState} onChange={onChange} onFind={setFound} onOpenFind={() => setFindOpen(true)} />
         </View>
         {raw ? null : <MarkdownPreview root={root ?? ''} path={NOTE_FILE} content={preview} />}
       </View>

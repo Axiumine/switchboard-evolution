@@ -5,11 +5,12 @@ import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressa
 
 import { CodeEditor, type CodeEditorHandle } from '@/components/files/CodeEditor';
 import { CursorBar } from '@/components/files/CursorBar';
+import { FindBar } from '@/components/files/FindBar';
 import { FontSizeButtons } from '@/components/files/FontSizeButtons';
 import { MarkdownPreview } from '@/components/files/MarkdownPreview';
 import { ShareButton } from '@/components/files/ShareButton';
 import { HeaderButton } from '@/components/HeaderButton';
-import type { EditorState } from '@/editor/bridge';
+import type { EditorState, FindResult } from '@/editor/bridge';
 import { downloadSupported, type KnownContent } from '@/files/download';
 import { act } from '@/projects/queries';
 import { request, useConnection } from '@/store/connection';
@@ -27,7 +28,9 @@ const CLEAN: EditorState = { dirty: false, canUndo: false, canRedo: false, curso
  * Edit makes editable in place; Markdown is shown formatted, or raw in the
  * editor. `inline` draws its own bar (beside the tree of the Files tab on a
  * wide screen); otherwise its buttons go in the screen's header.
- * While editing, the cursor bar sits over the keyboard (CursorBar).
+ * While editing, the cursor bar sits over the keyboard (CursorBar). Find (the
+ * magnifier, or Cmd/Ctrl+F on a keyboard) puts the find bar over the text,
+ * with Replace while editing (FindBar).
  * Give it a `key` per file, so another file starts with no edit in progress.
  * With `line` (a search result) a text file opens scrolled to that line, which
  * is marked; a Markdown file then opens raw, where lines are lines.
@@ -44,10 +47,18 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
   const [editing, setEditing] = useState(false);
   const [edit, setEdit] = useState<EditorState>(CLEAN);
   const [saving, setSaving] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [found, setFound] = useState<FindResult | null>(null);
   const name = (path || '').split('/').pop() || 'File';
   const data = file.data;
   const isText = data?.previewType === 'text' || data?.previewType === 'html';
   const isMarkdown = /\.(md|markdown)$/i.test(name);
+  // Find works where the text is in the editor (not the formatted Markdown).
+  const canFind = isText && (!isMarkdown || raw);
+  const closeFind = () => { setFindOpen(false); setFound(null); };
+  const findButton = canFind ? (
+    <HeaderButton icon="search-outline" accessibilityLabel={findOpen ? 'Close find' : 'Find in file'} onPress={() => (findOpen ? closeFind() : setFindOpen(true))} />
+  ) : null;
 
   // Markdown is edited raw.
   const startEditing = () => {
@@ -87,6 +98,7 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
       return (
         <View style={styles.textButtons}>
           <Pressable onPress={cancel} disabled={saving} hitSlop={10} accessibilityRole="button"><Text style={styles.headerButtonDim}>Cancel</Text></Pressable>
+          {findButton}
           <FontSizeButtons />
           <HeaderButton icon="arrow-undo-outline" accessibilityLabel="Undo" onPress={() => editor.current?.undo()} disabled={!edit.canUndo || saving} />
           <HeaderButton icon="arrow-redo-outline" accessibilityLabel="Redo" onPress={() => editor.current?.redo()} disabled={!edit.canRedo || saving} />
@@ -99,12 +111,13 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
     if (!isText && !canShare) return null;
     return (
       <View style={styles.headerButtons}>
+        {findButton}
         {isText ? <FontSizeButtons /> : null}
         {isText && isMarkdown ? (
           <HeaderButton
             icon={raw ? 'document-text-outline' : 'code-slash-outline'}
             accessibilityLabel={raw ? 'Show formatted' : 'Show raw Markdown'}
-            onPress={() => setRaw((r) => !r)}
+            onPress={() => { closeFind(); setRaw((r) => !r); }}
           />
         ) : null}
         {canShare ? <ShareButton root={root} path={path} name={name} known={known} /> : null}
@@ -122,15 +135,20 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
     body = <MarkdownPreview root={root} path={path} content={data.content || ''} />;
   } else if (isText) {
     body = (
-      <CodeEditor
-        ref={editor}
-        text={data.content ?? ''}
-        filename={name}
-        editable={editing}
-        line={line}
-        wrap={isMarkdown}
-        onState={setEdit}
-      />
+      <View style={styles.editorBox}>
+        {findOpen ? <FindBar editor={editor} result={found} canReplace={editing} textLength={(data.content ?? '').length} onClose={closeFind} /> : null}
+        <CodeEditor
+          ref={editor}
+          text={data.content ?? ''}
+          filename={name}
+          editable={editing}
+          line={line}
+          wrap={isMarkdown}
+          onState={setEdit}
+          onFind={setFound}
+          onOpenFind={() => setFindOpen(true)}
+        />
+      </View>
     );
   } else {
     body = <Text style={styles.error}>This kind of file opens on the computer only.</Text>;
@@ -158,6 +176,7 @@ export function FileView({ root, path, line, inline = false }: { root: string; p
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  editorBox: { flex: 1 },
   bar: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 48, paddingHorizontal: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, backgroundColor: colors.surface },
   barText: { flex: 1, minWidth: 0 },
   barName: { color: colors.text, fontSize: 14, fontWeight: '600' },

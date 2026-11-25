@@ -7,6 +7,7 @@ public/codemirror-bundle.js
 public/pptx-preview-bundle.js
 public/pptx-preview-bundle.js.LEGAL.txt
 public/jsonc-parser-bundle.js
+public/editor-*-bundle.js
 .DS_Store
 .idea/
 *.pem

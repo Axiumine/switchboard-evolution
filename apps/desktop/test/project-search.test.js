@@ -157,6 +157,23 @@ test('replaceInRoot expands regex groups, skips changed matches and files outsid
   }
 });
 
+test('replaceInRoot keeps the case of each match with Preserve Case, whole files and chosen matches alike', () => {
+  const root = makeFolder({ 'a.txt': 'color Color COLOR\n', 'b.txt': 'Color\n' });
+  try {
+    const found = search.searchRoot(root, { query: 'color' });
+    const b = found.files.find(f => f.path === 'b.txt');
+    const result = search.replaceInRoot(root, {
+      query: 'color', replace: 'shade', preserveCase: true,
+      files: [{ path: 'a.txt' }, { path: 'b.txt', matches: b.matches }],
+    });
+    assert.equal(result.replaced, 4);
+    assert.equal(read(root, 'a.txt'), 'shade Shade SHADE\n');
+    assert.equal(read(root, 'b.txt'), 'Shade\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('search and replace run in a worker thread', async () => {
   const root = makeFolder({ 'a.txt': 'hello world\n' });
   try {
@@ -169,4 +186,41 @@ test('search and replace run in a worker thread', async () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── A whole document: the editors' find bars (desktop and phone) ────
+
+test('a document\'s matches: ^ at every line, inside a scope, empty ones skipped', () => {
+  const regex = textSearch.documentRegExp({ query: '^a', isRegex: true });
+  assert.ok(regex.flags.includes('m') && regex.flags.includes('g'));
+  assert.deepEqual(textSearch.findAllMatches('ab\nab\nxa', regex), [{ from: 0, to: 1 }, { from: 3, to: 4 }]);
+  assert.deepEqual(textSearch.findAllMatches('ab\nab\nab', regex, [{ from: 3, to: 9 }]), [{ from: 3, to: 4 }, { from: 6, to: 7 }]);
+  assert.deepEqual(textSearch.findAllMatches('abc', textSearch.documentRegExp({ query: 'x*', isRegex: true })), []);
+  assert.equal(textSearch.findAllMatches('aaaa', textSearch.documentRegExp({ query: 'a' }), null, 2).length, 2);
+});
+
+test('next and previous go round the end of the document', () => {
+  const matches = [{ from: 0, to: 1 }, { from: 5, to: 6 }, { from: 9, to: 10 }];
+  assert.equal(textSearch.nextMatchIndex(matches, 5, 6, 1), 2);
+  assert.equal(textSearch.nextMatchIndex(matches, 9, 10, 1), 0);
+  assert.equal(textSearch.nextMatchIndex(matches, 0, 1, -1), 2);
+  assert.equal(textSearch.nextMatchIndex([], 0, 0, 1), -1);
+  assert.equal(textSearch.firstMatchAfter(matches, 5), 1);
+});
+
+test('a replacement in a document: groups, case changes and Preserve Case', () => {
+  const text = 'let fooBar = FOO_BAR;';
+  const regex = textSearch.documentRegExp({ query: '(foo)(bar)', isRegex: true });
+  const match = { from: 4, to: 10 };
+  assert.equal(textSearch.documentReplacement(regex, { isRegex: true }, text, match, '\\u$2$1'), 'Barfoo');
+  const plain = textSearch.documentRegExp({ query: 'foobar' });
+  assert.equal(textSearch.documentReplacement(plain, { preserveCase: true }, text, match, 'bazQux'), 'bazQux');
+  assert.equal(textSearch.documentReplacement(plain, { preserveCase: true }, 'FOOBAR', { from: 0, to: 6 }, 'bazqux'), 'BAZQUX');
+});
+
+test('replacementFor keeps the match\'s case with preserveCase (the Files tab\'s Search & Replace)', () => {
+  assert.equal(textSearch.replacementFor({ query: 'color', preserveCase: true }, 'Color', 'shade'), 'Shade');
+  assert.equal(textSearch.replacementFor({ query: 'color', preserveCase: true }, 'COLOR', 'shade'), 'SHADE');
+  assert.equal(textSearch.replacementFor({ query: 'color' }, 'COLOR', 'shade'), 'shade', 'off: as typed');
+  assert.equal(textSearch.replacementFor({ query: '(c)olor', isRegex: true, preserveCase: true }, 'Color', '$1ool'), 'Cool');
 });

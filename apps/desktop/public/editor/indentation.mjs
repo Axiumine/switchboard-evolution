@@ -5,7 +5,7 @@
 // and remembers the file's own: the text it gives back (textOf) has the
 // file's CRLF when the file had them, so a Windows file is not saved as LF.
 import { EditorState, StateField, StateEffect, Compartment } from '@codemirror/state';
-import { EditorView, ViewPlugin, Decoration, highlightWhitespace, highlightTrailingWhitespace } from '@codemirror/view';
+import { EditorView, ViewPlugin, Decoration } from '@codemirror/view';
 import { indentUnit, getIndentUnit } from '@codemirror/language';
 
 const DEFAULT_INDENT = { insertSpaces: true, size: 2 };
@@ -205,51 +205,7 @@ const indentGuidesTheme = EditorView.theme({
 
 const indentGuides = [indentGuidesPlugin, indentGuidesTheme];
 
-// ── Whitespace shown ────────────────────────────────────────────────
-// One choice for every editor, remembered, followed by every open editor in
-// this window and in the others (localStorage is shared by the app's windows).
-
-const SHOW_WHITESPACE_KEY = 'editorShowWhitespace';
-const SHOW_WHITESPACE_EVENT = 'editor-show-whitespace';
-const whitespaceCompartment = new Compartment();
-
-function readShowWhitespace() {
-  try { return localStorage.getItem(SHOW_WHITESPACE_KEY) === 'true'; } catch { return false; }
-}
-
-function setShowWhitespace(on) {
-  try { localStorage.setItem(SHOW_WHITESPACE_KEY, String(!!on)); } catch {}
-  window.dispatchEvent(new CustomEvent(SHOW_WHITESPACE_EVENT, { detail: !!on }));
-}
-
-/** Spaces and tabs drawn, and the ones at the end of a line marked, when `on`. */
-function whitespaceExtension(on) {
-  return on ? [highlightWhitespace(), highlightTrailingWhitespace()] : [];
-}
-
-const whitespaceSync = ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.view = view;
-    this.apply = (on) => view.dispatch({ effects: whitespaceCompartment.reconfigure(whitespaceExtension(on)) });
-    this.onEvent = (e) => this.apply(!!e.detail);
-    this.onStorage = (e) => { if (e.key === SHOW_WHITESPACE_KEY) this.apply(readShowWhitespace()); };
-    window.addEventListener(SHOW_WHITESPACE_EVENT, this.onEvent);
-    window.addEventListener('storage', this.onStorage);
-  }
-  destroy() {
-    window.removeEventListener(SHOW_WHITESPACE_EVENT, this.onEvent);
-    window.removeEventListener('storage', this.onStorage);
-  }
-});
-
-/** Whether the editor shows its whitespace now. */
-function showsWhitespace(state) {
-  const value = whitespaceCompartment.get(state);
-  return Array.isArray(value) ? value.length > 0 : !!value;
-}
-
 export {
   DEFAULT_INDENT, detectIndentation, detectEol, setEol, eolField, textOf, normalizeEol,
   indentCompartment, indentationConfig, currentIndentation, leadingColumns, convertIndentationChanges, indentGuides,
-  whitespaceCompartment, whitespaceExtension, whitespaceSync, readShowWhitespace, setShowWhitespace, showsWhitespace,
 };
