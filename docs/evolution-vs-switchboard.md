@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.17.1 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.18.0 (November 2026).
 
 ## At a glance
 
@@ -41,13 +41,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 25 Nov | Switchboard Evolution 1.16.0 | Several repositories at once in the Git tab: History as one table of their commits by date with a Repository column, Pull Requests as one list with each repository's name after the number, and Worktrees filtered by repository, each repository in its own color, on the desktop and the phone. The Git tab opens on History, the branch each repository is on shows in its toolbar, the project header gives the folder chips the whole width, and opening a folder, the file manager, a default application or a window each have their own icon. |
 | 25 Nov | Switchboard Evolution 1.17.0 | One editor everywhere a file or a piece of code is shown or edited, with VS Code's find and replace (find in selection, preserve case, history, several lines, Alt+Enter, the matches on the scrollbar), F3 and Cmd+G for the next match, Ctrl+G for a line, Go to Symbol, closing brackets, suggestions, indentation guides, commands on lines and case, a right-click menu and a status bar. Cmd/Ctrl+F always reaches it, in a Markdown or JSON preview too; a CRLF file stays CRLF; unsaved changes show a dot, are asked about before another file opens, and are never overwritten by a change on disk. |
 | 25 Nov | Switchboard Evolution 1.17.1 | On the phone, a commit's details in History start after the lines beside it and take the screen's width when the graph leaves them little room, scrolling into sight; a pull request's diffs show their code in the editor's colours, on their green and red lines. |
+| 25 Nov | Switchboard Evolution 1.18.0 | A Commands palette in the terminal (Cmd/Ctrl+Shift+K) and a "/" button in the phone's composers, with what the session's CLI understands: its slash commands and flags, skills, commands and MCP servers. In the editor: a minimap, sticky scroll, the computer's language servers chosen per project (hover, errors, suggestions, Go to Definition, Rename), formatting, Vim and more languages; find and replace in the phone's editor. Node Knowledge gives every file one graph: the project folder is a graph of its own, no folder is indexed twice, nested modules can be attached, and Coverage says all that was left out. In the Sessions tab a session names its project and opens on that project's Session tab, on the desktop and the phone, whose pull request diffs colour Shell, TOML, Dockerfile, Diff and SQL too. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.17.1, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.18.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
