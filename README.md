@@ -13,6 +13,7 @@ Switchboard Evolution is a desktop app (macOS, Windows, Linux) and a phone app (
 - **Git built in**: a full Git Graph with its actions, staging of hunks and lines, comparing 2–4 commits step by step, worktrees, pull requests and GitHub Actions.
 - **Files**: an explorer for the project and its attached folders, project-wide search and replace, and an editor.
 - **A Task Manager** with the RAM each session uses, and disk space by project.
+- **A command catalog in every terminal**: the slash commands, skills, custom commands, MCP servers, flags and keys of Claude Code, Codex and OpenCode, searchable, with what each one takes, to insert or run in the session; on the phone too, in the chat and in the terminal, where typing `/` suggests them.
 - **Your phone as a second seat**: see which session needs you, answer it, start new ones, review diffs, stage and commit. The phone talks to your computer over your local network or Tailscale, encrypted end to end, with no cloud relay. Cloudflare or ngrok tunnels are optional.
 
 > **Independent, unofficial project.** Switchboard Evolution grows out of [Switchboard](https://github.com/doctly/switchboard) by Doctly (MIT license). It is not affiliated with or endorsed by Doctly. If you want the official app, go to [doctly/switchboard](https://github.com/doctly/switchboard).

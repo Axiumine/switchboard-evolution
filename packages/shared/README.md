@@ -18,6 +18,7 @@ Modules both apps use, written once here:
 - `repo-colors.js`: the color of each repository of a project, the same in every view of the Git tab and on both apps.
 - `repo-selection.js`: which repositories the Git tab shows (one or several), and how their commits or pull requests merge into one list.
 - `action-icons.js`: the icons of the actions that open something (a folder in the app, the file manager, the default application, a window of its own).
+- `command-catalog-model.js`: the command catalog of a session (its tabs, the search, what a pick types into the session, when Run is allowed and what it asks first).
 
 Each one runs as a classic browser script, a CommonJS module and an ES import, so for now the apps keep a copy:
 the desktop in `public/` (and `remote-protocol.js` at its root), the mobile app in `src/shared/vendor/` with the

@@ -138,6 +138,11 @@ export const useConnection = create<ConnectionStore>((set, get) => {
           if (args[0] === 'project') queryClient.invalidateQueries({ queryKey: ['project-plan'] });
           return;
         }
+        if (event === 'command-catalog-updated') {
+          // The computer read newer CLI docs for the command catalog (command-docs-refresh.js).
+          queryClient.invalidateQueries({ queryKey: ['command-catalog'] });
+          return;
+        }
         if (event === 'project-plan-changed') {
           queryClient.invalidateQueries({ queryKey: ['project-plan', args[0]] });
           return;

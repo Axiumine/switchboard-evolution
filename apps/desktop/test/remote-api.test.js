@@ -326,3 +326,16 @@ test('the phone can start any CLI the desktop has, and nothing else', async () =
   }
   assert.match((await api.call('launch-session', [{ mode: 'new', projectPath: '/p/app', runtime: 'gemini' }])).error, /Wrong parameter 1/);
 });
+
+test('a phone asks for the command catalog of a session by its id, and nothing else', async () => {
+  const { api, calls } = setup({ 'get-command-catalog': (id, options) => ({ id, cli: options?.cli || 'claude' }), 'get-command-catalog-clis': () => ['claude'] });
+  assert.deepEqual(await api.call('get-command-catalog-clis', []), { result: ['claude'] });
+  assert.deepEqual(await api.call('get-command-catalog', ['s1']), { result: { id: 's1', cli: 'claude' } });
+  assert.deepEqual(await api.call('get-command-catalog', ['s1', { cli: 'codex' }]), { result: { id: 's1', cli: 'codex' } });
+  assert.match((await api.call('get-command-catalog', ['s1', { cli: 'codex', cwd: '/etc' }])).error, /Wrong parameter 2/);
+  assert.deepEqual(await api.call('get-command-catalog', ['s1', { runtime: 'codex' }]), { result: { id: 's1', cli: 'claude' } });
+  assert.match((await api.call('get-command-catalog', [{ path: '/etc' }])).error, /Wrong parameter 1/);
+  assert.equal(calls.filter((c) => c[0] === 'get-command-catalog').length, 3);
+  // Phones hear when newer docs were read, to ask again.
+  assert.equal(api.forwardsEvent('command-catalog-updated'), true);
+});

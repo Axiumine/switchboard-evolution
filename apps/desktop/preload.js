@@ -359,6 +359,12 @@ contextBridge.exposeInMainWorld('api', {
   openFileExternally: (filePath, projectRoot) => ipcRenderer.invoke('open-file-externally', filePath, projectRoot),
   shareFile: (filePath) => ipcRenderer.invoke('share-file', filePath),
   resolveTerminalFiles: (references, context) => ipcRenderer.invoke('resolve-terminal-files', references, context),
+  // The command catalog of a session (command-catalog.js): which CLIs have one, and a session's.
+  getCommandCatalogClis: () => ipcRenderer.invoke('get-command-catalog-clis'),
+  getCommandCatalog: (sessionId, options) => ipcRenderer.invoke('get-command-catalog', sessionId, options),
+  onCommandCatalogUpdated: (callback) => {
+    ipcRenderer.on('command-catalog-updated', (_event, info) => callback(info));
+  },
   listProjectDirectory: (projectPath, relativePath) => ipcRenderer.invoke('list-project-directory', projectPath, relativePath),
   readProjectFile: (projectPath, relativePath) => ipcRenderer.invoke('read-project-file', projectPath, relativePath),
   searchProjectFiles: (root, options) => ipcRenderer.invoke('search-project-files', root, options),

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu } = require('electron');
 // Capture every IPC handler as it is registered, so the remote-access server
 // can call the same functions. Must run before the first registration below.
 require('./ipc-registry').install(ipcMain);
@@ -90,6 +90,12 @@ const fileTimeline = require('./file-timeline');
 const projectSearch = require('./project-search');
 const { readPlans, linkPlans, projectResolver } = require('./plans-source');
 const { resolveTerminalFiles } = require('./terminal-file-links');
+const { createCommandCatalog } = require('./command-catalog');
+const { createDocsRefresher } = require('./command-docs-refresh');
+const { scanClaudeLocal } = require('./claude-local-commands');
+const { scanCodexLocal } = require('./codex-local-commands');
+const { scanOpencodeLocal } = require('./opencode-local-commands');
+const sessionVersion = require('./session-version');
 const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('./preview-assets');
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
 const { createTaskManager } = require('./task-manager');
@@ -1666,6 +1672,59 @@ ipcMain.handle('get-harnesses', () => {
   return allHarnesses()
     .filter(h => h.buildLaunchArgs)
     .map(h => ({ id: h.id, label: h.label, enabled: !disabled.has(h.id) }));
+});
+
+// --- IPC: command catalog --- (what the CLI of a session understands, for the
+// terminal's Commands palette and the phone's sheet; command-catalog.js)
+// The docs packed with the app, refreshed at most once a day when a catalog
+// is opened (command-docs-refresh.js); Electron's fetch follows the system proxy.
+let commandDocs = null;
+const commandCatalog = createCommandCatalog({
+  versionsFor: sessionVersion.versionsFor,
+  localScanners: { claude: scanClaudeLocal, codex: scanCodexLocal, opencode: scanOpencodeLocal },
+  refreshed: (cli) => (commandDocs ? commandDocs.current(cli) : null),
+});
+commandDocs = createDocsRefresher({
+  cacheDir: path.join(app.getPath('userData'), 'command-catalog'),
+  fetchImpl: (url, init) => net.fetch(url, init),
+  packed: (cli) => commandCatalog.packed(cli),
+  // The tag a CLI's own source is read at: the version installed now.
+  versionOf: (cli) => sessionVersion.versionsFor({ cli }).installed || null,
+  emit,
+});
+
+/**
+ * What the catalog needs to know of a session, running or not. `hint` is the
+ * caller's own idea of the session's CLI, for one main does not know yet (a
+ * session that has no transcript row so far).
+ */
+function commandCatalogContext(sessionId, hint = null) {
+  const session = activeSessions.get(sessionId) || null;
+  const row = getCachedSession((session && session.realSessionId) || sessionId) || null;
+  const isPlainTerminal = !!(session && session.isPlainTerminal) || (!session && hint === 'terminal');
+  let transcript = null;
+  if (!isPlainTerminal && row) {
+    try { transcript = transcriptPath(row); } catch { transcript = null; }
+  }
+  return {
+    runtime: (session && session.runtime) || (row && row.runtime)
+      || (hint && commandCatalog.clis().includes(hint) ? hint : null) || DEFAULT_HARNESS,
+    isPlainTerminal,
+    transcript,
+    projectPath: (session && session.projectPath) || (row && row.projectPath) || null,
+    addDirs: (session && session.launchAddDirs) || [],
+  };
+}
+
+ipcMain.handle('get-command-catalog-clis', () => commandCatalog.clis().filter(harnessEnabled));
+ipcMain.handle('get-command-catalog', (_event, sessionId, options) => {
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  const cli = options && typeof options.cli === 'string' ? options.cli : undefined;
+  const hint = options && typeof options.runtime === 'string' ? options.runtime : null;
+  const catalog = commandCatalog.forSession(commandCatalogContext(sessionId, hint), { cli });
+  // Newer docs arrive later, with command-catalog-updated.
+  if (catalog) commandDocs.maybeRefresh(catalog.cli).catch(() => {});
+  return catalog;
 });
 
 // Codex's model catalog, for model suggestions and the per-model reasoning
@@ -3256,6 +3315,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     projectPath, firstResize: true,
     projectFolder, knownJsonlFiles, sessionSlug,
     isPlainTerminal, runtime: runtimeId, forkFrom: sessionOptions?.forkFrom || null,
+    // The folders the CLI was given with --add-dir: their skills and commands
+    // are the session's too (the command catalog, command-catalog.js).
+    launchAddDirs: isPlainTerminal ? [] : String(sessionOptions?.addDirs || '').split(',').map(d => d.trim()).filter(Boolean),
     // A plain terminal has no CLI to report a busy state, so one is derived
     // from the shell's own OSC 133 prompt marks, or from the PTY's foreground
     // process when the shell sends none. A harness session already has the

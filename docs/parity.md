@@ -321,6 +321,9 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 - [ ] The terminal theme is one of Switchboard, Ghostty, Tokyo Night, Catppuccin Mocha, Dracula, Nord, Solarized Dark and applies to open terminals at once — `terminal-themes.js`, `app.js` (`_applyTerminalTheme`)
 - [ ] Terminal history is saved in the browser for restored terminals (bounded lines and characters) — `terminal-manager.js` (`TERMINAL_HISTORY_MAX_LINES`, `saveTerminalHistory`)
 - [ ] Grid view ("Session overview" button or Cmd/Ctrl+Shift+G) shows every open session as a card with project headings, state dot, name, project, time, status, a Stop button, and a "n sessions" count; double-clicking a card header returns to the full terminal; the choice is remembered — `grid-view.js` (`showGridView`, `wrapInGridCard`, `toggleGridView`, `#grid-toggle-btn`)
+- [ ] A Commands button in the terminal header (and in each grid card) opens a palette of what the session's CLI understands (Claude Code, Codex, OpenCode): built-in slash commands, skills and custom commands of the user, the project and enabled plugins, MCP servers, the CLI's own commands and flags, keyboard shortcuts; search, tabs, and details (arguments, values, aliases, example, badges, docs link) (master) — `command-catalog-view.js` (`initCommandCatalog`, `openCommandPalette`, `#command-catalog-btn`), `command-catalog-model.js`, main `command-catalog.js`
+- [ ] A pick types the command and a space into the session without Enter; Run (Cmd/Ctrl+Enter) types it and presses Enter 80 ms later, only for a command with no required argument while the session is idle, and asks first for one that ends the session, replaces the conversation, signs in or out or writes files; while the CLI waits for an answer Insert asks first; a CLI's own commands and flags are copied in its session and typed in a plain shell (master) — `command-catalog-view.js` (`commandPaletteAct`, `sendCatalogCommand`)
+- [ ] The catalog's built-in commands come from the snapshot packed with the app, refreshed from the CLIs' docs at most once a day when a catalog opens; an open palette shows newer docs when they arrive; the version of the CLI in the session marks commands it is too old for (master) — `public/command-catalog.generated.json`, `command-docs-refresh.js`, `session-version.js`, event `command-catalog-updated`
 - [ ] In the grid Cmd/Ctrl+Arrow moves focus to the nearest card in that direction; in single view Cmd+Arrow and Cmd+Shift+[ ] cycle through open sessions in the visible list order — `grid-view.js` (`navigateGrid`, `navigateSession`, `handleSessionNavKey`)
 - [ ] The terminal engine runs sessions either in herdr-core (they keep running when the app quits and re-attach at the next start, a note says when a kept session lost its IDE server) or inside the app (master) — `hc-engine.js`, `main.js` (`get-terminal-engine`), `settings-panel.js` (`#sv-terminal-engine`)
 - [ ] Sessions running at launch (also those kept in herdr-core, and scheduler-started ones) show as running within 30 seconds; the poll is 3 seconds while anything runs — `app.js` (`pollActiveSessions`, `POLL_FAST_MS`, `POLL_IDLE_MS`), `main.js` (`get-active-sessions`, `get-active-terminals`)
@@ -423,6 +426,7 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 ## 24. Keyboard shortcuts
 
 - [ ] Cmd/Ctrl+Shift+G toggles grid view, from anywhere including a focused terminal — `app.js`, `terminal-manager.js`, `grid-view.js`
+- [ ] Cmd/Ctrl+Shift+K opens and closes the Commands palette of the session in front, from anywhere including a focused terminal; in it ↑↓ choose, Enter inserts (or copies), Cmd/Ctrl+Enter runs, Tab moves between tabs, Escape closes (master) — `command-catalog-view.js` (`isCommandPaletteKey`, `commandPaletteKey`), `terminal-manager.js`
 - [ ] Cmd/Ctrl+Shift+[ and ] go to the previous and next open session; Cmd/Ctrl+Arrow does the same (left/right, up/down) and moves between cards in the grid; arrows typed in a text field or editor stay with the field — `grid-view.js` (`isSessionNavKey`, `handleSessionNavKey`, `isTextEditingTarget`)
 - [ ] Cmd/Ctrl+F finds in a terminal, in the viewer and in the transcript; Cmd/Ctrl+G goes to a line; Cmd/Ctrl+S saves a file in the editor — `terminal-manager.js`, `codemirror-setup.js`, `message-search.js`
 - [ ] Shift+Enter inserts a newline in the CLI (Ctrl+Enter on Windows and Linux) — `terminal-manager.js`
@@ -444,7 +448,7 @@ Upstream `main` has the read-only graph. Everything that changes a repository is
 
 ## Renderer to main: ipcMain handlers in `apps/desktop/main.js`
 
-There are **241** handlers: 235 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `main` has 98 of them; **143 are master only** (4 came with 1.6.6: staging, search and replace). A handler marked (master) is one of those. All of them are registered through `ipc-registry.js`, which lets the remote-access server call the same function with a null event. Events from main to the renderer are listed after the table.
+There are **243** handlers: 237 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `main` has 98 of them; **145 are master only** (4 came with 1.6.6: staging, search and replace). A handler marked (master) is one of those. All of them are registered through `ipc-registry.js`, which lets the remote-access server call the same function with a null event. Events from main to the renderer are listed after the table.
 
 | Area | Count | Channels |
 |---|---|---|
@@ -464,6 +468,7 @@ There are **241** handlers: 235 `ipcMain.handle` and 6 `ipcMain.on`. Upstream `m
 | Stats and usage | 4 | `get-stats`, `refresh-stats`, `get-usage`, `get-codex-usage` |
 | Search | 2 | `search`, `search-session-ids` |
 | Settings and CLIs | 8 (1 master) | `get-setting`, `set-setting`, `delete-setting`, `get-harnesses`, `get-codex-models`, `get-shell-profiles`, `get-effective-settings`; (master) `get-terminal-engine` |
+| Command catalog | 2 (2 master) | (master) `get-command-catalog-clis`, `get-command-catalog` |
 | Project tasks | 9 (2 are `ipcMain.on`) | `list-project-tasks`, `list-tasks-for-projects`, `get-task-run`, `start-task`, `stop-task`, `stop-all-tasks`, `restart-task`, `task-input` (on), `task-resize` (on) |
 | Sessions and terminals | 17 (5 master; 4 are `ipcMain.on`) | `get-active-sessions`, `get-active-terminals`, `stop-session`, `toggle-star`, `rename-session`, `archive-session`, `read-session-jsonl`, `get-session-last-message`, `open-terminal`, `terminal-input` (on), `terminal-resize` (on), `close-terminal` (on); (master) `read-session-entries`, `read-session-tail`, `get-session-states`, `session-notices` (on), `launch-session` |
 | Task Manager and windows | 10 (all master) | `get-process-usage`, `stop-owner`, `kill-owned-process`, `force-stop-owner`, `task-manager-open-owner`, `open-tool-window`, `open-project-window`, `project-window-run`, `get-window-on-top`, `set-window-on-top` |
@@ -476,12 +481,13 @@ Main to renderer events the new UI must subscribe to (names from `preload.js`): 
 
 ## Phone API: methods allowed in `apps/desktop/remote-api.js` (and the modules that add to it)
 
-Remote access is a whitelist: **178 methods** (86 in `remote-api.js`, 21 in `remote-worktrees.js`, 20 in `remote-git-graph.js`, 14 in `remote-pull-requests.js`, 13 in `remote-actions.js`, 12 in `remote-knowledge.js`, 7 in `remote-tasks.js`, 5 in `remote-process-usage.js`), each with a check per parameter. The hello handshake sends the protocol version (1, `remote-protocol.js`) and the list of methods this desktop implements. Methods marked *local* have no IPC channel; they are implemented in `main.js` (`remoteLocalMethods`) or a `remote-*.js` module because they need to know which phone is calling. Everything here is master only.
+Remote access is a whitelist: **180 methods** (88 in `remote-api.js`, 21 in `remote-worktrees.js`, 20 in `remote-git-graph.js`, 14 in `remote-pull-requests.js`, 13 in `remote-actions.js`, 12 in `remote-knowledge.js`, 7 in `remote-tasks.js`, 5 in `remote-process-usage.js`), each with a check per parameter. The hello handshake sends the protocol version (1, `remote-protocol.js`) and the list of methods this desktop implements. Methods marked *local* have no IPC channel; they are implemented in `main.js` (`remoteLocalMethods`) or a `remote-*.js` module because they need to know which phone is calling. Everything here is master only.
 
 | Phone methods | Feature on the desktop |
 |---|---|
 | `get-knowledge-status`, `get-knowledge-settings`, `set-knowledge-settings`, `knowledge-query` (read-only tools), `knowledge-compare`, `knowledge-prompt`, `knowledge-index`, `knowledge-index-all`, `knowledge-link-cross-repo`, `knowledge-delete-index`, `knowledge-adr`, `knowledge-ingest-traces` (data, not a file), event `knowledge-changed` (`remote-knowledge.js`); not the Lens, the program, CBM's settings or installer | Node Knowledge tab (section 10c) |
 | `get-projects`, `get-active-sessions`, `get-active-terminals`, `get-session-states`, `get-harnesses`, `get-codex-models`, `get-effective-settings`, `get-session-last-message`, `read-session-entries`, `read-session-tail`, `search`, `search-session-ids` | Sessions tab list, state dots, New session form, search, transcript viewer (sections 12, 13, 15) |
+| `get-command-catalog-clis`, `get-command-catalog` (by session id only) | The Commands palette, as the "/" button of the phone's composers (section 14) |
 | `toggle-star`, `rename-session`, `archive-session`, `stop-session`, `set-session-assignment`, `launch-session` | Star, rename, archive, stop, Move to project, and new, resume and fork (sections 12, 13) |
 | `get-session-notices`, `mark-read`, `mark-unread`, `set-viewing` (local) | Unread and needs-you marks shared with the window (sections 12, 21) |
 | `list-pending-diffs`, `mcp-diff-response` (local) | IDE emulation diffs answered from a phone (section 20) |
@@ -503,7 +509,7 @@ Remote access is a whitelist: **178 methods** (86 in `remote-api.js`, 21 in `rem
 | `get-process-usage`, `stop-owner`, `kill-owned-process`, `force-stop-owner` | Task Manager (section 18) |
 | `get-usage`, `get-codex-usage`, `get-stats`, `get-app-version` | Stats and the version row (sections 17, 19) |
 
-Phone events forwarded: `projects-changed`, `harnesses-changed`, `cli-busy-state`, `terminal-notification`, `process-exited`, `session-detected`, `session-forked`, `project-plan-changed`, `session-notices-changed`, `mcp-open-diff`, `mcp-close-tab`, `mcp-close-all-diffs`, `mcp-diff-resolved`, `task-output`, `task-state-changed`, `git-graph-repo-changed`, `git-graph-action-progress`. Terminal output goes only to the phones attached to that session.
+Phone events forwarded: `projects-changed`, `harnesses-changed`, `cli-busy-state`, `terminal-notification`, `process-exited`, `session-detected`, `session-forked`, `project-plan-changed`, `session-notices-changed`, `mcp-open-diff`, `mcp-close-tab`, `mcp-close-all-diffs`, `mcp-diff-resolved`, `command-catalog-updated`, `task-output`, `task-state-changed`, `git-graph-repo-changed`, `git-graph-action-progress`. Terminal output goes only to the phones attached to that session.
 
 Not exposed to phones on purpose: native dialogs, Finder and reveal, the clipboard, the updater, settings read and write, remote-access control, window and tool-window control, plans and the Files tab, `save-plan`, `save-memory`, `adopt-plan`, `add-project-files`, `get-memories`, the opened and pinned files, `open-file-window`.
 
@@ -562,6 +568,8 @@ The app opens on Sessions and has a bottom tab bar (Projects, Sessions, Stats, T
 - [ ] Chat view: Markdown messages, tool rows with diffs, commands, read results and approval state, thinking rows, images with a viewer, plan card ("Open plan", approval status), long-press to copy, file references that open the file — `components/ChatView.tsx`, `components/chat/*`
 - [ ] Composer for chat: message field, attachments (photo library, camera, file) saved on the desktop, send, and "Tap ✕ to interrupt" — `components/composer/*`, `sessions/attachments.ts`
 - [ ] Terminal view with a composer, special keys ("More keys"), and fit-to-phone — `components/TerminalView.tsx`, `components/composer/TerminalKeys.tsx`
+- [ ] A round "/" beside Attach, in the chat composer and in the terminal composer, opens the session's command catalog full screen (search, tabs, details, Insert, Run with a question for the dangerous ones, Copy, Docs); a pick goes in front of the chat draft or at the end of a shell's line; a command that opens a picker switches to the terminal; hidden for a desktop without the catalog — `components/composer/CommandsButton.tsx`, `components/composer/CommandsSheet.tsx`, `catalog/queries.ts`
+- [ ] In a CLI's session, a field holding only a command being typed (`/comp`, `$dep` for a Codex skill, `@rev` for an OpenCode one) shows above it the commands that complete it; a tap puts the command and a space in the field — `components/composer/CommandSuggestions.tsx`, `command-catalog-model.js` (`typedCommand`, `suggestionsFor`)
 - [ ] A session that is not running offers Resume, "Resume with options…" and Fork; a finished terminal says so — `components/session/NotRunningCard.tsx`
 - [ ] Split screen puts chat on the left and terminal on the right; "One screen" returns — `session/[id].tsx`
 - [ ] Session header with state and the Chat / Terminal switch — `components/session/SessionHeader.tsx`

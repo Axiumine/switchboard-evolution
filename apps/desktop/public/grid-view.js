@@ -48,6 +48,21 @@ function wrapInGridCard(sessionId) {
     e.stopPropagation();
     confirmAndStopSession(sessionId);
   };
+  // The session's Commands palette (command-catalog-view.js), under this card's button.
+  if (typeof sessionHasCommandCatalog === 'function' && sessionHasCommandCatalog(session)) {
+    const commandsBtn = document.createElement('button');
+    commandsBtn.className = 'grid-card-commands-btn';
+    commandsBtn.title = 'Commands';
+    commandsBtn.setAttribute('aria-label', 'Commands');
+    commandsBtn.innerHTML = ICONS.commands(12);
+    commandsBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (commandPalette && commandPalette.anchor === commandsBtn) { closeCommandPalette(); return; }
+      focusGridCard(sessionId);
+      openCommandPalette({ anchor: commandsBtn });
+    };
+    header.appendChild(commandsBtn);
+  }
   header.appendChild(stopBtn);
 
   // Footer

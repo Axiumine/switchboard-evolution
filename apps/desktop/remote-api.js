@@ -65,6 +65,10 @@ allow('get-active-terminals');
 allow('get-session-states');
 allow('get-harnesses');
 allow('get-codex-models');
+// The command catalog of a session (command-catalog.js), asked by the
+// session's id: a phone never names a folder for the desktop to read.
+allow('get-command-catalog-clis');
+allow('get-command-catalog', [isId, optional(fields({ cli: isId, runtime: isId }))]);
 allow('get-effective-settings', [optional(isPath)]);
 allow('get-session-last-message', [isId]);
 allow('read-session-entries', [isId, optional(isInt(0, Number.MAX_SAFE_INTEGER))]);
@@ -242,6 +246,8 @@ const EVENTS = new Set([
   'mcp-close-tab',
   'mcp-close-all-diffs',
   'mcp-diff-resolved',
+  // Newer CLI docs for the command catalog (command-docs-refresh.js).
+  'command-catalog-updated',
 ]);
 
 function createRemoteApi({ getHandler, localMethods = {} }) {
