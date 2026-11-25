@@ -5506,9 +5506,21 @@ button.cm-status-item:disabled { cursor: default; }
   display: flex;
   align-items: center;
   gap: 22px;
+  /* A narrow window scrolls the tabs sideways instead of cutting them off
+     (projects-view.js bindWorkspaceTabs): no scrollbar, a fade on the side that has more. */
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.ws-tabs::-webkit-scrollbar { display: none; }
+.ws-tabs > * { flex-shrink: 0; }
+.ws-tabs.more-right { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.ws-tabs.more-left { mask-image: linear-gradient(to right, transparent, #000 28px); }
+.ws-tabs.more-left.more-right { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 
 .ws-tab {
+  white-space: nowrap;
   padding: 10px 2px;
   font-size: 12.5px;
   font-weight: 600;
