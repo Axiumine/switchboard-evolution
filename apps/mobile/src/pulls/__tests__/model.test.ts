@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   ACTION_COPY, badges, canEdit, DEFAULT_FILE_VIEW, DEFAULT_FILTER, emptyText, errorTitle, FILE_TOOLS, fileRows, filterLabel, isDefaultFilter, menuActions, mergeBlock,
-  mergeLists, mergeWarnings, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, webUrl, whenText, inAppWebUrl,
+  mergeLists, mergeRepoPullRequests, mergeWarnings, morePages, summaryTextMany, noPatchText, pagedWords, pageStates, prStatus, summaryText, toggleFilter, webUrl, whenText, inAppWebUrl,
   baseChoices, checkDuration, checkFinishedJob, checkGroups, checksSummaryText, commentType, commitDays, detailCounts, eventText, hunkTail, labelColor,
   logLines, messageActions, messageVerb, quoteText, reviewChoices, reviewProblem, rowMenu, sideChange, statusRows, timelineBlocks, titleProblem, toggleReaction,
   type Check, type Message, type PullRequest, type PullRequestFile, type PullRequestHead, type PullRequestRepo, type ReviewThread, type TimelineItem,
@@ -53,6 +53,83 @@ describe('the list and its filter', () => {
     expect(toggleFilter(filter, 'merged')).toEqual(['merged']);
     expect(emptyText(['open', 'draft'])).toBe('No open or draft pull requests');
     expect(pagedWords(['CLOSED', 'MERGED'])).toBe('closed and merged');
+  });
+});
+
+describe('the pull requests of several repositories', () => {
+  const day = (n: number, extra: Partial<PullRequest> = {}) => pr(n, { createdAt: `2026-03-${String(n).padStart(2, '0')}T09:00:00Z`, ...extra });
+  const all = ['open', 'draft', 'closed', 'merged'] as const;
+  const keys = (merged: ReturnType<typeof mergeRepoPullRequests>) => merged.items.map((e) => `${e.key}#${e.pr.number}`);
+
+  it('is mergeLists for one repository', () => {
+    const open = [pr(3), pr(9, { isDraft: true }), pr(1)];
+    const page = [pr(7, { state: 'MERGED' }), pr(5, { state: 'CLOSED' }), pr(3)];
+    const merged = mergeRepoPullRequests([{ key: 'app', open, pages: page, hasMore: true }], all);
+    expect(merged.items.map((e) => e.pr.number)).toEqual(mergeLists(open, page, all).map((p) => p.number));
+    expect(merged.pageShown).toBe(2);
+  });
+
+  it('lists every open one of every repository, newest first, ties by repository then number', () => {
+    const merged = mergeRepoPullRequests([
+      { key: 'app', open: [day(4), day(2)], pages: [], hasMore: false },
+      { key: 'lib', open: [day(3), day(2, { number: 12 })], pages: [], hasMore: false },
+    ], all);
+    // lib's #12 is made the same moment as app's #2: the first repository goes first.
+    expect(keys(merged)).toEqual(['app#4', 'lib#3', 'app#2', 'lib#12']);
+  });
+
+  it('keeps the same number of two repositories apart', () => {
+    const merged = mergeRepoPullRequests([
+      { key: 'app', open: [day(5)], pages: [], hasMore: false },
+      { key: 'lib', open: [day(5, { title: 'Other' })], pages: [], hasMore: false },
+    ], all);
+    expect(keys(merged)).toEqual(['app#5', 'lib#5']);
+    expect(merged.items[1].pr.title).toBe('Other');
+  });
+
+  it('stops the closed and merged pages where a repository with more pages runs out', () => {
+    // The app's page ends at March 6 and GitHub has older ones: the lib's March 4 and 2 could come after one of them.
+    const repos = [
+      { key: 'app', open: [], pages: [day(8, { state: 'MERGED' }), day(6, { state: 'CLOSED' })], hasMore: true },
+      { key: 'lib', open: [], pages: [day(7, { state: 'MERGED' }), day(4, { state: 'MERGED' }), day(2, { state: 'CLOSED' })], hasMore: false },
+    ];
+    const merged = mergeRepoPullRequests(repos, all);
+    expect(keys(merged)).toEqual(['app#8', 'lib#7', 'app#6']);
+    expect(merged.held).toEqual({ app: 0, lib: 2 });
+    expect(merged.pageShown).toBe(3);
+    // The next page is asked of the app, the one that stopped it.
+    expect(morePages(repos, merged)).toEqual(['app']);
+  });
+
+  it('shows open ones even where a repository has more pages to load', () => {
+    const merged = mergeRepoPullRequests([
+      { key: 'app', open: [day(9)], pages: [], hasMore: true },
+      { key: 'lib', open: [day(8)], pages: [day(3, { state: 'MERGED' })], hasMore: false },
+    ], all);
+    expect(keys(merged)).toEqual(['app#9', 'lib#8']);
+  });
+
+  it('asks every repository with more pages that holds fewer than a page', () => {
+    const repos = [
+      { key: 'app', open: [], pages: [day(8, { state: 'MERGED' })], hasMore: true },
+      { key: 'lib', open: [], pages: [day(7, { state: 'MERGED' })], hasMore: true },
+      { key: 'docs', open: [], pages: [], hasMore: false },
+    ];
+    expect(morePages(repos, mergeRepoPullRequests(repos, all))).toEqual(['app', 'lib']);
+  });
+
+  it('applies the filter, and an open one hides its number in a page', () => {
+    const merged = mergeRepoPullRequests([
+      { key: 'app', open: [day(3), day(2, { isDraft: true })], pages: [day(3, { state: 'CLOSED' }), day(1, { state: 'CLOSED' })], hasMore: false },
+    ], ['open']);
+    expect(keys(merged)).toEqual(['app#3']);
+  });
+
+  it('says how many repositories and pull requests there are', () => {
+    const listing = (items: PullRequest[]) => ({ ok: true, repo: REPO, items });
+    expect(summaryTextMany([listing([pr(1), pr(2, { isDraft: true })])])).toBe('acme/widgets · 1 open, 1 draft');
+    expect(summaryTextMany([listing([pr(1), pr(2)]), listing([pr(3, { isDraft: true })]), { ok: false }])).toBe('2 repositories · 2 open, 1 draft');
+    expect(summaryTextMany([{ ok: false }, undefined])).toBe('');
   });
 });
 

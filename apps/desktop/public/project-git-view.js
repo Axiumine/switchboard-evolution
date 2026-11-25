@@ -25,7 +25,7 @@ function setGitChangesViewMode(mode) {
 function gitTabState(projectId) {
   if (!projectGitTabState.has(projectId)) {
     projectGitTabState.set(projectId, {
-      workspaceView: 'changes',
+      workspaceView: 'history',
       repositories: null,
       selectedRepo: null,
       selectedFiles: new Map(), // repo path -> `${side}\0${path}`
@@ -42,13 +42,41 @@ function gitTabState(projectId) {
   return projectGitTabState.get(projectId);
 }
 
-// The Git tab's views, in the order its switch shows them.
-const GIT_WORKSPACE_VIEWS = ['changes', 'history', 'worktrees', 'pulls', 'actions'];
+// The Git tab's views, in the order its switch shows them: History first,
+// and the view a project opens on.
+const GIT_WORKSPACE_VIEWS = ['history', 'changes', 'worktrees', 'pulls', 'actions'];
+const GIT_WORKSPACE_LABELS = { history: 'History', changes: 'Changes', worktrees: 'Worktrees', pulls: 'Pull Requests', actions: 'Actions' };
+// The views that can show several repositories at once (git-repo-tabs.js).
+const GIT_MULTI_REPO_VIEWS = ['history', 'pulls', 'worktrees'];
 
 function projectGitView(projectOrId) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
   const view = projectId && gitTabState(projectId).workspaceView;
-  return GIT_WORKSPACE_VIEWS.includes(view) ? view : 'changes';
+  return GIT_WORKSPACE_VIEWS.includes(view) ? view : 'history';
+}
+
+/**
+ * The repositories a view takes from the one the user leaves: the primary
+ * always; every repository shown between History, Pull Requests and
+ * Worktrees; and a view that shows several keeps its own when it already
+ * shows the repository handed over by Changes or Actions.
+ */
+function gitCarryRepoSelection(from, to, fromView, toView) {
+  if (!from || !to || from === to || !from.selectedRepo) return;
+  const fromMulti = GIT_MULTI_REPO_VIEWS.includes(fromView);
+  const toMulti = GIT_MULTI_REPO_VIEWS.includes(toView);
+  if (!toMulti) { to.selectedRepo = from.selectedRepo; return; }
+  if (fromMulti && Array.isArray(from.selectedRepos) && from.selectedRepos.length) {
+    to.selectedRepo = from.selectedRepo;
+    to.selectedRepos = [...from.selectedRepos];
+    return;
+  }
+  const target = { primary: to.selectedRepo || null, paths: Array.isArray(to.selectedRepos) ? to.selectedRepos : (to.selectedRepo ? [to.selectedRepo] : []) };
+  const carried = typeof RepoSelection !== 'undefined'
+    ? RepoSelection.carryRepoSelection(target, from.selectedRepo)
+    : { primary: from.selectedRepo, paths: [from.selectedRepo] };
+  to.selectedRepo = carried.primary;
+  to.selectedRepos = carried.paths;
 }
 
 function setProjectGitView(projectOrId, view) {
@@ -57,27 +85,25 @@ function setProjectGitView(projectOrId, view) {
   const changesState = gitTabState(projectId);
   const current = projectGitView(projectId);
 
-  // Each view has its own richer state, but the selected repository is a
-  // workspace-level choice. Carry it across when the user changes views
-  // (Worktrees lists every repository at once and has none).
+  // Each view has its own richer state, but the repositories shown are a
+  // workspace-level choice. Carry them across when the user changes views.
   const repoStates = { changes: changesState };
   if (typeof gitGraphState === 'function') repoStates.history = gitGraphState(projectId);
   if (typeof prTabState === 'function') repoStates.pulls = prTabState(projectId);
+  if (typeof wtTabState === 'function') repoStates.worktrees = wtTabState(projectId);
   if (typeof actTabState === 'function') repoStates.actions = actTabState(projectId);
-  const from = repoStates[current];
-  const to = repoStates[view];
-  if (from && to && from !== to && from.selectedRepo) to.selectedRepo = from.selectedRepo;
+  gitCarryRepoSelection(repoStates[current], repoStates[view], current, view);
   changesState.workspaceView = view;
 }
 
 function gitWorkspaceNavHtml(view) {
   const button = (name, label) => `<button type="button" id="git-workspace-${name}-tab" class="git-workspace-nav-btn${view === name ? ' active' : ''}" data-git-view="${name}" role="tab" aria-selected="${view === name}" aria-controls="git-workspace-view">${label}</button>`;
-  return `<div class="git-workspace-subnav"><div class="git-workspace-nav" role="tablist" aria-label="Git view">${button('changes', 'Changes')}${button('history', 'History')}${button('worktrees', 'Worktrees')}${button('pulls', 'Pull Requests')}${button('actions', 'Actions')}</div></div>`;
+  return `<div class="git-workspace-subnav"><div class="git-workspace-nav" role="tablist" aria-label="Git view">${GIT_WORKSPACE_VIEWS.map((name) => button(name, GIT_WORKSPACE_LABELS[name])).join('')}</div></div>`;
 }
 
 /**
- * The Git tab: Changes (working tree and diffs), History (the Git Graph,
- * with its actions), as upstream lays it out, then Worktrees, Pull Requests
+ * The Git tab: History (the Git Graph, with its actions) first, then Changes
+ * (working tree and diffs), Worktrees, Pull Requests
  * (project-pull-requests-view.js) and Actions (project-actions-view.js).
  */
 function renderProjectGitWorkspace(project, body) {
@@ -94,11 +120,11 @@ function renderProjectGitWorkspace(project, body) {
   });
 
   const viewBody = body.querySelector('#git-workspace-view');
-  if (view === 'history') renderProjectGitGraphTab(project, viewBody);
+  if (view === 'changes') renderProjectGitTab(project, viewBody);
   else if (view === 'worktrees') renderProjectWorktreesTab(project, viewBody);
   else if (view === 'pulls') renderProjectPullRequestsTab(project, viewBody);
   else if (view === 'actions') renderProjectActionsTab(project, viewBody);
-  else renderProjectGitTab(project, viewBody);
+  else renderProjectGitGraphTab(project, viewBody);
 }
 
 function gitCollapsedSet(state, repoPath) {

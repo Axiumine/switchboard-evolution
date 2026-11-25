@@ -303,3 +303,33 @@ test('the settings drawer opens under the toolbar and still ends 12px above the 
   assert.equal(drawer.style.top, '93px');
   assert.equal(drawer.style.maxHeight, 'calc(100% - 105px)');
 });
+
+// --- A History of several repositories: the slices ---
+
+test('a config applied to a slice sets what the slice asks git for, and a patch to the primary reaches its slice', () => {
+  const slice = { branchSelection: 'all', showTags: true, showStashesPref: true, showUncommittedChangesPref: true, includeReflogCommits: false };
+  settings.gitGraphApplyRepoConfigToSlice(slice, {
+    branchDropdownSelection: ['main'], showTags: false, showStashes: false, showUncommittedChanges: false, includeCommitsMentionedByReflogs: true,
+  });
+  assert.deepEqual(slice, {
+    branchSelection: ['main'], showTags: false, showStashesPref: false, showUncommittedChangesPref: false, includeReflogCommits: true,
+    repoConfig: slice.repoConfig,
+  });
+  assert.equal(slice.repoConfig.showTags, false);
+
+  const state = { selectedRepo: '/code/api', slices: new Map([['/code/api', { branchSelection: 'all' }]]) };
+  settings.gitGraphApplyRepoConfigToState(state, { branchDropdownSelection: ['dev'] });
+  assert.deepEqual(state.branchSelection, ['dev']);
+  assert.deepEqual(state.slices.get('/code/api').branchSelection, ['dev']);
+});
+
+test('the code review of a record is kept under plain hashes, in the config of the record\'s repository', async () => {
+  global.gitGraphPlainHash = (key) => String(key).replace(/^r\d+:/, '');
+  try {
+    assert.equal(settings.gitGraphCodeReviewKeyFor({ mode: 'single', kind: 'commit', hash: 'r1:abc' }), 'abc');
+    assert.equal(settings.gitGraphCodeReviewKeyFor({ mode: 'compare', fromHash: 'r1:abc', toHash: 'r1:def' }), 'abc..def');
+    assert.equal(settings.gitGraphCodeReviewKeyFor({ mode: 'single', kind: 'uncommitted', hash: 'r1:#uncommitted' }), null);
+  } finally {
+    delete global.gitGraphPlainHash;
+  }
+});

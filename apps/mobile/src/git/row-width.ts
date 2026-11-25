@@ -22,12 +22,18 @@ export function badgeTexts(row: Pick<HistoryRow, 'refs'>): string[] {
   return [...refs.heads, ...refs.remotes.map((r) => `${r.remote}/${r.name}`), ...refs.tags];
 }
 
-/** About how wide a row's text is in dp, badges and subject on one line, the hash and author under them. */
-export function estimateTextWidth(row: HistoryRow): number {
+/** The repository name that starts the line under the subject (with several repositories), then " · ". */
+const REPO_SEPARATOR = 3;
+
+/**
+ * About how wide a row's text is in dp, badges and subject on one line, the hash and author under them.
+ * `repoName` is the repository name that starts the line under the subject when several are shown.
+ */
+export function estimateTextWidth(row: HistoryRow, repoName = ''): number {
   const badges = badgeTexts(row).reduce((sum, text) => sum + text.length * BADGE_SIZE * CHAR + 2 * BADGE_PADDING + BADGE_GAP, 0);
   const subject = badges + row.subject.length * SUBJECT_SIZE * CHAR;
   const meta = row.kind === 'commit'
-    ? (row.shortHash.length + row.authorName.length + RELATIVE_TIME + 6) * META_SIZE * CHAR
-    : 0;
+    ? (row.shortHash.length + row.authorName.length + RELATIVE_TIME + 6 + (repoName ? repoName.length + REPO_SEPARATOR : 0)) * META_SIZE * CHAR
+    : repoName.length * META_SIZE * CHAR;
   return Math.ceil(Math.max(subject, meta));
 }

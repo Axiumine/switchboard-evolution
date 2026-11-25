@@ -90,9 +90,9 @@ function fileEntryMenuItems(root, entry, open) {
   return [
     { head: entry.name },
     entry.type === 'directory'
-      ? { label: 'Open folder', icon: PICONS.folder(14), onClick: run('open-folder') }
-      : { label: entry.viewable ? 'Open in editor / preview' : 'Open in default application', icon: PICONS.file(14), disabled: entry.type !== 'file', onClick: open },
-    { label: 'Reveal in ' + manager, icon: PICONS.open(14), onClick: run('reveal') },
+      ? { label: 'Open folder', icon: ICONS.folderOpen(14), onClick: run('open-folder') }
+      : { label: entry.viewable ? 'Open in editor / preview' : 'Open in default application', icon: entry.viewable ? PICONS.file(14) : ICONS.fileOutput(14), disabled: entry.type !== 'file', onClick: open },
+    { label: 'Reveal in ' + manager, icon: ICONS.folderOpen(14), onClick: run('reveal') },
     { sep: true },
     { label: 'Copy path', onClick: () => window.api.writeClipboard(projectEntryPath(root, entry.relativePath)) },
     { label: 'Copy relative path', onClick: () => window.api.writeClipboard(entry.relativePath) },

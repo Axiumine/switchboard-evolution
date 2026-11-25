@@ -33,7 +33,20 @@
   background: rgba(255,255,255,0.035);
 }
 
+/* A tab is the repository's name (a button: that repository alone) and, in
+   the views that show several (.gg-repo-picker--multi), a checkbox before it
+   that appears on hover and adds or takes away the repository. The ticked
+   ones keep theirs visible while several are shown (.is-multi), their name
+   in the repository's color (--repo-color, git-repo-tabs.js). */
 .gg-repo-option {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 5px;
+  background: transparent;
+}
+
+.gg-repo-name {
   border: 0;
   border-radius: 5px;
   padding: 5px 10px;
@@ -46,8 +59,34 @@
   cursor: pointer;
 }
 
-.gg-repo-option:hover { color: #bcbccc; }
-.gg-repo-option.active { color: #d8d8e8; background: rgba(255,255,255,0.075); }
+.gg-repo-check {
+  width: 0;
+  height: 12px;
+  margin: 0;
+  opacity: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--repo-color, var(--accent));
+  transition: width 0.12s ease, margin 0.12s ease, opacity 0.12s ease;
+}
+
+.gg-repo-option:hover .gg-repo-check,
+.gg-repo-option:focus-within .gg-repo-check,
+.gg-repo-picker.is-multi .gg-repo-option.checked .gg-repo-check {
+  width: 12px;
+  margin-left: 8px;
+  opacity: 1;
+}
+
+.gg-repo-option:hover .gg-repo-check + .gg-repo-name,
+.gg-repo-option:focus-within .gg-repo-check + .gg-repo-name,
+.gg-repo-picker.is-multi .gg-repo-option.checked .gg-repo-name { padding-left: 6px; }
+
+.gg-repo-option:hover .gg-repo-name { color: #bcbccc; }
+.gg-repo-option.active { background: rgba(255,255,255,0.075); }
+.gg-repo-option.active .gg-repo-name { color: #d8d8e8; }
+.gg-repo-picker.is-multi .gg-repo-option.checked .gg-repo-name { color: var(--repo-color, #d8d8e8); }
+.gg-repo-picker.is-multi .gg-repo-option.primary { box-shadow: inset 0 -2px 0 var(--repo-color, var(--accent)); }
 
 /* --- Control bar --- */
 
@@ -90,6 +129,30 @@
 
 .gg-toolbar-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gg-toolbar-btn:hover { background: rgba(255,255,255,0.06); }
+
+/* The checked-out branch(es), where Show Remote used to be: one chip, or one
+   per repository shown in the repository's color. */
+.gg-head-branches { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.gg-head-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--repo-color, #8989a0) 38%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--repo-color, #8989a0) 11%, transparent);
+  color: var(--repo-color, #bcbccc);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.gg-head-branch svg { flex-shrink: 0; }
+.gg-head-branch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A repository that could not be read, above the table that shows the others. */
+.gg-slice-errors { display: flex; flex-direction: column; gap: 6px; }
+.gg-slice-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 11px; border: 1px solid rgba(224,113,128,0.35); border-radius: 8px; background: rgba(224,113,128,0.08); color: #e2939e; font-size: 11.5px; }
+.gg-slice-error-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .gg-checkbox {
   display: inline-flex;
@@ -149,6 +212,17 @@
   color: #d8d8e8;
   font-size: 11.5px;
 }
+
+/* Show Remote sits in the tabs' row, before the sort button. */
+.gg-branches-remote { align-self: center; margin-left: auto; font-size: 10.5px; }
+.gg-branches-remote + .gg-branches-sort { margin-left: 8px; }
+/* A History of several repositories: a section for each, its name in its color. */
+.gg-branches-section { margin-bottom: 6px; }
+.gg-branches-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--repo-color, #8fa7e8) 35%, transparent); }
+.gg-branches-section-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--repo-color, #bcbccc); font-size: 11px; font-weight: 700; }
+.gg-branches-section-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.gg-branches-section-actions button { border: 0; border-radius: 5px; padding: 1px 6px; background: transparent; color: #8989a0; font-size: 10.5px; cursor: pointer; }
+.gg-branches-section-actions button:hover { color: #d8d8e8; background: rgba(255,255,255,0.06); }
 
 .gg-branches-row {
   display: flex;
@@ -234,6 +308,11 @@
 .gg-table-wrap { --gg-select-width: 22px; }
 .gg-th[data-col="select"] { width: var(--gg-select-width); flex: 0 0 auto; padding: 0; }
 .gg-th[data-col="description"] { flex: 1 1 auto; min-width: 80px; }
+/* With several repositories shown, a Repository column goes before the graph:
+   the graph, its clip and the inline details move right by its width. */
+.gg-table-wrap { --gg-repo-width: 0px; }
+.gg-table-wrap.gg-multi-repo { --gg-repo-width: var(--gg-repo-col, 110px); }
+.gg-th[data-col="repo"] { width: var(--gg-repo-col, 110px); flex: 0 0 auto; }
 .gg-th[data-col="date"] { width: 140px; flex: 0 1 auto; min-width: 56px; }
 .gg-th[data-col="author"] { width: 130px; flex: 0 1 auto; min-width: 56px; }
 .gg-th[data-col="commit"] { width: 90px; flex: 0 1 auto; min-width: 56px; }
@@ -285,6 +364,7 @@
 }
 
 .gg-cell-graph { width: var(--gg-graph-width, 60px); flex: 0 0 auto; padding: 0; position: relative; }
+.gg-cell-repo { display: block; line-height: 14px; width: var(--gg-repo-col, 110px); flex: 0 0 auto; box-sizing: border-box; color: var(--repo-color, #8989a0); font-weight: 600; font-size: 11px; }
 .gg-cell-select { width: var(--gg-select-width, 22px); flex: 0 0 auto; padding: 0; justify-content: center; cursor: default; }
 .gg-select-box { margin: 0; width: 12px; height: 12px; cursor: pointer; accent-color: var(--accent); opacity: 0.45; }
 .gg-row:hover .gg-select-box, .gg-select-box:checked { opacity: 1; }
@@ -305,7 +385,7 @@
 .gg-graph-clip {
   position: absolute;
   top: 0;
-  left: var(--gg-select-width, 0px);
+  left: calc(var(--gg-select-width, 0px) + var(--gg-repo-width, 0px));
   z-index: 1;
   width: var(--gg-graph-width, 60px);
   overflow: hidden;
@@ -369,7 +449,7 @@
 /* Inline, the panel sits under its row and leaves the graph column free, so
    the lanes run on beside it to the rows below. */
 .gg-details-inline {
-  margin-left: calc(var(--gg-select-width, 0px) + var(--gg-graph-width, 60px));
+  margin-left: calc(var(--gg-select-width, 0px) + var(--gg-repo-width, 0px) + var(--gg-graph-width, 60px));
   /* Never taller than three quarters of the table (--gg-details-max, set by
      gitGraphFitDetailsHeight), so the commits above and below stay in sight:
      the text and the files scroll inside it, the bar with Tree/List and Code

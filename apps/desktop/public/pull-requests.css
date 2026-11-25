@@ -146,6 +146,17 @@ mark.pr-hit { padding: 0 1px; border-radius: 2px; background: rgba(250, 204, 21,
   font-size: 10.5px;
 }
 .pr-number { color: #8a8aa2; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }
+/* With several repositories in the list, the repository's name follows the number, in its own color. */
+.pr-repo {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--repo-color, #8a8aa2);
+  font-weight: 650;
+}
+.pr-footer .pr-repo { margin-right: 4px; }
+.pr-error-repo { margin-bottom: 4px; font-size: 12px; }
 .pr-branches {
   max-width: 340px;
   overflow: hidden;

@@ -4,6 +4,7 @@
 // list, its filter and its actions. Keep the two in step.
 
 import { treeRows, type TreeRow } from '@/git/model';
+import { mergeRepoLists, repoPagePlan } from '@/shared/vendor/repo-selection';
 
 export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
@@ -138,6 +139,58 @@ export function mergeLists(open: readonly PullRequest[], pages: readonly PullReq
   return [...byNumber.values()]
     .filter((pr) => prVisible(pr, filter))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || b.number - a.number);
+}
+
+/** One repository's side of the merged list: its open pull requests (all of them), the closed/merged pages read so far, whether GitHub has more pages. */
+export type RepoPullRequests = { key: string; open: readonly PullRequest[]; pages: readonly PullRequest[]; hasMore: boolean };
+export type RepoPullRequest = { key: string; pr: PullRequest };
+export type MergedPullRequests = {
+  items: RepoPullRequest[];
+  /** Per repository, the closed/merged pull requests read but not shown yet (they wait for a repository that has more pages). */
+  held: Record<string, number>;
+  /** How many closed/merged ones are shown. */
+  pageShown: number;
+};
+
+const created = (pr: PullRequest) => new Date(pr.createdAt || 0).getTime();
+
+/**
+ * Several repositories' pull requests as one list, the desktop's prMergeRepoViews:
+ * every open one of every repository, and the closed/merged pages merged newest
+ * first (each repository keeps its own order, and the merge stops where a
+ * repository with more pages runs out, so nothing is shown out of place). Then
+ * newest first, ties by the repositories' order, then by number. Within one
+ * repository an open one hides the same number in a page. For one repository
+ * this is mergeLists.
+ */
+export function mergeRepoPullRequests(repos: readonly RepoPullRequests[], filter: readonly PrFilterKey[]): MergedPullRequests {
+  const order = new Map(repos.map((repo, index) => [repo.key, index]));
+  const shown: RepoPullRequest[] = [];
+  const lists = repos.map((repo) => {
+    const seen = new Set<number>();
+    for (const pr of repo.open) {
+      if (seen.has(pr.number)) continue;
+      seen.add(pr.number);
+      if (prVisible(pr, filter)) shown.push({ key: repo.key, pr });
+    }
+    const items: PullRequest[] = [];
+    for (const pr of repo.pages) {
+      if (seen.has(pr.number)) continue;
+      seen.add(pr.number);
+      if (prVisible(pr, filter)) items.push(pr);
+    }
+    return { key: repo.key, items, hasMore: repo.hasMore };
+  });
+  const { merged, held } = mergeRepoLists(lists, (pr) => created(pr));
+  for (const entry of merged) shown.push({ key: entry.key, pr: entry.item });
+  shown.sort((a, b) => String(b.pr.createdAt || '').localeCompare(String(a.pr.createdAt || ''))
+    || (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0) || b.pr.number - a.pr.number);
+  return { items: shown, held, pageShown: merged.length };
+}
+
+/** The repositories to read the next page of, for a "Load 10 more": those with more pages that hold fewer than a page not shown yet. */
+export function morePages(repos: readonly RepoPullRequests[], merged: Pick<MergedPullRequests, 'held'>, want = PAGE_SIZE): string[] {
+  return repoPagePlan(repos.map((repo) => ({ key: repo.key, hasMore: repo.hasMore })), merged.held, want);
 }
 
 export function filterLabel(filter: readonly PrFilterKey[]): string {
@@ -292,6 +345,16 @@ export function summaryText(listing: OpenListing | undefined): string {
   const items = listing.items || [];
   const drafts = items.filter((pr) => pr.isDraft).length;
   return `${listing.repo?.nameWithOwner || ''} · ${items.length - drafts} open${drafts ? `, ${drafts} draft${drafts === 1 ? '' : 's'}` : ''}`;
+}
+
+/** "3 repositories · 12 open, 2 drafts"; for one repository, summaryText. Nothing until one has answered. */
+export function summaryTextMany(listings: readonly (OpenListing | undefined)[]): string {
+  if (listings.length === 1) return summaryText(listings[0]);
+  const answered = listings.filter((listing): listing is OpenListing => !!listing?.ok);
+  if (!answered.length) return '';
+  const items = answered.flatMap((listing) => listing.items || []);
+  const drafts = items.filter((pr) => pr.isDraft).length;
+  return `${answered.length} ${answered.length === 1 ? 'repository' : 'repositories'} · ${items.length - drafts} open${drafts ? `, ${drafts} draft${drafts === 1 ? '' : 's'}` : ''}`;
 }
 
 const LETTERS: Record<PullRequestFile['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };

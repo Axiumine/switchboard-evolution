@@ -18,7 +18,7 @@ function projectMenu(project, opts) {
       openPath: () => {},
     } },
     selectProject: (id, options) => calls.selected.push([id, options.tab]),
-    ICONS: { gear: icon('gear'), popOut: icon('popOut') },
+    ICONS: { gear: icon('gear'), popOut: icon('popOut'), folderOpen: icon('folderOpen') },
     PICONS: new Proxy({}, { get: (_t, name) => icon(name) }),
     newSessionItems: () => [],
     snoozeMenuItems: () => [],

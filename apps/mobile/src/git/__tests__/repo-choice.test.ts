@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { chooseRepo, historyRepos, repoLabel, showRepoChips } from '../repo-choice';
+import { repoColorMap } from '@/shared/vendor/repo-colors';
+
+import { carryRepoPatch, chooseRepo, chooseRepos, historyRepos, repoColors, repoLabel, selectionPatch, showRepoChips } from '../repo-choice';
 
 const app = { path: '/work/app', git: true };
 const docs = { path: '/work/docs', git: false };
@@ -67,5 +69,64 @@ describe('showRepoChips', () => {
     expect(showRepoChips([])).toBe(false);
     expect(showRepoChips([app])).toBe(false);
     expect(showRepoChips([app, lib])).toBe(true);
+  });
+});
+
+describe('chooseRepos', () => {
+  const repos = [app, lib, { path: '/work/tools', git: true }];
+
+  it('keeps what is remembered, in the project order, with the primary among it', () => {
+    expect(chooseRepos(repos, ['/work/tools', '/work/app'], '/work/tools')).toEqual({ primary: '/work/tools', paths: ['/work/app', '/work/tools'] });
+    expect(chooseRepos(repos, undefined, '/work/lib')).toEqual({ primary: '/work/lib', paths: ['/work/lib'] });
+  });
+
+  it('adds the primary when the list lacks it, and drops paths that are gone', () => {
+    expect(chooseRepos(repos, ['/work/app', '/work/gone'], '/work/lib')).toEqual({ primary: '/work/lib', paths: ['/work/app', '/work/lib'] });
+  });
+
+  it('shows what chooseRepo would when nothing remembered is still there', () => {
+    expect(chooseRepos([docs, lib], undefined, undefined)).toEqual({ primary: '/work/lib', paths: ['/work/lib'] });
+    expect(chooseRepos(repos, ['/work/gone'], '/work/gone2')).toEqual({ primary: '/work/app', paths: ['/work/app'] });
+    expect(chooseRepos([], ['/work/app'], '/work/app')).toEqual({ primary: null, paths: [] });
+  });
+});
+
+describe('carryRepoPatch', () => {
+  it('keeps the selection when it shows the repository, with it as primary', () => {
+    expect(carryRepoPatch({ gitRepo: '/work/app', gitRepos: ['/work/app', '/work/lib'] }, '/work/lib')).toEqual({ gitRepo: '/work/lib', gitRepos: ['/work/app', '/work/lib'] });
+  });
+
+  it('takes the repository alone otherwise', () => {
+    expect(carryRepoPatch({ gitRepo: '/work/app', gitRepos: ['/work/app', '/work/lib'] }, '/work/docs')).toEqual({ gitRepo: '/work/docs', gitRepos: ['/work/docs'] });
+    expect(carryRepoPatch({}, '/work/app')).toEqual({ gitRepo: '/work/app', gitRepos: ['/work/app'] });
+  });
+});
+
+describe('selectionPatch', () => {
+  it('remembers the primary and every path', () => {
+    expect(selectionPatch({ primary: '/work/lib', paths: ['/work/app', '/work/lib'] })).toEqual({ gitRepo: '/work/lib', gitRepos: ['/work/app', '/work/lib'] });
+    expect(selectionPatch({ primary: null, paths: [] })).toEqual({ gitRepos: [] });
+  });
+});
+
+describe('repoColors', () => {
+  const project = { root: '/work/project', folders: [{ path: '/work/app' }, { path: '/work/lib' }] };
+
+  it('gives each folder a color, the same as the desktop (repoColorMap over the folders in order)', () => {
+    const colors = repoColors(project);
+    expect(colors).toEqual({ ...repoColorMap(['/work/app', '/work/lib', '/work/project']) });
+    expect(colors['/work/app']).not.toBe(colors['/work/lib']);
+  });
+
+  it('keeps a folder\'s color when paths are appended', () => {
+    const base = repoColors(project);
+    const more = repoColors(project, ['/work/nested']);
+    expect(more['/work/app']).toBe(base['/work/app']);
+    expect(more['/work/lib']).toBe(base['/work/lib']);
+    expect(more['/work/nested']).toBeDefined();
+  });
+
+  it('copes with no folders', () => {
+    expect(repoColors({ folders: [] })).toEqual({});
   });
 });

@@ -5297,6 +5297,13 @@ body { display: flex; flex-direction: column; }
   min-width: 0;
 }
 
+/* The header's buttons sit on the title's line (after .ws-flex), so the
+   folder chips below have the whole width. A long title gives way first. */
+.ws-title-line .ws-title { min-width: 0; }
+.ws-title-line .ws-chip--status { flex-shrink: 0; }
+/* The project's state dot, kept apart from the buttons (updateProjectHeaderStatus). */
+.ws-title-status { display: contents; }
+
 .ws-title {
   font-size: 18px;
   font-weight: 700;
@@ -5337,6 +5344,10 @@ body { display: flex; flex-direction: column; }
 .ws-chip--status.done { color: #9090a8; }
 .ws-chip--status.snoozed { color: color-mix(in srgb, var(--accent) 83%, white); border-color: rgb(from var(--accent) r g b / 0.3); background: rgb(from var(--accent) r g b / 0.08); }
 .ws-chip--add { color: #6a6a80; border-style: dashed; cursor: pointer; }
+/* "name · branch", the branch in bold. */
+.ws-chip-sep { color: #6a6a80; }
+.ws-chip-branch { font-weight: 700; color: #d4d4e6; }
+.ws-chip--worktree .ws-chip-branch { color: #b8efbf; }
 .ws-chip--add:hover { color: #b0b0c4; border-color: rgba(255,255,255,0.2); }
 .ws-chip--cli { height: 18px; padding: 0 6px; font-size: 10px; font-weight: 600; }
 .ws-chip--cli.claude { color: color-mix(in srgb, var(--accent) 70%, white); }
@@ -9681,3 +9692,10 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
   border: 0; border-radius: 4px; background: none; color: color-mix(in srgb, var(--accent) 80%, white); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
 }
 .kn-git-impact:hover { background: rgb(from var(--accent) r g b / 0.12); color: color-mix(in srgb, var(--accent) 50%, white); }
+
+/* --- Worktrees: repository tabs filter the list (git-repo-tabs.js); with several shown, each group's header takes its repository color --- */
+#wt-tabs:empty { display: none; }
+/* The tabs as wide as their names, as in History and Pull Requests. */
+#wt-tabs { display: flex; }
+.wt-repo.is-colored .wt-repo-name { color: var(--repo-color); }
+.wt-repo.is-colored .wt-repo-toggle svg { color: var(--repo-color); }

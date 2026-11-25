@@ -1,14 +1,18 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { HeaderButton } from '@/components/HeaderButton';
+import { FolderChips } from '@/components/project/FolderChips';
 import type { Rename } from '@/components/project/actions';
 import { ProjectTabBar } from '@/components/project/ProjectTabBar';
 import { SwipeTabs } from '@/components/project/SwipeTabs';
 import { FilesTab } from '@/components/project/tabs/FilesTab';
 import { GitTab } from '@/components/project/tabs/GitTab';
 import { KnowledgeTab } from '@/components/project/tabs/KnowledgeTab';
+import { folderChips } from '@/files/model';
+import { useGitInfo } from '@/git/info-query';
 import { useKnowledgeSupported } from '@/knowledge/queries';
 import { OverviewTab } from '@/components/project/tabs/OverviewTab';
 import { PlanTab } from '@/components/project/tabs/PlanTab';
@@ -51,6 +55,7 @@ export default function ProjectScreen() {
   if (!visited.includes(tab)) setVisited([...visited, tab]);
 
   const [actions, setActions] = useState(false);
+  const [folderSheet, setFolderSheet] = useState(false);
   // The header's ⋯ on the Session tab: the session's actions (Split screen among them).
   const [sessionActions, setSessionActions] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
@@ -61,6 +66,9 @@ export default function ProjectScreen() {
   // Node Knowledge only when the computer offers it (a desktop older than it does not).
   const knowledge = useKnowledgeSupported();
   const tabs = useMemo(() => PROJECT_TABS.filter(({ key }) => (key !== 'session' || !!sessionId) && (key !== 'knowledge' || knowledge)), [sessionId, knowledge]);
+  // The folders button's chips: the branch git reports, else the one the project stored (what is cached is enough here).
+  const gitInfo = useGitInfo(id, false);
+  const chips = useMemo(() => (project ? folderChips(project, gitInfo.data?.repositories) : []), [project, gitInfo.data?.repositories]);
   const run = async (method: string, params: unknown[], after?: () => void) => {
     try { await act(method, params); after?.(); } catch (err: any) { Alert.alert('That did not work', err.message); }
     refresh();
@@ -73,12 +81,14 @@ export default function ProjectScreen() {
   const snoozed = projectSnoozed(project, now);
   const meta = planTabMeta(plan.data);
 
+  const attachFolder = () => router.push({ pathname: '/folders', params: { projectId: project.id } });
+
   const projectOptions: SheetOption[] = [
     { label: 'New session…', onPress: () => router.push({ pathname: '/new', params: { target: `p:${project.id}` } }) },
     { label: 'Rename…', onPress: () => setRename({ kind: 'project', id: project.id, name: project.name }) },
     { label: 'New track…', onPress: () => setRename({ kind: 'new-track', id: project.id, name: '' }) },
     { label: 'Note', onPress: () => { openNote(project.id); } },
-    { label: 'Attach a folder…', onPress: () => router.push({ pathname: '/folders', params: { projectId: project.id } }) },
+    { label: 'Attach a folder…', onPress: attachFolder },
     { label: project.starred ? 'Unstar' : 'Star', onPress: () => run('update-project', [project.id, { starred: !project.starred }]) },
     ...(project.status === 'done' ? [] : snoozed
       ? [{ label: 'Wake now', onPress: () => run('update-project', [project.id, { snoozedUntil: null }]) }]
@@ -115,6 +125,22 @@ export default function ProjectScreen() {
       <Stack.Screen
         options={{
           title: project.name,
+          // The name, then the folders button: how many folders are attached, and a sheet with each and its branch.
+          headerTitle: ({ children }) => (
+            <View style={styles.titleRow}>
+              <Text style={styles.title} numberOfLines={1}>{children}</Text>
+              <Pressable
+                onPress={() => setFolderSheet(true)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.foldersButton, pressed && styles.foldersPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Folders, ${project.folders.length} attached`}
+              >
+                <Ionicons name="folder-outline" size={15} color={colors.textDim} />
+                <Text style={styles.foldersCount}>{project.folders.length}</Text>
+              </Pressable>
+            </View>
+          ),
           // The note button is on every tab, beside the ⋯ (the desktop has it beside Tasks).
           headerRight: () => (
             <View style={styles.headerButtons}>
@@ -145,6 +171,9 @@ export default function ProjectScreen() {
       </ProjectSessionContext.Provider>
 
       <Sheet visible={actions} title={project.name} options={projectOptions} onClose={() => setActions(false)} />
+      <Sheet visible={folderSheet} title="Folders" onClose={() => setFolderSheet(false)}>
+        <FolderChips chips={chips} onAttach={() => { setFolderSheet(false); attachFolder(); }} />
+      </Sheet>
       <Sheet
         visible={snoozing}
         title="Snooze until"
@@ -173,6 +202,11 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
   headerButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, maxWidth: '100%' },
+  title: { flexShrink: 1, color: colors.text, fontSize: 17, fontWeight: '600' },
+  foldersButton: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 28, paddingHorizontal: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.06)' },
+  foldersPressed: { opacity: 0.6 },
+  foldersCount: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   pane: { flex: 1 },
   hidden: { display: 'none' },
   empty: { color: colors.textFaint, fontSize: 13, paddingVertical: 8 },

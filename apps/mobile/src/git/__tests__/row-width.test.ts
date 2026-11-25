@@ -33,6 +33,13 @@ describe('the width of a history row', () => {
     expect(withRefs).toBeGreaterThan(plain + 2 * 'feat/internal-rules-registry'.length * 5);
   });
 
+  it('widens for the repository name that starts the line under the subject, stashes and uncommitted changes included', () => {
+    const name = 'a-repository-with-a-long-name';
+    expect(estimateTextWidth(row({ subject: 'x' }), name)).toBeGreaterThan(estimateTextWidth(row({ subject: 'x' })));
+    expect(estimateTextWidth(row({ kind: 'uncommitted', subject: 'x' }), name)).toBeGreaterThan(name.length * 5);
+    expect(estimateTextWidth(row({ subject: 'x' }), '')).toBe(estimateTextWidth(row({ subject: 'x' })));
+  });
+
   it('is never narrower than the line under the subject', () => {
     const author = 'An author with a really rather long name indeed';
     expect(estimateTextWidth(row({ subject: 'x', authorName: author }))).toBeGreaterThan(author.length * 5);

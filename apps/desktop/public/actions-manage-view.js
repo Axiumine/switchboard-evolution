@@ -83,7 +83,7 @@ function actCachesHtml(data, { now = new Date() } = {}) {
   const sorts = [['last_accessed_at', 'Last used'], ['created_at', 'Created'], ['size_in_bytes', 'Size']];
   const head = `
     <div class="act-page-head"><div class="act-page-title"><h2>Caches</h2>${entry.data?.usage ? `<span class="act-subtle">${actPlural(entry.data.usage.count, 'cache')} · ${escapeHtml(AM.formatBytes(entry.data.usage.size))} in all</span>` : ''}</div>
-      <div class="act-page-actions"><button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="nav-github" data-page="caches" title="Open GitHub's Caches page here">${ACT_ICONS.external(12)}</button></div></div>
+      <div class="act-page-actions"><button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="nav-github" data-page="caches" title="Open GitHub's Caches page here">${ACT_ICONS.globe(12)}</button></div></div>
     <div class="act-filters">
       <label class="pr-search act-search" title="Caches whose key starts with this">${PICONS.search(12)}<input type="search" id="act-cache-key" placeholder="Filter caches by key" autocomplete="off" spellcheck="false" value="${actAttr(opts.key)}"></label>
       <label class="pr-search act-search act-search--small" title="Caches of one branch">${PICONS.branch(12)}<input type="search" id="act-cache-ref" placeholder="Branch" autocomplete="off" spellcheck="false" value="${actAttr(opts.ref)}"></label>
@@ -141,8 +141,8 @@ function actRunnersHtml(data) {
   const head = `
     <div class="act-page-head"><div class="act-page-title"><h2>Runners</h2><span class="act-subtle">Self-hosted runners of this repository</span></div>
       <div class="act-page-actions">
-        <button type="button" class="ws-btn ws-btn--sm" data-act="nav-github" data-page="runners" title="GitHub-hosted runners and the organization's runners, on GitHub">${ACT_ICONS.external(11)}<span>GitHub-hosted runners</span></button>
-        ${canAdmin ? `<button type="button" class="ws-btn ws-btn--sm ws-btn--primary" data-act="nav-github" data-page="newRunner" title="GitHub's page with the commands that add one">${ACT_ICONS.external(11)}<span>New self-hosted runner</span></button>` : ''}
+        <button type="button" class="ws-btn ws-btn--sm" data-act="nav-github" data-page="runners" title="GitHub-hosted runners and the organization's runners, on GitHub">${ACT_ICONS.globe(11)}<span>GitHub-hosted runners</span></button>
+        ${canAdmin ? `<button type="button" class="ws-btn ws-btn--sm ws-btn--primary" data-act="nav-github" data-page="newRunner" title="GitHub's page with the commands that add one">${ACT_ICONS.globe(11)}<span>New self-hosted runner</span></button>` : ''}
       </div></div>`;
   if (!entry.data && entry.loading) return head + actLoadingHtml('Reading runners…');
   if (!entry.data && entry.error) return head + actErrorHtml(entry, 'The runners');
@@ -184,7 +184,7 @@ function actDeploymentsHtml(data, { now = new Date() } = {}) {
   const d = data.deployments;
   const entry = d.entry;
   const head = `<div class="act-page-head"><div class="act-page-title"><h2>Deployments</h2>${entry.data ? `<span class="act-subtle">${actPlural(entry.data.totalCount || 0, 'deployment')}</span>` : ''}</div>
-    <div class="act-page-actions"><button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="nav-github" data-page="deployments" title="Open GitHub's Deployments page here">${ACT_ICONS.external(12)}</button></div></div>`;
+    <div class="act-page-actions"><button type="button" class="ws-btn ws-btn--sm ws-btn--icon" data-act="nav-github" data-page="deployments" title="Open GitHub's Deployments page here">${ACT_ICONS.globe(12)}</button></div></div>`;
   if (!entry.data && entry.loading) return head + actLoadingHtml('Reading deployments…');
   if (!entry.data && entry.error) return head + actErrorHtml(entry, 'The deployments');
   if (!entry.data) return head;

@@ -40,9 +40,9 @@ describe('PROJECT_TABS', () => {
     expect(PROJECT_TABS.map((t) => t.label)).toEqual(['Overview', 'Session', 'Plan', 'Todos', 'Files', 'Git', 'Node Knowledge', 'Settings']);
   });
 
-  it('puts Changes, History, Worktrees, Pull Requests and Actions under Git', () => {
-    expect(GIT_VIEWS.map((v) => v.label)).toEqual(['Changes', 'History', 'Worktrees', 'PRs', 'Actions']);
-    expect(GIT_VIEWS.map((v) => v.a11y ?? v.label)).toEqual(['Changes', 'History', 'Worktrees', 'Pull Requests', 'Actions']);
+  it('puts History, Changes, Worktrees, Pull Requests and Actions under Git, History first', () => {
+    expect(GIT_VIEWS.map((v) => v.label)).toEqual(['History', 'Changes', 'Worktrees', 'PRs', 'Actions']);
+    expect(GIT_VIEWS.map((v) => v.a11y ?? v.label)).toEqual(['History', 'Changes', 'Worktrees', 'Pull Requests', 'Actions']);
   });
 });
 

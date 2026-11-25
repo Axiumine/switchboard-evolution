@@ -135,6 +135,74 @@ function gitGraphBuildLayoutInput(commits, stashes, uncommitted, headHash) {
   return list;
 }
 
+// --- Several repositories in one history ---
+//
+// With more than one repository selected, the History merges their commits
+// into one table. A hash alone is no longer a row's identity (the same
+// repository can be attached twice, and every repository has its own
+// Uncommitted Changes), so each row's hash becomes "<tag>:<hash>", where the tag
+// ("r0", "r1", …) is the repository's position among the History's tabs; the
+// plain hash stays on the row as `sha`, with `repoPath`. A single repository
+// keeps the plain hashes: gitGraphSplitKey gives {tag: null} for them.
+
+function gitGraphRepoKey(tag, sha) {
+  return `${tag}:${sha}`;
+}
+
+/** { tag, sha } of a row key; a plain hash (one repository shown) has no tag. */
+function gitGraphSplitKey(key) {
+  const match = /^(r\d+):([\s\S]*)$/.exec(String(key == null ? '' : key));
+  return match ? { tag: match[1], sha: match[2] } : { tag: null, sha: key };
+}
+
+/** The hash git knows, from a row key or a plain hash. */
+function gitGraphPlainHash(key) {
+  return gitGraphSplitKey(key).sha;
+}
+
+/** The rows of one repository with their hashes and parents (Uncommitted and stashes too) made keys. */
+function gitGraphNamespaceRows(rows, tag, path) {
+  return (rows || []).map(row => ({
+    ...row,
+    hash: gitGraphRepoKey(tag, row.hash),
+    parents: (row.parents || []).map(parent => gitGraphRepoKey(tag, parent)),
+    sha: row.hash,
+    repoPath: path,
+    repoTag: tag,
+  }));
+}
+
+/** How new a row is, to put repositories' rows in order: Uncommitted Changes always on top, otherwise the date the order goes by. */
+function gitGraphRowRank(row, order) {
+  if (row && row.kind === 'uncommitted') return Infinity;
+  const value = order === 'author-date' ? (row.authorDate || row.commitDate) : (row.commitDate || row.authorDate);
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : -Infinity;
+}
+
+/**
+ * The rows of several repositories as one list. `slices`: [{ tag, path,
+ * rawCommits, stashes, uncommitted, headHash, hasMore }] in the order of the
+ * tabs. Each repository's rows keep their own order; the lists are merged by
+ * date (RepoSelection.mergeRepoLists), stopping where a repository with more
+ * to load runs out. Returns { rows, held, hasMore, lists }: `held` is how many
+ * rows of each tag wait below that point, and `lists` what repoPagePlan needs.
+ */
+function gitGraphMergeSlices(slices, order) {
+  const lists = (slices || []).map(slice => ({
+    key: slice.tag,
+    items: gitGraphNamespaceRows(gitGraphBuildLayoutInput(slice.rawCommits, slice.stashes, slice.uncommitted, slice.headHash), slice.tag, slice.path),
+    hasMore: !!slice.hasMore,
+  }));
+  const result = RepoSelection.mergeRepoLists(lists, item => gitGraphRowRank(item, order));
+  return {
+    rows: result.merged.map(entry => entry.item),
+    held: result.held,
+    hasMore: result.hasMore,
+    lists: lists.map(list => ({ key: list.key, hasMore: list.hasMore })),
+  };
+}
+
 // --- Layout-function resolution ---
 //
 // git-graph-layout.js's own computeGitGraphLayout is the real lane/edge
@@ -458,5 +526,6 @@ if (typeof module !== 'undefined' && module.exports) {
     gitGraphDiffStatHtml, gitGraphAccessibilityBadge, gitGraphStatusBadge,
     gitGraphAvatarHtml, gitGraphSignatureStatusBucket, gitGraphSignatureBadgeHtml,
     gitGraphRenderMarkdownInline, gitGraphFileStatusGlyph,
+    gitGraphRepoKey, gitGraphSplitKey, gitGraphPlainHash, gitGraphNamespaceRows, gitGraphRowRank, gitGraphMergeSlices,
   };
 }

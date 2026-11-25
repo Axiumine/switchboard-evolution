@@ -8,19 +8,23 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 import { usePullRefresh } from '@/components/PullRefresh';
 import { Sheet, type SheetOption } from '@/components/Sheet';
 import { TextPrompt } from '@/components/TextPrompt';
+import { repoColors, selectionPatch } from '@/git/repo-choice';
 import type { Project } from '@/projects/model';
 import { useOpenSession } from '@/projects/open-session';
+import { useProjectUi } from '@/projects/ui-store';
 import { relativeTime, type Session } from '@/sessions/model';
 import { request, useCapability, useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 import {
-  FILTERS, folderFor, plural, prunedText, rowPath, runningSessionChoices, shortPath, SORT_ORDERS, summaryText, toggleGroup, visibleRepositories, worktreeBadges, worktreeLabel, worktreeTime,
+  FILTERS, folderFor, groupKey, groupSelection, plural, prunedText, rowPath, runningSessionChoices, selectOnlyGroup, shortPath, SORT_ORDERS, summaryText, toggleGroup,
+  toggleGroupSelection, visibleRepositories, worktreeBadges, worktreeLabel, worktreeTime,
   type Badge, type PrunePreview, type SortOrder, type Worktree, type WorktreeFilter, type WorktreeRepository,
 } from '@/worktrees/model';
 import {
   ask, patchCachedSettings, runAction, setNotice, SLOW_TIMEOUT_MS, startInWorktree, useNotice, useProjectWorktrees, useRunningByWorktree, type Notice,
 } from '@/worktrees/queries';
 import { canShowChanges, hasPendingWork } from '@/worktrees/changes';
+import { RepoChips } from '../RepoChips';
 import { useTabScroll } from '../useTabScroll';
 
 type Harness = { id: string; label: string; enabled: boolean };
@@ -83,8 +87,17 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
   const collapsed = settings?.collapsedGroups || [];
   const running = useRunningByWorktree(repositories);
   const liveStates = useConnection((s) => s.live);
-  const groups = useMemo(() => visibleRepositories(repositories || [], query, order, filter, running), [repositories, query, order, filter, running]);
-  const usable = (repositories || []).filter((repo) => !repo.error);
+  // The repositories shown: the Git tab's selection (shared with History and Pull Requests), as the repositories
+  // that hold its folders. With several shown, each one's name is in its color.
+  const [gitRepo, patchUi] = useProjectUi(pid, (ui) => ui.gitRepo);
+  const [gitRepos] = useProjectUi(pid, (ui) => ui.gitRepos);
+  const selection = useMemo(() => ({ primary: gitRepo ?? null, paths: gitRepos ?? (gitRepo ? [gitRepo] : []) }), [gitRepo, gitRepos]);
+  const { shown, keys } = useMemo(() => groupSelection(repositories || [], selection), [repositories, selection]);
+  const multi = shown.length > 1;
+  const chips = useMemo(() => (repositories || []).map((repo) => ({ path: groupKey(repo), label: repo.name })), [repositories]);
+  const colorOf = useMemo(() => repoColors(project, chips.map((chip) => chip.path)), [project, chips]);
+  const groups = useMemo(() => visibleRepositories(shown, query, order, filter, running), [shown, query, order, filter, running]);
+  const usable = shown.filter((repo) => !repo.error);
   const clis = (harnesses.data || []).filter((h) => h.enabled);
 
   // --- Actions ---
@@ -167,6 +180,8 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
     if (then === 'prune') prune(repo);
     else router.push({ pathname: '/worktrees/merged', params: { projectId: pid, repo: repo.mainPath } });
   };
+
+  const chipRepo = (path: string) => (repositories || []).find((repo) => groupKey(repo) === path);
 
   const create = (repo: WorktreeRepository | null) => router.push({ pathname: '/worktrees/new', params: { projectId: pid, ...(repo ? { repo: repo.mainPath } : {}) } });
 
@@ -273,9 +288,9 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
       <View style={styles.toolbar}>
         <View style={styles.flex}>
           <Text style={styles.toolbarTitle}>Worktrees</Text>
-          <Text style={styles.summary} numberOfLines={1}>{repositories ? summaryText(repositories) : ' '}</Text>
+          <Text style={styles.summary} numberOfLines={1}>{repositories ? summaryText(shown) : ' '}</Text>
         </View>
-        <ToolButton icon="add" label="New worktree" onPress={() => create(null)} disabled={!usable.length} primary />
+        <ToolButton icon="add" label="New worktree" onPress={() => create(usable.length === 1 && (repositories?.length ?? 0) > 1 ? usable[0] : null)} disabled={!usable.length} primary />
         <ToolButton icon="git-merge-outline" label="Remove merged" onPress={() => pickRepository('merged')} disabled={!usable.length} />
         <ToolButton icon="cut-outline" label="Prune" onPress={() => pickRepository('prune')} disabled={!usable.length} />
         <ToolButton icon="options-outline" label="Worktree settings" onPress={() => router.push({ pathname: '/worktrees/settings', params: { projectId: pid } })} disabled={!repositories} />
@@ -358,7 +373,7 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
             >
               <Ionicons name={closed ? 'chevron-forward' : 'chevron-down'} size={13} color={colors.textFaint} />
               <View style={styles.flex}>
-                <Text style={styles.repoName} numberOfLines={1}>{repo.name}</Text>
+                <Text style={[styles.repoName, multi && colorOf[groupKey(repo)] ? { color: colorOf[groupKey(repo)] } : null]} numberOfLines={1}>{repo.name}</Text>
                 <Text style={styles.repoPath} numberOfLines={1}>{shortPath(repo.mainPath, homeDir)} · {plural((repo.worktrees || []).length, 'worktree')}</Text>
               </View>
             </Pressable>
@@ -385,6 +400,14 @@ export function WorktreesTab({ project, active = true }: { project: Project; act
 
   return (
     <View style={styles.screen}>
+      <RepoChips
+        repos={chips}
+        selected={keys.primary}
+        onSelect={(path) => { const repo = chipRepo(path); if (repo) patchUi(selectionPatch(selectOnlyGroup(repo))); }}
+        checked={keys.paths}
+        onToggle={(path) => { const repo = chipRepo(path); if (repo && repositories) patchUi(selectionPatch(toggleGroupSelection(repositories, selection, repo))); }}
+        repoColors={colorOf}
+      />
       {header}
       <ScrollView
         {...scroll}

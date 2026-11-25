@@ -54,4 +54,12 @@ describe('the Git tab repository', () => {
     expect(get('p1').gitRepo).toBe('/work/app');
     expect(get('p2').gitRepo).toBeUndefined();
   });
+
+  it('remembers every repository shown together beside the primary one', () => {
+    const { patch, get } = useProjectUiStore.getState();
+    patch('p1', { gitRepo: '/work/app', gitRepos: ['/work/app', '/work/lib'] });
+    patch('p1', { gitView: 'pulls' });
+    expect(get('p1').gitRepos).toEqual(['/work/app', '/work/lib']);
+    expect(get('p2').gitRepos).toBeUndefined();
+  });
 });

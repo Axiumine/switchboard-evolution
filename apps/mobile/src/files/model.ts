@@ -7,7 +7,14 @@ import type { Project } from '@/projects/model';
 /** An entry of list-project-directory. */
 export type FileEntry = { name: string; relativePath: string; type: 'directory' | 'file' | 'other'; size: number; viewable: boolean; previewType: string | null };
 
-export type FilesRoot = { path: string; label: string; kind: 'project' | 'folder' | 'worktree' };
+export type FilesRoot = {
+  path: string;
+  label: string;
+  kind: 'project' | 'folder' | 'worktree';
+  /** A folder's name, and its branch when that adds something: the chip reads "name · branch", the branch in bold. */
+  name?: string;
+  branch?: string;
+};
 
 /** Hidden from the tree, as a code editor's explorer hides them by default. */
 export const HIDDEN_NAMES = new Set(['.git', '.svn', '.hg', 'CVS', '.DS_Store', 'Thumbs.db']);
@@ -17,19 +24,44 @@ function basename(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
+/** A folder's name and its branch, the branch left out when it only repeats the name (a worktree made for it). */
+export function folderParts(path: string, branch?: string | null): { name: string; branch?: string } {
+  const name = basename(path);
+  return branch && branch !== name ? { name, branch } : { name };
+}
+
 /** The project folder first, then every attached folder ("name · branch" for a worktree on one). */
 export function filesRoots(project: Pick<Project, 'root' | 'folders'>): FilesRoot[] {
   const roots: FilesRoot[] = [{ path: project.root, label: 'Project', kind: 'project' }];
   for (const folder of project.folders || []) {
     if (!folder?.path || roots.some((r) => r.path === folder.path)) continue;
-    const name = basename(folder.path);
+    const { name, branch } = folderParts(folder.path, folder.branch);
     roots.push({
       path: folder.path,
-      label: folder.branch && folder.branch !== name ? `${name} · ${folder.branch}` : name,
+      label: branch ? `${name} · ${branch}` : name,
       kind: folder.mode === 'worktree' ? 'worktree' : 'folder',
+      name,
+      ...(branch ? { branch } : {}),
     });
   }
   return roots;
+}
+
+export type FolderChip = { path: string; name: string; branch?: string; kind: 'folder' | 'worktree' };
+
+/**
+ * The project's attached folders, each as the desktop's header chip: its name
+ * and its branch. The branch is the one git reports now (`repos`, the Git
+ * tab's repositories) and falls back to the one the project stored.
+ */
+export function folderChips(project: Pick<Project, 'folders'>, repos?: readonly { path: string; branch?: string }[]): FolderChip[] {
+  const chips: FolderChip[] = [];
+  for (const folder of project.folders || []) {
+    if (!folder?.path || chips.some((chip) => chip.path === folder.path)) continue;
+    const live = repos?.find((repo) => repo.path === folder.path)?.branch;
+    chips.push({ path: folder.path, ...folderParts(folder.path, live || folder.branch), kind: folder.mode === 'worktree' ? 'worktree' : 'folder' });
+  }
+  return chips;
 }
 
 export type TreeRow = { entry: FileEntry; depth: number };

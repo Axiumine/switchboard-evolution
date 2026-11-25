@@ -1,5 +1,8 @@
 // The Git tab's Pull Requests view for a project: the pull requests of each of
-// the project's repositories on GitHub, one tab per repository as in History.
+// the project's repositories on GitHub, one tab per repository as in History:
+// a click on a name shows that repository alone, the checkbox before it adds
+// it to those shown, and the pull requests of several repositories then come
+// in one list, each row naming its repository in its color (git-repo-tabs.js).
 // Every open pull request is listed, drafts too; closed and merged ones join
 // the list 10 at a time when the filter asks for them. A row opens on its
 // changed files and their diffs. Merge sits on the row, and its "…" menu has
@@ -61,6 +64,12 @@ function prTabState(projectId) {
     projectPullRequestsTabState.set(projectId, {
       repositories: null,
       selectedRepo: null,
+      // Every repository shown (git-repo-tabs.js): selectedRepo is the primary.
+      selectedRepos: [],
+      // A repaint waiting to run once, when several repositories answer together.
+      repaintQueued: false,
+      // What the rows of the merged list were, to tell when the texts changed them.
+      multiViewKey: '',
       // The filter's choice, kept while the app runs (not saved): every start
       // shows the open pull requests, drafts included.
       filter: [...PR_DEFAULT_FILTER],
@@ -255,21 +264,35 @@ function prShownView(data, state) {
   return { items, candidates, search, where, read, unread, people, narrowed };
 }
 
-/** The line over the rows while the search runs: how far it has read, or why it stopped. */
-function prSearchStatusHtml(data, view) {
+/**
+ * The line over the rows while the search runs: how far it has read, or why it
+ * stopped. `parts` is what was looked through, one per repository: its texts
+ * and its candidates (the repositories shown at once add up).
+ */
+function prSearchStatusFor(view, parts) {
   if (!view || !view.search?.terms.length) return '';
-  const texts = data.texts || { failed: new Set() };
-  const total = view.candidates.length;
-  const failed = view.candidates.filter(pr => texts.failed.has(pr.number) && !texts.map?.has(pr.number)).length;
+  const total = parts.reduce((n, part) => n + part.candidates.length, 0);
+  let failed = 0;
+  let error = '';
+  for (const { texts, candidates } of parts) {
+    const count = candidates.filter(pr => texts.failed.has(pr.number) && !texts.map?.has(pr.number)).length;
+    failed += count;
+    if (count && texts.error && !error) error = texts.error;
+  }
   let inner;
-  if (failed && texts.error) {
-    inner = `<span>${escapeHtml(`${prPlural(failed, 'pull request')} could not be searched: ${texts.error}`)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="texts-retry">Retry</button>`;
+  if (failed && error) {
+    inner = `<span>${escapeHtml(`${prPlural(failed, 'pull request')} could not be searched: ${error}`)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="texts-retry">Retry</button>`;
   } else if (view.unread) {
     inner = `<span class="git-loading-dot"></span><span>Searching descriptions, comments and files: ${view.read} of ${total} read</span>`;
   } else {
     inner = `<span>${view.items.length} of ${prPlural(total, 'pull request')} match</span>`;
   }
-  return `<div class="pr-search-status${failed && texts.error ? ' is-error' : ''}" id="pr-search-status" role="status">${inner}</div>`;
+  return `<div class="pr-search-status${failed && error ? ' is-error' : ''}" id="pr-search-status" role="status">${inner}</div>`;
+}
+
+function prSearchStatusHtml(data, view) {
+  if (!view || !view.search?.terms.length) return '';
+  return prSearchStatusFor(view, [{ texts: data.texts || { failed: new Set() }, candidates: view.candidates }]);
 }
 
 /** What makes the rows what they are (not the status line): the list is painted again only when it changes. */
@@ -415,7 +438,22 @@ function prTitleEditHtml(pr, edit) {
   return `<span class="pr-title-edit"><input type="text" class="pr-title-input" value="${prAttr(edit.text)}" maxlength="256" spellcheck="true" aria-label="Title of #${pr.number}" title="Enter saves, Esc cancels"${off}><button type="button" class="ws-btn ws-btn--sm ws-btn--primary pr-title-save" data-act="title-save"${off}>${edit.busy ? '<span class="gg-dialog-spinner" aria-hidden="true"></span>' : PICONS.check(12)}<span>Save</span></button>${edit.error ? `<span class="pr-title-error" role="alert">${escapeHtml(edit.error)}</span>` : ''}</span>`;
 }
 
-function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleEdit = null, search = null, where = null } = {}) {
+/**
+ * The repository's name in its color, after a pull request's number, when the
+ * pull requests of several repositories share the list: { name, color, title }.
+ */
+function prRepoTagHtml(tag) {
+  if (!tag || !tag.name) return '';
+  const style = tag.color ? ` style="--repo-color:${prAttr(tag.color)}"` : '';
+  return `<span class="pr-repo"${style} title="${prAttr(tag.title || tag.name)}">${escapeHtml(tag.name)}</span>`;
+}
+
+/**
+ * One row. `repoTag` and `repoIndex` are set only when several repositories are
+ * shown: the number of a pull request is the repository's own, so each row
+ * says which repository it is of (data-repo) for every lookup that follows.
+ */
+function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleEdit = null, search = null, where = null, repoTag = null, repoIndex = null } = {}) {
   const status = prStatus(pr);
   const block = prMergeBlock(pr, repo);
   const branches = `${pr.head} → ${pr.base}`;
@@ -435,13 +473,13 @@ function prRowHtml(pr, { expanded = false, repo = null, now = new Date(), titleE
   const foundTip = found && where.files.length ? `Files: ${where.files.slice(0, 12).join(', ')}${where.files.length > 12 ? '…' : ''}` : '';
   const foundHtml = found ? `<span class="pr-found"${foundTip ? ` title="${prAttr(foundTip)}"` : ''}>Found in ${escapeHtml(found)}</span>` : '';
   return `
-    <div class="pr-item${expanded ? ' open' : ''}" data-pr="${pr.number}">
+    <div class="pr-item${expanded ? ' open' : ''}" data-pr="${pr.number}"${repoIndex == null ? '' : ` data-repo="${repoIndex}"`}>
       <div class="pr-row" data-act="toggle" role="button" tabindex="0" aria-expanded="${expanded}">
         <span class="pr-chevron">${PICONS.chevronRight(10)}</span>
         <span class="pr-state pr-state--${status}" title="${PR_STATE_LABELS[status]}">${PR_ICONS[status](15)}</span>
         <div class="pr-main">
           <div class="pr-line">${title}${prBadgesHtml(pr)}</div>
-          <div class="pr-meta"><span class="pr-number">#${pr.number}</span><span>${escapeHtml(prWhenText(pr, now))} by ${escapeHtml(pr.author)}</span><span class="pr-branches mono" title="${prAttr(branches)}">${escapeHtml(branches)}</span><span class="pr-stats mono"><span class="pr-add">+${pr.additions || 0}</span> <span class="pr-del">−${pr.deletions || 0}</span></span><span>${prPlural(pr.changedFiles || 0, 'file')}</span>${foundHtml}</div>
+          <div class="pr-meta"><span class="pr-number">#${pr.number}</span>${prRepoTagHtml(repoTag)}<span>${escapeHtml(prWhenText(pr, now))} by ${escapeHtml(pr.author)}</span><span class="pr-branches mono" title="${prAttr(branches)}">${escapeHtml(branches)}</span><span class="pr-stats mono"><span class="pr-add">+${pr.additions || 0}</span> <span class="pr-del">−${pr.deletions || 0}</span></span><span>${prPlural(pr.changedFiles || 0, 'file')}</span>${foundHtml}</div>
         </div>
         <div class="pr-actions">${actions}</div>
       </div>
@@ -493,6 +531,218 @@ function prListHtml(data, filter, now = new Date(), view = null) {
     ? `<div class="pr-rows">${items.map(pr => prRowHtml(pr, { expanded: data.expanded.has(pr.number), repo, now, titleEdit: prTitleEditOf(data, pr), search, where: view?.where?.get(pr.number) || null })).join('')}</div>`
     : (waitingForPage || waitingForTexts ? '' : `<div class="git-empty-state"><div class="git-empty-title">${escapeHtml(empty)}</div></div>`);
   return `${prSearchStatusHtml(data, view)}${rows}${truncated}${prFooterHtml(data, filter, { narrowed: !!view?.narrowed })}`;
+}
+
+// --- Several repositories at once ---
+//
+// With the checkbox of the tabs, the pull requests of several repositories
+// share one list. Each repository keeps its own data (state.repos) and its own
+// reading; what is merged is only what shows. A pull request's number is its
+// repository's own, so everything that looks a row up takes the repository too.
+
+function prRepoLabel(repo) {
+  if (typeof gitRepoTabLabel === 'function') return gitRepoTabLabel(repo);
+  return repo.label || pathBasename(repo.path) || repo.path;
+}
+
+/** The repositories shown, in the tabs' order: the selected ones that are Git repositories, or the primary alone. */
+function prShownRepos(state) {
+  const repos = state.repositories || [];
+  const shown = typeof gitShownRepos === 'function' ? gitShownRepos(state, repos) : [];
+  if (!shown.length) {
+    const one = prSelectedRepo(state);
+    return one ? [one] : [];
+  }
+  if (shown.length === 1) return shown;
+  const git = shown.filter(repo => repo.git !== false);
+  return git.length ? git : shown.slice(0, 1);
+}
+
+function prIsShown(state, repoPath) {
+  return prShownRepos(state).some(repo => repo.path === repoPath);
+}
+
+function prRepoIndex(state, repoPath) {
+  return (state.repositories || []).findIndex(repo => repo.path === repoPath);
+}
+
+/** Which row: a number is a repository's own, so with several repositories shown the row's repository goes with it. */
+function prItemSelector(index, number) {
+  return index == null ? `.pr-item[data-pr="${number}"]` : `.pr-item[data-repo="${index}"][data-pr="${number}"]`;
+}
+
+function prItemSelectorFor(state, repoPath, number) {
+  return prItemSelector(prShownRepos(state).length > 1 ? prRepoIndex(state, repoPath) : null, number);
+}
+
+/** The repositories shown with their data and the name and color their rows carry. */
+function prMultiEntries(project, state) {
+  const colors = typeof gitRepoColors === 'function' ? gitRepoColors(project, state.repositories) : {};
+  return prShownRepos(state).map(repo => ({
+    repo,
+    path: repo.path,
+    index: prRepoIndex(state, repo.path),
+    data: prRepoState(project.id, state, repo.path),
+    tag: { name: prRepoLabel(repo), color: colors[repo.colorKey || repo.path] || '', title: repo.path },
+  }));
+}
+
+/**
+ * The list of several repositories, from entries [{ path, data, ... }]. Each
+ * repository is narrowed by the states filter, People and the search as it is
+ * alone (prShownView). Every open pull request shows: those lists are read
+ * whole. Closed and merged ones come a page at a time per repository, newest
+ * first, so they are merged by date only as far as every repository has read
+ * (RepoSelection.mergeRepoLists): past that, a page not read yet could hold
+ * newer ones. Newest first, then the tabs' order, then the number.
+ */
+function prMergeRepoViews(entries, state) {
+  const paged = prPageStates(state?.filter || PR_DEFAULT_FILTER).length > 0;
+  const views = new Map();
+  const open = [];
+  const lists = [];
+  const whereIn = (view, pr) => (view && view.where ? view.where.get(pr.number) || null : null);
+  entries.forEach((entry, order) => {
+    const { data } = entry;
+    const view = data.open ? prShownView(data, state) : null;
+    views.set(entry.path, view);
+    const items = view ? view.items : [];
+    for (const pr of items) if (pr.state === 'OPEN') open.push({ entry, order, pr, where: whereIn(view, pr) });
+    // More to read: a page that was not read yet counts, one that failed does not (it has its Retry).
+    let hasMore = false;
+    if (paged) {
+      if (!data.open) hasMore = !data.error;
+      else if (data.page.loaded) hasMore = !!data.page.hasNextPage;
+      else hasMore = !data.page.error;
+    }
+    lists.push({ key: entry.path, items: items.filter(pr => pr.state !== 'OPEN'), hasMore });
+  });
+  const merge = RepoSelection.mergeRepoLists(lists, pr => Date.parse(pr.createdAt));
+  const rows = [...open];
+  for (const { key, item } of merge.merged) {
+    const order = entries.findIndex(entry => entry.path === key);
+    rows.push({ entry: entries[order], order, pr: item, where: whereIn(views.get(key), item) });
+  }
+  rows.sort((a, b) => String(b.pr.createdAt || '').localeCompare(String(a.pr.createdAt || '')) || a.order - b.order || b.pr.number - a.pr.number);
+  const read = [...views.values()].reduce((n, view) => n + (view ? view.read : 0), 0);
+  const unread = [...views.values()].reduce((n, view) => n + (view ? view.unread : 0), 0);
+  const search = prSearchOf(state);
+  const people = state?.people || [];
+  return {
+    rows, items: rows.map(row => row.pr), views, lists, held: merge.held, hasMore: merge.hasMore,
+    search, people, narrowed: people.length > 0 || search.terms.length > 0, read, unread,
+  };
+}
+
+/** What makes the merged rows what they are: the list is painted again only when it changes. */
+function prMultiViewKey(merged) {
+  const searching = merged.search.terms.length > 0;
+  return merged.rows.map(row => `${row.entry.path}#${row.pr.number}:${searching && row.where ? prSearchWhereText(row.where) : ''}`).join(',');
+}
+
+/** Pages' footers of several repositories: a line per failed page, then one count with one Load more for all. */
+function prMultiFooterHtml(entries, merged, filter, { narrowed = false } = {}) {
+  const states = prPageStates(filter);
+  if (!states.length) return '';
+  const words = prPagedWords(states);
+  const size = narrowed ? PR_NARROWED_PAGE_SIZE : PR_PAGE_SIZE;
+  const read = entries.filter(entry => entry.data.open);
+  const errors = read.filter(entry => entry.data.page.error).map(entry => `<div class="pr-footer is-error"><span>${prRepoTagHtml(entry.tag)} ${escapeHtml(entry.data.page.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="page-retry" data-repo="${entry.index}">Retry</button></div>`).join('');
+  if (read.some(entry => !entry.data.page.loaded && !entry.data.page.error)) {
+    return `${errors}<div class="pr-footer"><span class="git-loading-dot"></span><span>Reading ${escapeHtml(words)} pull requests…</span></div>`;
+  }
+  const pages = read.filter(entry => entry.data.page.loaded).map(entry => entry.data.page);
+  if (!pages.length) return errors;
+  const total = pages.reduce((n, page) => n + page.totalCount, 0);
+  // Not the pull requests read but those shown: the merge may hold some back until the others catch up.
+  const count = narrowed ? pages.reduce((n, page) => n + page.items.length, 0) : merged.rows.filter(row => row.pr.state !== 'OPEN').length;
+  const shown = `${count} of ${total} ${words} ${narrowed ? 'read' : 'shown'}`;
+  if (!pages.some(page => page.hasNextPage)) return errors + (total ? `<div class="pr-footer"><span>${escapeHtml(shown)}</span></div>` : '');
+  const loading = pages.some(page => page.loading);
+  return `${errors}
+    <div class="pr-footer">
+      <span>${escapeHtml(shown)}</span>
+      <button type="button" class="ws-btn ws-btn--sm pr-more-btn" data-act="page-more"${loading ? ' disabled' : ''}>${loading ? 'Loading…' : `Load ${size} more`}</button>
+    </div>`;
+}
+
+/** A repository that could not be read, among others that could: one line, with Try again. */
+function prMultiErrorLineHtml(entry) {
+  return `<div class="pr-footer is-error"><span>${prRepoTagHtml(entry.tag)} ${escapeHtml(entry.data.error || 'The pull requests could not be read.')}</span><button type="button" class="ws-btn ws-btn--sm" data-act="retry" data-repo="${entry.index}">Try again</button></div>`;
+}
+
+/**
+ * The list of several repositories: the search's line, a line per repository
+ * that failed, the merged rows (each naming its repository), an empty line,
+ * the footer.
+ */
+function prMultiListHtml(entries, merged, state, now = new Date()) {
+  const filter = state.filter;
+  const search = merged.search.terms.length ? merged.search : null;
+  const read = entries.filter(entry => entry.data.open);
+  const failed = entries.filter(entry => !entry.data.open && entry.data.error && !entry.data.loading);
+  const reading = entries.some(entry => !entry.data.open && !failed.includes(entry));
+  if (!read.length) {
+    if (failed.length === entries.length) return entries.map(entry => prErrorHtml(entry.data, entry)).join('');
+    return '<div class="git-loading"><span class="git-loading-dot"></span>Reading pull requests…</div>';
+  }
+  const status = prSearchStatusFor(merged, read.map(entry => ({ texts: entry.data.texts, candidates: merged.views.get(entry.path).candidates })));
+  const truncated = read.filter(entry => entry.data.open.truncated).map(entry => `<div class="pr-footer">Only the newest 1000 open pull requests of ${escapeHtml(entry.tag.name)} are listed.</div>`).join('');
+  const waitingForPage = prPageStates(filter).length && read.some(entry => !entry.data.page.loaded);
+  const empty = prEmptyText(filter, { people: merged.people, search: search ? search.raw : '' });
+  const rows = merged.rows.length
+    ? `<div class="pr-rows">${merged.rows.map(({ entry, pr, where }) => prRowHtml(pr, {
+      expanded: entry.data.expanded.has(pr.number), repo: entry.data.open?.repo || null, now, titleEdit: prTitleEditOf(entry.data, pr), search, where, repoTag: entry.tag, repoIndex: entry.index,
+    })).join('')}</div>`
+    : (waitingForPage || merged.unread || reading ? '' : `<div class="git-empty-state"><div class="git-empty-title">${escapeHtml(empty)}</div></div>`);
+  return `${status}${failed.map(prMultiErrorLineHtml).join('')}${rows}${truncated}${prMultiFooterHtml(entries, merged, filter, { narrowed: merged.narrowed })}`;
+}
+
+/** "3 repositories · 12 open, 2 drafts", over what has been read so far. */
+function prMultiSummaryText(entries) {
+  const read = entries.filter(entry => entry.data.open);
+  if (!read.length) return entries.some(entry => entry.data.loading) ? 'Reading pull requests…' : '';
+  let drafts = 0;
+  let open = 0;
+  for (const entry of read) {
+    const items = entry.data.open.items || [];
+    const count = items.filter(pr => pr.isDraft).length;
+    drafts += count;
+    open += items.length - count;
+  }
+  const waiting = entries.some(entry => entry.data.loading) ? ' · reading…' : '';
+  return `${entries.length} repositories · ${open} open${drafts ? `, ${drafts} draft${drafts === 1 ? '' : 's'}` : ''}${waiting}`;
+}
+
+/** The Remote choice of several repositories is one menu, a section per repository that has 2 or more remotes. */
+function prRemotesButtonHtml(entries) {
+  if (!entries.some(entry => (entry.data.remotes || []).length >= 2)) return '';
+  return `<button type="button" class="ws-btn ws-btn--sm pr-filter-btn" id="pr-remotes" aria-haspopup="menu" title="Whose pull requests are listed, for each repository that has several remotes"><span>Remotes</span>${PICONS.chevronDown(10)}</button>`;
+}
+
+function prRemotesMenuItems(entries, onPick) {
+  const items = [];
+  for (const entry of entries) {
+    const remotes = entry.data.remotes || [];
+    if (remotes.length < 2) continue;
+    if (items.length) items.push({ sep: true });
+    const current = entry.data.remote || remotes[0].name;
+    items.push({ head: entry.tag.name });
+    for (const remote of remotes) {
+      items.push({ label: `${remote.name} · ${remote.slug}`, icon: remote.name === current ? PICONS.check(13) : '', onClick: () => onPick(entry.path, remote.name) });
+    }
+  }
+  return items;
+}
+
+/** The prompt of several repositories: the one of each, with its own repository named, one after the other. */
+function prMultiPromptText(kind, rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!groups.has(row.entry.path)) groups.set(row.entry.path, { repo: row.entry.data.open?.repo, prs: [] });
+    groups.get(row.entry.path).prs.push(row.pr);
+  }
+  return [...groups.values()].map(group => prPromptText(kind, group.prs, group.repo)).filter(Boolean).join('\n');
 }
 
 // --- Files and diffs ---
@@ -684,7 +934,7 @@ function prSummaryText(data) {
   return '';
 }
 
-function prErrorHtml(data) {
+function prErrorHtml(data, entry = null) {
   const titles = {
     'gh-missing': 'The GitHub CLI is needed',
     'gh-auth': 'Sign in to GitHub',
@@ -695,11 +945,13 @@ function prErrorHtml(data) {
   const text = data.errorCode === 'no-github-remote'
     ? 'Pull requests are listed for repositories on GitHub, and this one has no GitHub remote.'
     : data.error;
+  // Among several repositories, the one it is about comes first, and Try again names it.
+  const heading = entry ? `<div class="pr-error-repo">${prRepoTagHtml(entry.tag)}</div>` : '';
   return `
-    <div class="git-empty-state">
+    <div class="git-empty-state">${heading}
       <div class="git-empty-title">${escapeHtml(title)}</div>
       <div>${escapeHtml(text || '')}</div>
-      <button type="button" class="ws-btn ws-btn--sm" data-act="retry">Try again</button>
+      <button type="button" class="ws-btn ws-btn--sm" data-act="retry"${entry ? ` data-repo="${entry.index}"` : ''}>Try again</button>
     </div>`;
 }
 
@@ -723,9 +975,11 @@ function prRemoteSelectHtml(data) {
     </select>`;
 }
 
-function prRepoPickerHtml(repos, active) {
-  if (typeof gitGraphRepoPickerHtml === 'function') return gitGraphRepoPickerHtml(repos, active);
-  return '';
+/** The repository tabs, as History has them: a name shows that repository alone, the checkbox adds it. */
+function prRepoTabsHtml(project, state) {
+  if (typeof gitRepoTabsHtml !== 'function') return '';
+  const repos = state.repositories || [];
+  return gitRepoTabsHtml(repos, gitRepoSelectionOf(state, repos), { multi: true, colors: gitRepoColors(project, repos) });
 }
 
 function prPaint(project, state, body) {
@@ -734,23 +988,32 @@ function prPaint(project, state, body) {
     body.innerHTML = '<div class="git-empty-state"><div class="git-empty-title">No folders attached</div><div>Attach a repository to this project to see its pull requests here.</div></div>';
     return;
   }
+  // The selection made valid for the repositories there are, and its primary one among those shown.
+  if (typeof gitSetRepoSelection === 'function') gitSetRepoSelection(state, gitRepoSelectionOf(state, repos));
+  const first = prShownRepos(state)[0];
+  if (first && !prShownRepos(state).some(r => r.path === state.selectedRepo)) state.selectedRepo = first.path;
   const repo = prSelectedRepo(state);
   state.selectedRepo = repo.path;
-  const picker = prRepoPickerHtml(repos, repo);
+  const picker = prRepoTabsHtml(project, state);
   if (repo.git === false) {
     body.innerHTML = `<div class="git-tab-shell pr-shell">${picker}<div class="git-empty-state"><div class="git-empty-title">Not a Git repository</div><div>${escapeHtml(repo.path)}</div></div></div>`;
     prWireRepoPicker(project, state, body);
     return;
   }
   const data = prRepoState(project.id, state, repo.path);
+  const shown = prShownRepos(state);
+  const multi = shown.length > 1;
+  const entries = multi ? prMultiEntries(project, state) : [];
+  const summary = multi ? prMultiSummaryText(entries) : prSummaryText(data);
+  const summaryTitle = multi ? shown.map(r => r.path).join('\n') : repo.path;
   body.innerHTML = `
     <div class="git-tab-shell pr-shell">
       ${picker}
       <div class="git-tab-top">
-        <div class="pr-heading"><div class="git-tab-title">Pull Requests</div><div class="git-tab-path" id="pr-summary" title="${prAttr(repo.path)}">${escapeHtml(prSummaryText(data))}</div></div>
+        <div class="pr-heading"><div class="git-tab-title">Pull Requests</div><div class="git-tab-path" id="pr-summary" title="${prAttr(summaryTitle)}">${escapeHtml(summary)}</div></div>
         <div class="pr-top-actions">
           <label class="pr-search" title="Words in a title, a description or a comment, or in a changed file's path, never in the code. A word with * or ? is a pattern for the files: *.sql finds the pull requests that change a .sql file.">${PICONS.search(12)}<input type="search" id="pr-search" placeholder="Search titles, comments, files" autocomplete="off" spellcheck="false" aria-label="Search pull requests" value="${prAttr(state.search)}"></label>
-          <span id="pr-remote-slot">${prRemoteSelectHtml(data)}</span>
+          <span id="pr-remote-slot">${multi ? prRemotesButtonHtml(entries) : prRemoteSelectHtml(data)}</span>
           <div class="pr-filter-wrap">
             <button type="button" class="ws-btn ws-btn--sm pr-filter-btn${prIsDefaultFilter(state.filter) ? '' : ' is-on'}" id="pr-filter" aria-haspopup="true" aria-expanded="false" title="Which pull requests to show">${PR_ICONS.filter(12)}<span id="pr-filter-label">${escapeHtml(prFilterLabel(state.filter))}</span>${PICONS.chevronDown(10)}</button>
           </div>
@@ -767,12 +1030,12 @@ function prPaint(project, state, body) {
   prBindNotice(project, state, body);
   // A repaint held back while a field had the focus runs once it leaves (after the click that moved it).
   body.onfocusout = () => setTimeout(() => { if (typeof prFlushPending === 'function') prFlushPending(project, state); }, 200);
-  body.querySelector('#pr-refresh').onclick = () => prRefresh(project, state, repo.path, { notice: true });
+  body.querySelector('#pr-refresh').onclick = () => prRefreshShown(project, state, { notice: true });
   body.querySelector('#pr-filter').onclick = (e) => prOpenFilterMenu(project, state, body, e.currentTarget);
   body.querySelector('#pr-people').onclick = (e) => prOpenPeopleMenu(project, state, body, e.currentTarget);
   body.querySelector('#pr-prompt').onclick = (e) => prOpenPromptMenu(project, state, e.currentTarget);
   prWireSearch(project, state, body);
-  prWireRemote(project, state, body, repo.path);
+  prWireRemoteSlot(project, state, body);
 }
 
 /** The search box: the list follows the text a moment after typing stops, at once on Enter; Escape empties it. */
@@ -796,31 +1059,52 @@ function prWireSearch(project, state, body) {
   input.addEventListener('search', apply);
 }
 
+/** A name shows that repository alone; the checkbox before it adds it to those shown, or takes it away. */
 function prWireRepoPicker(project, state, body) {
-  body.querySelectorAll('.gg-repo-option').forEach((button) => {
-    const repo = (state.repositories || [])[Number(button.dataset.index)];
-    if (!repo) return;
-    button.onclick = () => {
-      if (state.selectedRepo === repo.path) return;
-      state.selectedRepo = repo.path;
-      state.notice = null;
-      prPaint(project, state, body);
-      prEnsureLoaded(project, state);
-    };
+  if (typeof gitWireRepoTabs !== 'function') return;
+  const repos = state.repositories || [];
+  const changed = () => {
+    state.notice = null;
+    prPaint(project, state, body);
+    prEnsureLoaded(project, state);
+  };
+  gitWireRepoTabs(body, repos, {
+    onOnly: (repo) => { if (gitRepoSelectOnly(state, repos, repo)) changed(); },
+    onToggle: (repo) => {
+      if (!gitRepoToggle(state, repos, repo)) return false;
+      changed();
+      return true;
+    },
   });
+}
+
+/** The Remote choice of one repository (a combo), or of several (a menu). */
+function prWireRemoteSlot(project, state, body) {
+  const shown = prShownRepos(state);
+  if (shown.length > 1) prWireRemotes(project, state, body);
+  else if (shown.length) prWireRemote(project, state, body, shown[0].path);
+}
+
+/** Another remote for a repository: its pull requests are read again from that one. */
+function prSetRemote(project, state, repoPath, remote) {
+  const previous = state.repos.get(repoPath);
+  const fresh = prRepoData(remote);
+  fresh.remotes = previous ? previous.remotes : [];
+  state.repos.set(repoPath, fresh);
+  prSaveRemote(project.id, repoPath, remote);
+  prLoad(project, state, repoPath);
 }
 
 function prWireRemote(project, state, body, repoPath) {
   const select = body.querySelector('#pr-remote');
   if (!select) return;
-  select.onchange = () => {
-    const previous = state.repos.get(repoPath);
-    const fresh = prRepoData(select.value);
-    fresh.remotes = previous ? previous.remotes : [];
-    state.repos.set(repoPath, fresh);
-    prSaveRemote(project.id, repoPath, select.value);
-    prLoad(project, state, repoPath);
-  };
+  select.onchange = () => prSetRemote(project, state, repoPath, select.value);
+}
+
+function prWireRemotes(project, state, body) {
+  const button = body.querySelector('#pr-remotes');
+  if (!button) return;
+  button.onclick = () => showContextMenu(prRemotesMenuItems(prMultiEntries(project, state), (path, remote) => prSetRemote(project, state, path, remote)), { anchor: button });
 }
 
 function prBindNotice(project, state, body) {
@@ -837,17 +1121,48 @@ function prSetNotice(project, state, notice) {
   prBindNotice(project, state, body);
 }
 
-/** Repaint the summary, the Remote combo and the list of the repository on screen. */
+/**
+ * Repaint the summary, the Remote choice and the list, when `repoPath` is one
+ * of the repositories on screen. Several repositories answer together: their
+ * repaints run once.
+ */
 function prRepaint(project, state, repoPath) {
   const body = prActiveBody(project);
-  if (!body || state.selectedRepo !== repoPath || !body.querySelector('#pr-list')) return;
-  const data = prRepoState(project.id, state, repoPath);
+  if (!body || !prIsShown(state, repoPath) || !body.querySelector('#pr-list')) return;
+  if (prShownRepos(state).length > 1) { prQueueRepaint(project, state); return; }
+  prRepaintNow(project, state, body);
+}
+
+function prQueueRepaint(project, state) {
+  if (state.repaintQueued) return;
+  state.repaintQueued = true;
+  Promise.resolve().then(() => {
+    state.repaintQueued = false;
+    const body = prActiveBody(project);
+    if (body && body.querySelector('#pr-list')) prRepaintNow(project, state, body);
+  });
+}
+
+function prRepaintNow(project, state, body) {
+  const shown = prShownRepos(state);
+  if (!shown.length) return;
   const summary = body.querySelector('#pr-summary');
-  if (summary) summary.textContent = prSummaryText(data);
   const remoteSlot = body.querySelector('#pr-remote-slot');
-  if (remoteSlot && !remoteSlot.querySelector('select:focus')) {
-    remoteSlot.innerHTML = prRemoteSelectHtml(data);
-    prWireRemote(project, state, body, repoPath);
+  if (shown.length > 1) {
+    const entries = prMultiEntries(project, state);
+    if (summary) summary.textContent = prMultiSummaryText(entries);
+    if (remoteSlot) {
+      remoteSlot.innerHTML = prRemotesButtonHtml(entries);
+      prWireRemotes(project, state, body);
+    }
+  } else {
+    const repoPath = shown[0].path;
+    const data = prRepoState(project.id, state, repoPath);
+    if (summary) summary.textContent = prSummaryText(data);
+    if (remoteSlot && !remoteSlot.querySelector('select:focus')) {
+      remoteSlot.innerHTML = prRemoteSelectHtml(data);
+      prWireRemote(project, state, body, repoPath);
+    }
   }
   prPaintList(project, state, body);
 }
@@ -856,6 +1171,7 @@ function prPaintList(project, state, body) {
   const list = body.querySelector('#pr-list');
   const repo = prSelectedRepo(state);
   if (!list || !repo) return;
+  if (prShownRepos(state).length > 1) { prPaintMultiList(project, state, body, list); return; }
   const data = prRepoState(project.id, state, repo.path);
   // Never under the fingers: while a field in the list has the focus, the repaint waits.
   if (typeof prTypingIn === 'function' && prTypingIn(list)) { data.listPending = true; return; }
@@ -884,13 +1200,63 @@ function prPaintList(project, state, body) {
   prSearchEnsure(project, state, repo.path, view);
 }
 
+/** The list of several repositories: one merged list, each row wired to its own repository. */
+function prPaintMultiList(project, state, body, list) {
+  const entries = prMultiEntries(project, state);
+  // The primary repository holds the "repaint waiting" flag, as the one repository does alone.
+  const holder = prRepoState(project.id, state, prSelectedRepo(state).path);
+  if (typeof prTypingIn === 'function' && prTypingIn(list)) { holder.listPending = true; return; }
+  holder.listPending = false;
+  const scroller = body;
+  const scrollTop = scroller.scrollTop;
+  const merged = prMergeRepoViews(entries, state);
+  state.multiViewKey = prMultiViewKey(merged);
+  list.innerHTML = prMultiListHtml(entries, merged, state, new Date());
+  const rowAt = new Map(merged.rows.map(row => [`${row.entry.index}:${row.pr.number}`, row]));
+  list.querySelectorAll('.pr-item').forEach((item) => {
+    const row = rowAt.get(`${item.dataset.repo}:${item.dataset.pr}`);
+    if (row) prWireItem(project, state, row.entry.path, item, row.pr);
+  });
+  const entryOf = (button) => entries.find(entry => entry.index === Number(button.dataset.repo));
+  list.querySelector('[data-act="page-more"]')?.addEventListener('click', () => prLoadMorePages(project, state));
+  list.querySelectorAll('[data-act="page-retry"]').forEach((button) => button.addEventListener('click', () => {
+    const entry = entryOf(button);
+    if (entry) prLoadPage(project, state, entry.path, { more: entry.data.page.loaded });
+  }));
+  list.querySelectorAll('[data-act="retry"]').forEach((button) => button.addEventListener('click', () => {
+    const entry = entryOf(button);
+    if (entry) prLoad(project, state, entry.path);
+  }));
+  prWireTextsRetry(project, state, body, list);
+  scroller.scrollTop = scrollTop;
+  for (const entry of entries) {
+    const view = merged.views.get(entry.path);
+    if (view) prSearchEnsure(project, state, entry.path, view);
+  }
+}
+
+/**
+ * "Load 10 more" over several repositories: the next page of those that hold
+ * fewer than a page of what they have read and the list does not show yet
+ * (RepoSelection.repoPagePlan), so the others are not read past what is needed.
+ */
+function prLoadMorePages(project, state) {
+  const merged = prMergeRepoViews(prMultiEntries(project, state), state);
+  const size = merged.narrowed ? PR_NARROWED_PAGE_SIZE : PR_PAGE_SIZE;
+  const plan = RepoSelection.repoPagePlan(merged.lists, merged.held, size);
+  for (const path of plan) prLoadPage(project, state, path, { more: true });
+  return plan;
+}
+
 function prWireTextsRetry(project, state, body, list) {
   list.querySelector('[data-act="texts-retry"]')?.addEventListener('click', () => {
-    const repo = prSelectedRepo(state);
-    if (!repo) return;
-    const texts = prRepoState(project.id, state, repo.path).texts;
-    texts.failed.clear();
-    texts.error = null;
+    const shown = prShownRepos(state);
+    if (!shown.length) return;
+    for (const repo of shown) {
+      const texts = prRepoState(project.id, state, repo.path).texts;
+      texts.failed.clear();
+      texts.error = null;
+    }
     prPaintList(project, state, body);
   });
 }
@@ -1075,15 +1441,18 @@ function prWireFiles(slot, entry, { openPaths, closedFolders, viewed = null, sea
 /** Paint one row again where it is (after its title changed, or started or stopped being edited). */
 function prRepaintItem(project, state, repoPath, number) {
   const body = prActiveBody(project);
-  if (!body || state.selectedRepo !== repoPath) return null;
+  if (!body || !prIsShown(state, repoPath)) return null;
   const data = prRepoState(project.id, state, repoPath);
-  const item = body.querySelector(`.pr-item[data-pr="${number}"]`);
+  const item = body.querySelector(prItemSelectorFor(state, repoPath, number));
   const pr = typeof prFindPr === 'function' ? prFindPr(data, number) : null;
   if (!item || !pr) return null;
   const holder = document.createElement('div');
   const search = prSearchOf(state);
   const where = search.terms.length ? prSearchMatch(pr, data.texts?.map.get(number) || null, search).where : null;
-  holder.innerHTML = prRowHtml(pr, { expanded: data.expanded.has(number), repo: data.open?.repo || null, titleEdit: prTitleEditOf(data, pr), search: search.terms.length ? search : null, where }).trim();
+  // Among several repositories, the row names its repository again.
+  const multi = prShownRepos(state).length > 1;
+  const repoOpts = multi ? { repoTag: prMultiEntries(project, state).find(entry => entry.path === repoPath)?.tag, repoIndex: prRepoIndex(state, repoPath) } : {};
+  holder.innerHTML = prRowHtml(pr, { expanded: data.expanded.has(number), repo: data.open?.repo || null, titleEdit: prTitleEditOf(data, pr), search: search.terms.length ? search : null, where, ...repoOpts }).trim();
   const fresh = holder.firstElementChild;
   item.replaceWith(fresh);
   prWireItem(project, state, repoPath, fresh, pr);
@@ -1166,10 +1535,10 @@ async function prSaveTitle(project, state, repoPath, pr) {
 /** The repaint of one open row's files, if it is still on screen and open. */
 function prRepaintDetail(project, state, repoPath, pr) {
   const body = prActiveBody(project);
-  if (!body || state.selectedRepo !== repoPath) return;
+  if (!body || !prIsShown(state, repoPath)) return;
   const data = prRepoState(project.id, state, repoPath);
   if (!data.expanded.has(pr.number)) return;
-  const item = body.querySelector(`.pr-item[data-pr="${pr.number}"]`);
+  const item = body.querySelector(prItemSelectorFor(state, repoPath, pr.number));
   if (item) prPaintDetail(project, state, repoPath, item, pr);
 }
 
@@ -1234,10 +1603,10 @@ function prOpenFilterMenu(project, state, body, button) {
  * is everyone.
  */
 function prOpenPeopleMenu(project, state, body, button) {
-  const repo = prSelectedRepo(state);
-  const data = repo ? prRepoState(project.id, state, repo.path) : null;
+  // Several repositories: the authors of all of them.
+  const datas = prShownRepos(state).map(repo => prRepoState(project.id, state, repo.path));
   const paint = (menu) => {
-    const items = data ? prMergeLists(data.open?.items, data.page?.items, state.filter) : [];
+    const items = datas.flatMap(data => prMergeLists(data.open?.items, data.page?.items, state.filter));
     const choices = prPeopleChoices(items, state.people);
     const avatar = (c) => (typeof prdAvatarHtml === 'function' ? prdAvatarHtml(c.login, c.avatar, 16) : '');
     menu.innerHTML = (choices.length
@@ -1269,7 +1638,11 @@ function prOpenPromptMenu(project, state, button) {
   const repo = prSelectedRepo(state);
   if (!repo) return;
   const data = prRepoState(project.id, state, repo.path);
-  const shown = data.open ? prShownView(data, state).items : [];
+  // Several repositories: the pull requests shown, repository by repository, each prompt naming its own.
+  const multi = prShownRepos(state).length > 1;
+  const rows = multi ? prMergeRepoViews(prMultiEntries(project, state), state).rows : [];
+  const shown = multi ? rows.map(row => row.pr) : (data.open ? prShownView(data, state).items : []);
+  const promptText = (kind) => (multi ? prMultiPromptText(kind, rows) : prPromptText(kind, shown, data.open?.repo));
   const what = { numbers: 'the numbers', titles: 'the numbers and titles' };
   showContextMenu([
     { head: shown.length ? `${prPlural(shown.length, 'pull request')} shown` : 'No pull requests shown' },
@@ -1278,7 +1651,7 @@ function prOpenPromptMenu(project, state, button) {
       icon: PR_ICONS.prompt(13),
       disabled: !shown.length,
       onClick: () => {
-        window.api?.writeClipboard?.(prPromptText(kind, shown, data.open?.repo));
+        window.api?.writeClipboard?.(promptText(kind));
         prSetNotice(project, state, { kind: 'ok', text: `Copied a prompt with ${what[kind]} of ${prPlural(shown.length, 'pull request')}.` });
       },
     })),
@@ -1290,13 +1663,13 @@ function prSetFilter(project, state, body, filter) {
   const label = body.querySelector('#pr-filter-label');
   if (label) label.textContent = prFilterLabel(filter);
   body.querySelector('#pr-filter')?.classList.toggle('is-on', !prIsDefaultFilter(filter));
-  const repo = prSelectedRepo(state);
-  if (!repo) return;
-  const data = prRepoState(project.id, state, repo.path);
   const states = prPageStates(filter);
-  if (states.length && data.open && data.page.key !== states.join(',')) {
-    data.page = prEmptyPage(states.join(','));
-    prLoadPage(project, state, repo.path);
+  for (const repo of prShownRepos(state)) {
+    const data = prRepoState(project.id, state, repo.path);
+    if (states.length && data.open && data.page.key !== states.join(',')) {
+      data.page = prEmptyPage(states.join(','));
+      prLoadPage(project, state, repo.path);
+    }
   }
   prPaintList(project, state, body);
 }
@@ -1458,7 +1831,8 @@ async function prReadTexts(project, state, repoPath, numbers) {
 function prAfterTexts(project, state, repoPath) {
   const body = prActiveBody(project);
   const list = body?.querySelector('#pr-list');
-  if (!list || state.selectedRepo !== repoPath) return;
+  if (!list || !prIsShown(state, repoPath)) return;
+  if (prShownRepos(state).length > 1) { prAfterTextsMulti(project, state, body, list); return; }
   const data = prRepoState(project.id, state, repoPath);
   const view = prShownView(data, state);
   if (prViewKey(view) !== data.viewKey) { prPaintList(project, state, body); return; }
@@ -1471,6 +1845,26 @@ function prAfterTexts(project, state, repoPath) {
     return;
   }
   prSearchEnsure(project, state, repoPath, view);
+}
+
+/** After texts came, with several repositories: the same as for one, over the merged list. */
+function prAfterTextsMulti(project, state, body, list) {
+  const entries = prMultiEntries(project, state);
+  const merged = prMergeRepoViews(entries, state);
+  if (prMultiViewKey(merged) !== state.multiViewKey) { prPaintList(project, state, body); return; }
+  const line = list.querySelector('#pr-search-status');
+  if (line) {
+    const read = entries.filter(entry => entry.data.open);
+    line.outerHTML = prSearchStatusFor(merged, read.map(entry => ({ texts: entry.data.texts, candidates: merged.views.get(entry.path).candidates })));
+    prWireTextsRetry(project, state, body, list);
+  } else if (merged.search.terms.length) {
+    prPaintList(project, state, body);
+    return;
+  }
+  for (const entry of entries) {
+    const view = merged.views.get(entry.path);
+    if (view) prSearchEnsure(project, state, entry.path, view);
+  }
 }
 
 async function prRefresh(project, state, repoPath, { notice = false } = {}) {
@@ -1492,14 +1886,37 @@ async function prRefresh(project, state, repoPath, { notice = false } = {}) {
   }
 }
 
-/** Read the selected repository's pull requests when they were never read, or long ago. */
+/** Refresh: every repository shown is read again (the one alone as prRefresh does). */
+async function prRefreshShown(project, state, { notice = false } = {}) {
+  const shown = prShownRepos(state);
+  if (shown.length === 1) return prRefresh(project, state, shown[0].path, { notice });
+  if (notice) {
+    prSetNotice(project, state, { kind: 'busy', text: 'Reading pull requests…' });
+    for (const repo of shown) {
+      const data = prRepoState(project.id, state, repo.path);
+      data.texts.failed.clear();
+      data.texts.error = null;
+      for (const d of data.detail.values()) {
+        for (const what of ['conversation', 'commits', 'checks', 'viewed']) if (d[what]) d[what].loadedAt = 0;
+      }
+    }
+  }
+  await Promise.all(shown.map(repo => prLoad(project, state, repo.path, { quiet: true })));
+  if (notice && state.notice?.kind === 'busy') {
+    const failed = shown.map(repo => prRepoState(project.id, state, repo.path)).find(data => data.error);
+    prSetNotice(project, state, failed ? { kind: 'error', text: failed.error } : null);
+  }
+}
+
+/** Read the pull requests of every repository shown when they were never read, or long ago. */
 function prEnsureLoaded(project, state) {
-  const repo = prSelectedRepo(state);
-  if (!repo || repo.git === false) return;
-  const data = prRepoState(project.id, state, repo.path);
-  if (data.loading) return;
-  if (!data.open) { prLoad(project, state, repo.path); return; }
-  if (Date.now() - data.loadedAt > PR_STALE_MS) prRefresh(project, state, repo.path);
+  for (const repo of prShownRepos(state)) {
+    if (repo.git === false) continue;
+    const data = prRepoState(project.id, state, repo.path);
+    if (data.loading) continue;
+    if (!data.open) { prLoad(project, state, repo.path); continue; }
+    if (Date.now() - data.loadedAt > PR_STALE_MS) prRefresh(project, state, repo.path);
+  }
 }
 
 function renderProjectPullRequestsTab(project, body) {
@@ -1639,6 +2056,8 @@ if (typeof module !== 'undefined' && module.exports) {
     prSearchOf, prShownView, prSearchStatusHtml, prViewKey, prSearchEnsure,
     prCanEdit, prMergeBlock, prRowMenuItems, prWebUrl, prLinkToolsHtml, prWebTitle, prFileRows, prFileView, prFilesToolsHtml, prRowHtml, prListHtml, prFooterHtml, prFilesHtml,
     prTitleEditHtml, prTitleEditOf,
+    prRepoTagHtml, prShownRepos, prIsShown, prItemSelector, prItemSelectorFor, prMergeRepoViews, prMultiViewKey, prMultiFooterHtml, prMultiListHtml, prMultiSummaryText,
+    prRemotesButtonHtml, prRemotesMenuItems, prMultiPromptText, prLoadMorePages, prMultiEntries, prSearchStatusFor,
     prPatchHtml, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,
   };
 }

@@ -78,6 +78,14 @@ global.gitTreeRows = (tree, collapsedSet, keyPrefix, depth = 0) => {
   return rows;
 };
 
+// The History of several repositories: the shared selection and color modules,
+// and the tabs' own helpers, run as the classic script they are (their
+// functions become globals, as in the window).
+global.RepoSelection = require('../public/repo-selection');
+global.RepoColors = require('../public/repo-colors');
+global.pathBasename = (p) => String(p || '').split('/').filter(Boolean).pop() || '';
+vm.runInThisContext(fs.readFileSync(path.join(__dirname, '../public/git-repo-tabs.js'), 'utf8'));
+
 const render = require(path.join(__dirname, '../public/git-graph-render.js'));
 Object.assign(global, render);
 
@@ -1710,4 +1718,846 @@ test('folding a folder in the Commit Details hides its files', () => {
   assert.deepEqual(shown().sort(), ['README.md', 'src/a.js']);
   state.collapsedFolders.add('src');
   assert.deepEqual(shown(), ['README.md']);
+});
+
+// === A History of several repositories ===
+//
+// More than one repository ticked in the tabs makes one merged table: a slice
+// of data per repository, rows named "<tag>:<hash>", a Repository column. The
+// tests below use made-up repositories, and `window.api` stubs keyed by the
+// repository asked about.
+
+const GG_API = '/code/api';
+const GG_WEB = '/code/web';
+const GG_DOCS = '/code/docs';
+const ggNoRefs = () => ({ heads: [], remotes: [], tags: [] });
+
+function ggCommit(hash, date, parents = [], extra = {}) {
+  return { hash, shortHash: hash.slice(0, 7), parents, authorName: 'Ada', authorEmail: 'ada@example.com', authorDate: date, commitDate: date, subject: `Commit ${hash}`, refs: ggNoRefs(), ...extra };
+}
+
+/** A History state showing `paths` (the first is the primary). */
+function ggMulti(id, paths = [GG_API, GG_WEB]) {
+  const state = view.gitGraphState(id);
+  state.repositories = [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p, git: true }));
+  state.selectedRepo = paths[0];
+  state.selectedRepos = [...paths];
+  return { state, project: { id, folders: [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p })) } };
+}
+
+/** The slices of the shown repositories, filled with `data` ({ path: fields }), and the merged rows computed. */
+function ggFill(state, data) {
+  view.gitGraphSyncSlices(state, view.gitGraphShownRepos(state));
+  for (const [repoPath, fields] of Object.entries(data)) Object.assign(state.slices.get(repoPath), fields);
+  view.gitGraphRecomputeLayout(state);
+  return state;
+}
+
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('a row key names its repository and round-trips; a plain hash has no tag', () => {
+  assert.equal(render.gitGraphRepoKey('r1', 'abc'), 'r1:abc');
+  assert.deepEqual(render.gitGraphSplitKey('r1:abc'), { tag: 'r1', sha: 'abc' });
+  assert.deepEqual(render.gitGraphSplitKey('r12:#uncommitted'), { tag: 'r12', sha: '#uncommitted' });
+  assert.deepEqual(render.gitGraphSplitKey('abc'), { tag: null, sha: 'abc' });
+  assert.deepEqual(render.gitGraphSplitKey('#uncommitted'), { tag: null, sha: '#uncommitted' });
+  assert.equal(render.gitGraphPlainHash('r3:abc'), 'abc');
+  assert.equal(render.gitGraphPlainHash('abc'), 'abc');
+  const rows = render.gitGraphNamespaceRows([
+    { hash: '#uncommitted', parents: ['h'], kind: 'uncommitted' },
+    { hash: 's', parents: ['h'], kind: 'stash' },
+    { hash: 'h', parents: [] },
+  ], 'r0', GG_API);
+  assert.deepEqual(rows.map(r => r.hash), ['r0:#uncommitted', 'r0:s', 'r0:h']);
+  assert.deepEqual(rows.map(r => r.parents), [['r0:h'], ['r0:h'], []]);
+  assert.deepEqual(rows.map(r => r.sha), ['#uncommitted', 's', 'h']);
+  assert.ok(rows.every(r => r.repoPath === GG_API && r.repoTag === 'r0'));
+  assert.deepEqual(rows.map(r => render.gitGraphSplitKey(r.hash).sha), ['#uncommitted', 's', 'h'], 'the key goes back to the hash git knows');
+});
+
+test('merging repositories: the same hash twice, both Uncommitted rows on top, a tail held below the frontier', () => {
+  const same = ggCommit('aaaa111', '2024-03-01T00:00:00Z');
+  const slice = (tag, path, rawCommits, extra) => ({ tag, path, rawCommits, stashes: [], uncommitted: { changeCount: 1 }, headHash: rawCommits[0].hash, hasMore: false, ...extra });
+  const api = [ggCommit('a2', '2024-03-05T00:00:00Z', ['aaaa111']), same];
+  const web = [ggCommit('b2', '2024-03-04T00:00:00Z', ['aaaa111']), ggCommit('b1', '2024-03-03T00:00:00Z', ['aaaa111']), { ...same }];
+
+  const all = render.gitGraphMergeSlices([slice('r0', GG_API, api), slice('r1', GG_WEB, web)], 'date');
+  assert.deepEqual(all.rows.map(r => r.hash), ['r0:#uncommitted', 'r1:#uncommitted', 'r0:a2', 'r1:b2', 'r1:b1', 'r0:aaaa111', 'r1:aaaa111']);
+  assert.deepEqual(all.rows.filter(r => r.kind === 'uncommitted').map(r => r.sha), ['#uncommitted', '#uncommitted']);
+  assert.deepEqual(all.rows.find(r => r.hash === 'r1:#uncommitted').parents, ['r1:b2'], 'each Uncommitted row hangs off its own repository\'s HEAD');
+  assert.equal(all.hasMore, false);
+  assert.deepEqual(all.held, { r0: 0, r1: 0 });
+
+  // api has more to load and is used up: web's last commit waits (it could come after something api has not loaded).
+  const frontier = render.gitGraphMergeSlices([slice('r0', GG_API, api, { hasMore: true }), slice('r1', GG_WEB, web)], 'date');
+  assert.deepEqual(frontier.rows.map(r => r.hash), ['r0:#uncommitted', 'r1:#uncommitted', 'r0:a2', 'r1:b2', 'r1:b1', 'r0:aaaa111']);
+  assert.deepEqual(frontier.held, { r0: 0, r1: 1 });
+  assert.equal(frontier.hasMore, true);
+  assert.deepEqual(frontier.lists, [{ key: 'r0', hasMore: true }, { key: 'r1', hasMore: false }]);
+});
+
+test('the author-date order ranks rows by their author date', () => {
+  const a = { ...ggCommit('a1', '2024-01-01T00:00:00Z'), authorDate: '2024-06-01T00:00:00Z' };
+  const b = ggCommit('b1', '2024-03-01T00:00:00Z');
+  const slices = [
+    { tag: 'r0', path: GG_API, rawCommits: [a], stashes: [], uncommitted: null, headHash: 'a1', hasMore: false },
+    { tag: 'r1', path: GG_WEB, rawCommits: [b], stashes: [], uncommitted: null, headHash: 'b1', hasMore: false },
+  ];
+  assert.deepEqual(render.gitGraphMergeSlices(slices, 'date').rows.map(r => r.hash), ['r1:b1', 'r0:a1']);
+  assert.deepEqual(render.gitGraphMergeSlices(slices, 'author-date').rows.map(r => r.hash), ['r0:a1', 'r1:b1']);
+});
+
+test('which repositories are shown: the selected ones in the order of the tabs, the primary alone otherwise', () => {
+  const { state } = ggMulti('proj-shown-1', [GG_DOCS, GG_API]);
+  assert.deepEqual(view.gitGraphShownRepos(state).map(r => r.path), [GG_API, GG_DOCS], 'the order of the tabs, not of the clicks');
+  assert.equal(view.gitGraphIsMulti(state), true);
+  assert.equal(view.gitGraphRepoTag(state, GG_DOCS), 'r2');
+  assert.equal(view.gitGraphRepoByTag(state, 'r1').path, GG_WEB);
+
+  state.selectedRepos = [];
+  assert.deepEqual(view.gitGraphShownRepos(state).map(r => r.path), [GG_DOCS], 'nothing selected: the primary');
+  assert.equal(view.gitGraphIsMulti(state), false);
+
+  // A folder that is not a repository is not shown among the others.
+  state.repositories[1].git = false;
+  state.selectedRepos = [GG_API, GG_WEB];
+  state.selectedRepo = GG_API;
+  assert.deepEqual(view.gitGraphShownRepos(state).map(r => r.path), [GG_API]);
+});
+
+test('the Repository column is only there with several repositories, before the graph, each name in its color', () => {
+  const { state, project } = ggMulti('proj-col-1');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a1', '2024-03-02T00:00:00Z')], headHash: 'a1' },
+    [GG_WEB]: { rawCommits: [ggCommit('b1', '2024-03-01T00:00:00Z')], headHash: 'b1' },
+  });
+  const header = view.gitGraphHeaderHtml(state);
+  assert.match(header, /data-col="select"><\/div><div class="gg-th" data-col="repo">Repository<span class="gg-col-resizer" data-col="repo"><\/span><\/div><div class="gg-th" data-col="graph"/);
+
+  const html = view.gitGraphRowsHtml(project, state);
+  const rows = html.split('data-row-index').slice(1);
+  assert.equal(rows.length, 2);
+  const colors = global.gitRepoColors(project, state.repositories);
+  assert.match(rows[0], new RegExp(`gg-cell-repo" title="${GG_API}" style="--repo-color:${colors[GG_API]}">api</div>`));
+  assert.match(rows[1], new RegExp(`gg-cell-repo" title="${GG_WEB}" style="--repo-color:${colors[GG_WEB]}">web</div>`));
+  for (const row of rows) assert.ok(row.indexOf('gg-cell-select') < row.indexOf('gg-cell-repo') && row.indexOf('gg-cell-repo') < row.indexOf('gg-cell-graph'));
+  assert.notEqual(colors[GG_API], colors[GG_WEB]);
+
+  // One repository: no such column, in the header or in the rows.
+  state.selectedRepos = [GG_API];
+  assert.doesNotMatch(view.gitGraphHeaderHtml(state), /data-col="repo"|Repository/);
+  const single = view.gitGraphState('proj-col-2');
+  single.repositories = [{ path: GG_API, git: true }];
+  single.selectedRepo = GG_API;
+  single.rows = [ggCommit('a1', '2024-03-02T00:00:00Z')];
+  single.layout = [{ lane: 0, colorIndex: 0, edges: [] }];
+  assert.doesNotMatch(view.gitGraphRowsHtml(project, single), /gg-cell-repo/);
+});
+
+test('the History paints repository tabs with a checkbox each; the table of several is marked for the column', () => {
+  const { state, project } = ggMulti('proj-tabs-1');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a1', '2024-03-02T00:00:00Z')], headHash: 'a1' },
+    [GG_WEB]: { rawCommits: [ggCommit('b1', '2024-03-01T00:00:00Z')], headHash: 'b1' },
+  });
+  state.columnWidths = { repo: 140 };
+  const body = fakeElement();
+  view.gitGraphPaint(project, state, body);
+  assert.match(body.innerHTML, /class="gg-repo-picker gg-repo-picker--multi is-multi"/);
+  assert.equal([...body.innerHTML.matchAll(/class="gg-repo-check"/g)].length, 3);
+  assert.match(body.innerHTML, /class="gg-table-wrap gg-no-select gg-multi-repo" style="--gg-repo-col:140px"/);
+
+  state.selectedRepos = [GG_API];
+  state.columnWidths = {};
+  view.gitGraphPaint(project, state, body);
+  assert.doesNotMatch(body.innerHTML, /gg-multi-repo/);
+  assert.match(body.innerHTML, /class="gg-repo-picker gg-repo-picker--multi"/, 'with one shown, the checkboxes are still there to add another');
+});
+
+test('each repository is asked for its own branches, and Load More only for the ones the merge needs', async () => {
+  const { state, project } = ggMulti('proj-load-multi');
+  state.loadMore = 2;
+  state.branchSelection = ['main'];
+  state.tagSelection = 'all';
+  const calls = [];
+  const answers = {
+    [GG_API]: [ggCommit('a3', '2024-03-10T00:00:00Z', ['a2']), ggCommit('a2', '2024-03-09T00:00:00Z', ['a1']), ggCommit('a1', '2024-03-08T00:00:00Z')],
+    [GG_WEB]: [ggCommit('b2', '2024-03-07T00:00:00Z', ['b1']), ggCommit('b1', '2024-03-06T00:00:00Z')],
+  };
+  global.window = {
+    api: {
+      getGitGraphRepoConfig: (_id, folder) => Promise.resolve({ ok: true, config: folder === GG_WEB ? { branchDropdownSelection: ['develop', 'origin/develop'], showStashes: false } : { branchDropdownSelection: ['main'] } }),
+      getProjectGitGraph: (_id, folder, opts) => {
+        calls.push({ folder, ...opts });
+        const all = answers[folder];
+        const page = all.slice(opts.skip, opts.skip + opts.limit);
+        return Promise.resolve({ ok: true, commits: page, refs: { heads: [{ name: 'main', hash: all[0].hash, isHead: true }], remotes: [], tags: [] }, hasMore: opts.skip + opts.limit < all.length });
+      },
+    },
+  };
+  const body = fakeElement();
+  await view.gitGraphLoadGraph(project, state, body, { reset: true });
+  await flush();
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(c => c.folder).sort(), [GG_API, GG_WEB]);
+  const web = calls.find(c => c.folder === GG_WEB);
+  assert.deepEqual(web.branches, ['develop', 'origin/develop'], 'the repository\'s own saved branches');
+  assert.equal(web.showStashes, false, 'and its own display settings');
+  assert.deepEqual(calls.find(c => c.folder === GG_API).branches, ['main']);
+  assert.equal(web.limit, 150, 'the initial load shared out: max(100, 300 / 2) each');
+  assert.equal(web.skip, 0);
+  // Both fit in the first page of each (limit 100 vs 3 and 2 commits): everything is loaded.
+  assert.deepEqual(state.rows.map(r => r.hash), ['r0:a3', 'r0:a2', 'r0:a1', 'r1:b2', 'r1:b1']);
+
+  // Force the frontier: api says it has more, so web's commits older than api's last wait.
+  calls.length = 0;
+  answers[GG_API].push(ggCommit('a0', '2024-03-01T00:00:00Z'));
+  state.initialLoad = 1; // per repository: max(100, ...) stays 100, so give the slices the paging directly
+  const api = state.slices.get(GG_API);
+  const webSlice = state.slices.get(GG_WEB);
+  api.rawCommits = answers[GG_API].slice(0, 3);
+  api.hasMore = true;
+  webSlice.rawCommits = answers[GG_WEB].slice();
+  webSlice.hasMore = true;
+  view.gitGraphRecomputeLayout(state);
+  assert.deepEqual(state.rows.map(r => r.hash), ['r0:a3', 'r0:a2', 'r0:a1'], 'api is used up and has more: web waits');
+  assert.deepEqual(state.multiHeld, { r0: 0, r1: 2 });
+  assert.equal(state.hasMore, true);
+
+  await view.gitGraphLoadGraph(project, state, body, { reset: false });
+  // web holds 2 rows (not fewer than the batch of 2): only api is asked, from the commits it holds.
+  assert.deepEqual(calls.map(c => [c.folder, c.skip, c.limit, c.refsUnchanged]), [[GG_API, 3, 2, true]]);
+  // web is used up and has more too: api's new commit is older than anything web may still have, so it waits in its turn.
+  assert.deepEqual(state.rows.map(r => r.hash), ['r0:a3', 'r0:a2', 'r0:a1', 'r1:b2', 'r1:b1']);
+  assert.deepEqual(state.multiHeld, { r0: 1, r1: 0 });
+  assert.equal(state.hasMore, true);
+  assert.equal(state.slices.get(GG_API).rawCommits.length, 4, 'but it is loaded');
+});
+
+test('a repository that cannot be read does not blank the table: a strip with Retry, the others stay', async () => {
+  const { state, project } = ggMulti('proj-slice-error');
+  let webFails = true;
+  global.window = {
+    api: {
+      getProjectGitGraph: (_id, folder) => (folder === GG_WEB && webFails
+        ? Promise.resolve({ ok: false, error: 'not a git repository' })
+        : Promise.resolve({ ok: true, commits: [ggCommit(folder === GG_WEB ? 'b1' : 'a1', '2024-03-01T00:00:00Z')], refs: ggNoRefs(), hasMore: false })),
+    },
+  };
+  const body = fakeElement();
+  global.selectedProject = () => project;
+  global.projectTab = () => 'git'; global.projectGitView = () => 'history';
+  await view.gitGraphLoadGraph(project, state, body, { reset: true });
+  await flush();
+  assert.deepEqual(state.rows.map(r => r.hash), ['r0:a1']);
+  assert.equal(state.error, '', 'one failing repository is not the whole view failing');
+  assert.match(body.innerHTML, /gg-slice-errors/);
+  assert.match(body.innerHTML, /<strong>web<\/strong> could not be read: not a git repository/);
+  assert.match(body.innerHTML, /class="ws-btn gg-slice-retry" data-path="\/code\/web"/);
+  assert.match(body.innerHTML, /gg-cell-repo/, 'the rows of the other are still there');
+
+  webFails = false;
+  await view.gitGraphReloadSlice(project, state, body, GG_WEB, {});
+  assert.deepEqual(state.rows.map(r => r.hash).sort(), ['r0:a1', 'r1:b1']);
+  assert.doesNotMatch(body.innerHTML, /gg-slice-errors/);
+
+  // All of them failing is the ordinary full error.
+  global.window = { api: { getProjectGitGraph: () => Promise.resolve({ ok: false, error: 'boom' }) } };
+  await view.gitGraphLoadGraph(project, state, body, { reset: true });
+  await flush();
+  assert.equal(state.error, 'api: boom; web: boom');
+  assert.match(body.innerHTML, /Git Graph could not load these repositories/);
+});
+
+test('a stale answer of one repository is dropped, the newer one wins', async () => {
+  const { state, project } = ggMulti('proj-slice-stale');
+  const waiting = [];
+  global.window = { api: { getProjectGitGraph: (_id, folder) => new Promise(resolve => waiting.push({ folder, resolve })) } };
+  const body = fakeElement();
+  const first = view.gitGraphLoadGraph(project, state, body, { reset: true });
+  await flush();
+  const second = view.gitGraphLoadGraph(project, state, body, { reset: true });
+  await flush();
+  const answer = (folder, hash) => ({ ok: true, commits: [ggCommit(hash, '2024-03-01T00:00:00Z')], refs: ggNoRefs(), hasMore: false });
+  const [firstApi, firstWeb, secondApi, secondWeb] = waiting;
+  secondApi.resolve(answer(GG_API, 'new-a'));
+  secondWeb.resolve(answer(GG_WEB, 'new-b'));
+  await second;
+  firstApi.resolve(answer(GG_API, 'old-a'));
+  firstWeb.resolve(answer(GG_WEB, 'old-b'));
+  await first;
+  assert.deepEqual(state.rows.map(r => r.hash).sort(), ['r0:new-a', 'r1:new-b']);
+});
+
+test('the menu of a row carries the plain hashes and its own repository\'s refs, remotes and HEAD', () => {
+  const { state, project } = ggMulti('proj-menu-multi');
+  const tagged = ggCommit('b2', '2024-03-04T00:00:00Z', ['b1'], { refs: { heads: ['main'], remotes: [], tags: ['v1'] }, isHead: true });
+  ggFill(state, {
+    [GG_API]: {
+      rawCommits: [ggCommit('a1', '2024-03-05T00:00:00Z')], headHash: 'a1', headBranchName: 'trunk',
+      refs: { heads: [{ name: 'trunk', hash: 'a1', isHead: true }], remotes: [], tags: [{ name: 'v1', hash: 'a1', annotated: false }] },
+      remotes: [{ name: 'origin' }], branchSelection: 'all',
+    },
+    [GG_WEB]: {
+      rawCommits: [tagged, ggCommit('b1', '2024-03-03T00:00:00Z')], headHash: 'b2', headBranchName: 'main',
+      refs: { heads: [{ name: 'main', hash: 'b2', isHead: true }, { name: 'dev', hash: 'b1' }], remotes: [], tags: [{ name: 'v1', hash: 'b2', annotated: true }] },
+      remotes: [{ name: 'upstream' }], branchSelection: ['main'], uncommitted: { changeCount: 2, changes: [{ path: 'x', status: 'untracked' }] },
+    },
+  });
+  const body = fakeElement();
+  const web = state.repositories.find(r => r.path === GG_WEB);
+
+  const commit = view.gitGraphBuildMenuCtx(project, state, body, web, { kind: 'commit', hash: 'r1:b2' });
+  assert.equal(commit.folderPath, GG_WEB);
+  assert.deepEqual(commit.commit, { hash: 'b2', shortHash: 'b2', subject: 'Commit b2', parents: ['b1'], children: [] });
+  assert.deepEqual(commit.head, { hash: 'b2', branch: 'main' });
+  assert.deepEqual(commit.remotes, [{ name: 'upstream' }]);
+  assert.deepEqual(commit.localBranches.map(b => b.name), ['main', 'dev']);
+  assert.deepEqual(commit.selectedBranchKeys, ['main']);
+  assert.equal(commit.defaultRemoteName, 'upstream');
+  assert.equal(commit.hasUntrackedFiles, true, 'the uncommitted changes of that repository');
+
+  const parent = view.gitGraphBuildMenuCtx(project, state, body, web, { kind: 'commit', hash: 'r1:b1' });
+  assert.deepEqual(parent.commit.children, [{ hash: 'b2', parents: ['b1'] }], 'children come back as plain hashes');
+
+  const tag = view.gitGraphBuildMenuCtx(project, state, body, web, { kind: 'tag', refName: 'v1', hash: 'r1:b2' });
+  assert.deepEqual(tag.tag, { name: 'v1', hash: 'b2', annotated: true }, 'the tag of the row\'s repository, not the primary\'s');
+  const branch = view.gitGraphBuildMenuCtx(project, state, body, web, { kind: 'branch', refType: 'local', refName: 'main', hash: 'r1:b2' });
+  assert.deepEqual(branch.localBranch, { name: 'main', hash: 'b2' });
+  const stash = view.gitGraphBuildMenuCtx(project, state, body, web, { kind: 'stash', hash: 'r1:zz' });
+  assert.deepEqual(stash.stash, { hash: 'zz' });
+
+  // What the right-click is about: the row's repository, the record's for files, the primary's for the header.
+  assert.equal(view.gitGraphTargetRepo(state, { kind: 'commit', hash: 'r1:b2' }).path, GG_WEB);
+  assert.equal(view.gitGraphTargetRepo(state, { kind: 'tag', hash: 'r0:a1' }).path, GG_API);
+  assert.equal(view.gitGraphTargetRepo(state, { kind: 'column-header' }).path, GG_API);
+  state.detailsData = { mode: 'single', hash: 'r1:b2', kind: 'commit', repoPath: GG_WEB, files: [] };
+  assert.equal(view.gitGraphTargetRepo(state, { kind: 'file', filePath: 'x' }).path, GG_WEB);
+});
+
+test('ticking and comparing from the menu of a row speaks keys to the History and plain hashes to the menu', () => {
+  const { state, project } = ggMulti('proj-menu-compare');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a2', '2024-03-05T00:00:00Z', ['a1']), ggCommit('a1', '2024-03-04T00:00:00Z')], headHash: 'a2' },
+    [GG_WEB]: { rawCommits: [ggCommit('b1', '2024-03-03T00:00:00Z')], headHash: 'b1' },
+  });
+  const body = fakeElement();
+  const api = state.repositories.find(r => r.path === GG_API);
+  const web = state.repositories.find(r => r.path === GG_WEB);
+  state.checkedHashes = new Set(['r0:a1']);
+  const ctx = view.gitGraphBuildMenuCtx(project, state, body, api, { kind: 'commit', hash: 'r0:a2' });
+  assert.equal(ctx.isChecked('a1'), true);
+  assert.equal(ctx.isChecked('a2'), false);
+  assert.deepEqual(ctx.compareBase, { hash: 'a1', label: 'a1' }, 'the ticked commit of this repository, by its plain hash');
+  const other = view.gitGraphBuildMenuCtx(project, state, body, web, { kind: 'commit', hash: 'r1:b1' });
+  assert.equal(other.compareBase, null, 'no base to compare with in another repository');
+  assert.equal(other.isChecked('a1'), false, 'a1 of the other repository is not b1 of this one');
+});
+
+test('Compare refuses commits of different repositories and compares those of one', () => {
+  const { state, project } = ggMulti('proj-compare-mixed');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a2', '2024-03-05T00:00:00Z', ['a1']), ggCommit('a1', '2024-03-04T00:00:00Z')], headHash: 'a2' },
+    [GG_WEB]: { rawCommits: [ggCommit('b1', '2024-03-03T00:00:00Z')], headHash: 'b1' },
+  });
+  state.selecting = true;
+  state.checkedHashes = new Set(['r0:a2', 'r1:b1']);
+  assert.equal(view.gitGraphCompareSpec(project, state), null);
+  const slot = compareModule.gitGraphCompareButtonsHtml(2, { mixed: true });
+  assert.match(slot, /id="gg-compare-btn"[^>]*disabled/);
+  assert.match(slot, /Compare works within one repository/);
+  const bar = view.gitGraphControlBarHtml(project, state);
+  assert.match(bar, /id="gg-compare-btn"[^>]*disabled/, 'the toolbar shows it disabled');
+  assert.match(bar, /Compare 2/);
+
+  // Ctrl/Cmd+click on a commit of another repository does not compare either.
+  state.checkedHashes = new Set();
+  state.selectedHash = 'r0:a2';
+  assert.equal(view.gitGraphCompareWithSelected(project, state, fakeElement(), 'r1:b1'), false);
+  assert.equal(state.selectedHash, 'r0:a2', 'and leaves the open record alone');
+
+  // Two of one repository: enabled, with the repository's path and plain hashes, the older first.
+  state.checkedHashes = new Set(['r0:a2', 'r0:a1']);
+  const spec = view.gitGraphCompareSpec(project, state);
+  assert.equal(spec.repoPath, GG_API);
+  assert.deepEqual(spec.hashes, ['a1', 'a2']);
+  assert.deepEqual(spec.labels, ['a1', 'a2']);
+  assert.doesNotMatch(view.gitGraphControlBarHtml(project, state), /id="gg-compare-btn"[^>]*disabled/);
+});
+
+test('a commit opens its record in its own repository, with the plain hash; files, revisions and menus follow that repository', async () => {
+  const { state, project } = ggMulti('proj-details-multi');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a1', '2024-03-05T00:00:00Z')], headHash: 'a1' },
+    [GG_WEB]: { rawCommits: [ggCommit('b2', '2024-03-04T00:00:00Z', ['b1']), ggCommit('b1', '2024-03-03T00:00:00Z')], headHash: 'b2', uncommitted: { changeCount: 1 } },
+  });
+  state.selectedRepo = GG_API;
+  const calls = [];
+  global.window = {
+    api: {
+      getGitGraphCommitDetail: (...args) => { calls.push(['commit', ...args]); return Promise.resolve({ ok: true, commit: { hash: 'b2', parents: ['b1'], shortHash: 'b2' }, files: [{ path: 'src/x.js', status: 'modified' }] }); },
+      getGitGraphCompareDetail: (...args) => { calls.push(['compare', ...args]); return Promise.resolve({ ok: true, files: [] }); },
+    },
+  };
+  const body = fakeElement();
+  const row = state.rows.find(r => r.hash === 'r1:b2');
+  view.gitGraphOpenDetails(project, state, body, row);
+  await flush();
+  assert.deepEqual(calls[0], ['commit', 'proj-details-multi', GG_WEB, 'b2']);
+  assert.equal(state.detailsData.repoPath, GG_WEB);
+  assert.equal(state.detailsData.hash, 'r1:b2', 'the record is the row\'s');
+  assert.equal(view.gitGraphIsOpenRecord(state, 'r1:b2'), true);
+  assert.equal(view.gitGraphDetailsRepo(state).path, GG_WEB, 'not the primary');
+
+  assert.deepEqual(view.gitGraphFileRevs(state, 'diff'), { fromRev: 'b2^', toRev: 'b2' });
+  assert.deepEqual(view.gitGraphFileRevs(state, 'revision'), { fromRev: null, toRev: 'b2' });
+  const file = view.gitGraphBuildFileCtx(state, 'src/x.js');
+  assert.equal(file.absolutePath, `${GG_WEB}/src/x.js`);
+  assert.equal(file.revisionHash, 'b2');
+  const spec = view.gitGraphFileWindowSpec(state, { repoPath: GG_WEB, path: 'src/x.js', kind: 'diff', fromRev: 'b2^', toRev: 'b2' });
+  assert.equal(spec.label, 'b2');
+  assert.equal(spec.repo, GG_WEB);
+
+  // Its Uncommitted Changes start from its own HEAD.
+  calls.length = 0;
+  view.gitGraphOpenDetails(project, state, body, state.rows.find(r => r.hash === 'r1:#uncommitted'));
+  await flush();
+  assert.deepEqual(calls[0], ['compare', 'proj-details-multi', GG_WEB, 'b2', null]);
+  assert.deepEqual(view.gitGraphFileRevs(state, 'diff'), { fromRev: 'b2', toRev: null });
+  assert.equal(view.gitGraphFileRevs(state, 'revision'), null);
+
+  // A comparison names its repository and sends plain hashes.
+  calls.length = 0;
+  view.gitGraphOpenComparison(project, state, body, 'r1:b1', 'r1:b2');
+  await flush();
+  assert.deepEqual(calls[0], ['compare', 'proj-details-multi', GG_WEB, 'b1', 'b2']);
+  assert.equal(state.detailsData.repoPath, GG_WEB);
+  assert.match(view.gitGraphDetailsBodyHtml(state), /Displaying all changes from <span class="mono">b1<\/span> to <span class="mono">b2<\/span>/);
+});
+
+test('with one repository shown, a record stores no repository and speaks the hash as it is', async () => {
+  const state = view.gitGraphState('proj-details-single');
+  state.repositories = [{ path: GG_API, git: true }, { path: GG_WEB, git: true }];
+  state.selectedRepo = GG_WEB;
+  state.selectedRepos = [GG_WEB];
+  const calls = [];
+  global.window = { api: { getGitGraphCommitDetail: (...args) => { calls.push(args); return Promise.resolve({ ok: true, commit: { hash: 'c1' }, files: [] }); } } };
+  view.gitGraphOpenDetails({ id: 'proj-details-single' }, state, fakeElement(), { hash: 'c1', kind: 'commit' });
+  await flush();
+  assert.deepEqual(calls[0], ['proj-details-single', GG_WEB, 'c1']);
+  assert.equal('repoPath' in state.detailsData, false);
+  assert.equal(view.gitGraphDetailsRepo(state).path, GG_WEB);
+});
+
+test('the toolbar has no Show Remote; the checked-out branch is where it was, one chip with one repository', () => {
+  const project = { id: 'proj-head-1', folders: [{ path: GG_API }] };
+  const state = view.gitGraphState('proj-head-1');
+  state.repositories = [{ path: GG_API, git: true }];
+  state.selectedRepo = GG_API;
+  state.headBranchName = 'feature/login';
+  const html = view.gitGraphControlBarHtml(project, state);
+  assert.doesNotMatch(html, /id="gg-show-remote"|Show Remote/);
+  assert.match(html, /<div class="gg-head-branches" id="gg-head-branches"><span class="gg-head-branch" title="Checked out: feature\/login">.*<span>feature\/login<\/span><\/span><\/div>/);
+  assert.ok(html.indexOf('gg-branches-btn') < html.indexOf('gg-head-branches') && html.indexOf('gg-head-branches') < html.indexOf('gg-toolbar-right'), 'right after the Branches button');
+
+  // Not known from the graph yet: the repository's own snapshot; detached: where.
+  state.headBranchName = null;
+  state.repositories = [{ path: GG_API, git: true, branch: 'main' }];
+  assert.match(view.gitGraphControlBarHtml(project, state), /<span>main<\/span>/);
+  state.repositories = [{ path: GG_API, git: true, branch: '', detached: true }];
+  state.headHash = 'abcdef1234567890';
+  state.rawCommits = [{ hash: 'abcdef1234567890', shortHash: 'abcdef12' }];
+  assert.match(view.gitGraphControlBarHtml(project, state), /<span>detached at abcdef12<\/span>/);
+  state.headHash = null;
+  state.repositories = [{ path: GG_API, git: true }];
+  assert.doesNotMatch(view.gitGraphControlBarHtml(project, state), /gg-head-branch/, 'nothing known: no chip');
+});
+
+test('with several repositories the toolbar shows each one\'s checked-out branch in its color, with its name as the tooltip', () => {
+  const { state, project } = ggMulti('proj-head-multi', [GG_API, GG_WEB, GG_DOCS]);
+  ggFill(state, {
+    [GG_API]: { headBranchName: 'main', rawCommits: [ggCommit('a1', '2024-03-01T00:00:00Z')] },
+    [GG_WEB]: { headBranchName: 'release/2', rawCommits: [ggCommit('b1', '2024-03-02T00:00:00Z')] },
+    [GG_DOCS]: { headBranchName: null, headHash: 'dddddddd1', rawCommits: [ggCommit('dddddddd1', '2024-03-03T00:00:00Z')] },
+  });
+  const html = view.gitGraphControlBarHtml(project, state);
+  const chips = [...html.matchAll(/<span class="gg-head-branch" title="([^"]*)" style="--repo-color:(#[0-9a-f]{6})">/g)].map(m => [m[1], m[2]]);
+  const colors = global.gitRepoColors(project, state.repositories);
+  assert.deepEqual(chips, [['api: main', colors[GG_API]], ['web: release/2', colors[GG_WEB]], ['docs: detached at ddddddd', colors[GG_DOCS]]]);
+  assert.doesNotMatch(html, /id="gg-show-remote"/);
+  assert.match(html, /Branches: Show All/);
+});
+
+test('Show Remote is in the Branches dropdown, in the row of the tabs, right before the A to Z button', () => {
+  const { state, project } = ggMulti('proj-remote-menu', [GG_API]);
+  state.selectedRepos = [GG_API];
+  state.refs = { heads: [{ name: 'main' }], remotes: [{ remote: 'origin', name: 'main' }], tags: [] };
+  state.showRemoteBranches = true;
+  const menu = menuStub();
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  global.window = { innerHeight: 900 };
+  view.gitGraphOpenBranchesMenu(project, state, bodyWithMenu(menu), anchorStub());
+  const html = menu.innerHTML;
+  const tabs = html.indexOf('class="gg-branches-tabs"');
+  const remote = html.indexOf('id="gg-show-remote"');
+  const sort = html.indexOf('id="gg-branches-sort"');
+  const search = html.indexOf('class="gg-branches-search"');
+  assert.ok(tabs >= 0 && tabs < remote && remote < sort && sort < search, 'Branches/Tags tabs, Show Remote, A to Z, then the filter');
+  assert.match(html, /<input type="checkbox" id="gg-show-remote" checked> Show Remote/);
+  assert.match(html, /data-name="origin\/main"/, 'remote branches are listed while it is on');
+  assert.doesNotMatch(html, /gg-branches-section/, 'one repository: no sections');
+});
+
+/** A dropdown element whose children are the same objects each time they are asked for, so handlers can be reached. */
+function menuStub() {
+  const cache = new Map();
+  const menu = fakeElement();
+  menu.contains = () => false;
+  menu.querySelector = (selector) => { if (!cache.has(selector)) cache.set(selector, fakeElement()); return cache.get(selector); };
+  menu.cache = cache;
+  return menu;
+}
+function bodyWithMenu(menu) {
+  const body = fakeElement();
+  body.querySelector = (selector) => {
+    if (selector === '#gg-branches-menu') return menu;
+    const el = fakeElement();
+    el.getBoundingClientRect = () => ({ bottom: 0, left: 0 });
+    el.contains = () => false;
+    return el;
+  };
+  return body;
+}
+function anchorStub() {
+  return { getBoundingClientRect: () => ({ bottom: 10, left: 4 }), contains: () => false };
+}
+
+test('Show Remote applies to every repository shown: all their configs, then all are read again', async () => {
+  const { state, project } = ggMulti('proj-remote-all');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a1', '2024-03-01T00:00:00Z')], refs: { heads: [{ name: 'main' }], remotes: [], tags: [] } },
+    [GG_WEB]: { rawCommits: [ggCommit('b1', '2024-03-01T00:00:00Z')], refs: { heads: [{ name: 'main' }], remotes: [], tags: [] } },
+  });
+  state.showRemoteBranches = true;
+  const patched = [];
+  const asked = [];
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  global.localStorage = { setItem() {}, getItem() { return null; } };
+  global.window = {
+    innerHeight: 900,
+    api: {
+      setGitGraphRepoConfig: (_id, folder, patch) => { patched.push([folder, patch]); return Promise.resolve({ ok: true, config: { ...patch } }); },
+      getProjectGitGraph: (_id, folder, opts) => { asked.push([folder, opts.showRemote]); return Promise.resolve({ ok: true, commits: [], refs: ggNoRefs(), hasMore: false }); },
+    },
+  };
+  const menu = menuStub();
+  const body = bodyWithMenu(menu);
+  view.gitGraphOpenBranchesMenu(project, state, body, anchorStub());
+  menu.querySelector('#gg-show-remote').onchange({ target: { checked: false } });
+  await flush();
+  assert.equal(state.showRemoteBranches, false);
+  assert.deepEqual(patched.map(p => p[0]).sort(), [GG_API, GG_WEB]);
+  assert.ok(patched.every(p => p[1].showRemoteBranches === false));
+  assert.deepEqual(asked.map(a => a[0]).sort(), [GG_API, GG_WEB]);
+  assert.ok(asked.every(a => a[1] === false), 'both are asked without remote branches');
+});
+
+test('the Branches dropdown of several repositories has a section for each, with its own All and None', async () => {
+  const { state, project } = ggMulti('proj-branches-multi');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('a1', '2024-03-01T00:00:00Z')], refs: { heads: [{ name: 'main' }, { name: 'dev' }], remotes: [], tags: [] }, branchSelection: 'all' },
+    [GG_WEB]: { rawCommits: [ggCommit('b1', '2024-03-01T00:00:00Z')], refs: { heads: [{ name: 'main' }, { name: 'ui' }], remotes: [], tags: [] }, branchSelection: ['ui'] },
+  });
+  state.showRemoteBranches = false;
+  const patched = [];
+  const asked = [];
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  global.localStorage = { setItem() {}, getItem() { return null; } };
+  global.window = {
+    innerHeight: 900,
+    api: {
+      setGitGraphRepoConfig: (_id, folder, patch) => { patched.push([folder, patch]); return Promise.resolve({ ok: true, config: patch }); },
+      getProjectGitGraph: (_id, folder, opts) => { asked.push([folder, opts.branches]); return Promise.resolve({ ok: true, commits: [], refs: ggNoRefs(), hasMore: false }); },
+    },
+  };
+  const menu = menuStub();
+  view.gitGraphOpenBranchesMenu(project, state, bodyWithMenu(menu), anchorStub());
+  const html = menu.innerHTML;
+  const colors = global.gitRepoColors(project, state.repositories);
+  assert.match(html, new RegExp(`<div class="gg-branches-section" data-repo="${GG_API}" style="--repo-color:${colors[GG_API]}">`));
+  assert.match(html, /<span class="gg-branches-section-name" title="\/code\/web">web<\/span>/);
+  assert.match(html, /data-name="ui" data-repo="\/code\/web" checked/);
+  assert.doesNotMatch(html, /data-name="ui"[^>]*data-repo="\/code\/api"/);
+  assert.match(html, /data-section-act="none" data-repo="\/code\/api"/);
+
+  // None in one section: that repository's saved branches and only it is read again.
+  const noneButtons = [...menu.cache.entries()];
+  assert.ok(noneButtons.length > 0);
+  view.gitGraphCommitSelections(project, state, fakeElement(), 'branches', [{ path: GG_API, next: [] }]);
+  await flush();
+  assert.deepEqual(state.slices.get(GG_API).branchSelection, []);
+  assert.deepEqual(state.branchSelection, [], 'the primary\'s own field follows');
+  assert.deepEqual(state.slices.get(GG_WEB).branchSelection, ['ui']);
+  assert.deepEqual(patched, [[GG_API, { branchDropdownSelection: [] }]]);
+  assert.deepEqual(asked, [[GG_API, []]], 'the other repository is not read again');
+});
+
+test('the Branches button says Show All, or how many branches in how many repositories', () => {
+  const { state } = ggMulti('proj-branches-label');
+  ggFill(state, {
+    [GG_API]: { refs: { heads: [{ name: 'main' }, { name: 'dev' }], remotes: [], tags: [] }, branchSelection: 'all' },
+    [GG_WEB]: { refs: { heads: [{ name: 'main' }], remotes: [], tags: [] }, branchSelection: 'all' },
+  });
+  assert.equal(view.gitGraphBranchesLabel(state), 'Show All');
+  state.slices.get(GG_WEB).branchSelection = ['main'];
+  assert.equal(view.gitGraphBranchesLabel(state), '3 branches · 2 repos');
+  state.slices.get(GG_API).branchSelection = ['main'];
+  assert.equal(view.gitGraphBranchesLabel(state), '2 branches · 2 repos');
+  state.selectedRepos = [GG_API];
+  state.branchSelection = ['main', 'dev'];
+  assert.equal(view.gitGraphBranchesLabel(state), '2 branches', 'one repository: as it always was');
+});
+
+test('the watcher reloads only the slice of the repository that changed, and ignores one that is not shown', async () => {
+  const modulePath = path.join(__dirname, '../public/project-git-graph-view.js');
+  delete require.cache[modulePath];
+  let watcherCallback = null;
+  const asked = [];
+  const body = fakeElement();
+  const project = { id: 'proj-watch-multi' };
+  global.document = { addEventListener() {}, removeEventListener() {}, getElementById: (id) => (id === 'git-workspace-view' ? body : null) };
+  global.window = {
+    api: {
+      onGitGraphRepoChanged: (cb) => { watcherCallback = cb; },
+      getProjectGitGraph: (_id, folder, opts) => { asked.push([folder, opts.skip, opts.limit]); return Promise.resolve({ ok: true, commits: [ggCommit('w-new', '2024-03-01T00:00:00Z')], refs: ggNoRefs(), hasMore: false }); },
+    },
+  };
+  global.selectedProject = () => project;
+  global.projectTab = () => 'git'; global.projectGitView = () => 'history';
+  const freshView = require(modulePath);
+  try {
+    const state = freshView.gitGraphState(project.id);
+    state.repositories = [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p, git: true }));
+    state.selectedRepo = GG_API;
+    state.selectedRepos = [GG_API, GG_WEB];
+    freshView.gitGraphSyncSlices(state, freshView.gitGraphShownRepos(state));
+    for (const slice of state.slices.values()) { slice.rawCommits = [ggCommit(`${slice.tag}-1`, '2024-03-01T00:00:00Z')]; slice.configLoaded = true; }
+    freshView.gitGraphRecomputeLayout(state);
+    freshView.gitGraphEnsureWatcherBound();
+
+    watcherCallback(GG_WEB, { workingTree: true });
+    await flush();
+    assert.deepEqual(asked, [[GG_WEB, 0, 150]], 'one slice, quietly, as many commits as it holds (at least its share of a page)');
+    assert.deepEqual(state.rows.map(r => r.hash).sort(), ['r0:r0-1', 'r1:w-new'], 'the answer replaced that repository\'s commits only');
+
+    asked.length = 0;
+    watcherCallback(GG_DOCS, {});
+    await flush();
+    assert.deepEqual(asked, [], 'a repository that is not shown changes nothing');
+  } finally {
+    delete require.cache[modulePath];
+  }
+});
+
+test('ticking a tab\'s checkbox shows another repository, clears the record and the ticks, and remembers the selection', async () => {
+  const project = { id: 'proj-toggle', folders: [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p })) };
+  const state = view.gitGraphState(project.id);
+  state.repositories = [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p, git: true }));
+  state.selectedRepo = GG_API;
+  state.selectedRepos = [GG_API];
+  state.rows = [ggCommit('a1', '2024-03-01T00:00:00Z')];
+  state.selectedHash = 'a1';
+  state.detailsData = { mode: 'single', hash: 'a1', kind: 'commit' };
+  state.checkedHashes = new Set(['a1']);
+  const saved = {};
+  global.localStorage = { setItem: (k, v) => { saved[k] = v; }, getItem: (k) => saved[k] || null };
+  const asked = [];
+  global.window = { api: { getProjectGitGraph: (_id, folder) => { asked.push(folder); return Promise.resolve({ ok: true, commits: [ggCommit(`${folder.slice(-3)}1`, '2024-03-01T00:00:00Z')], refs: ggNoRefs(), hasMore: false }); } } };
+  const body = fakeElement();
+  const repos = state.repositories;
+
+  assert.equal(view.gitGraphChangeSelection(project, state, body, () => global.gitRepoToggle(state, repos, repos[2])), true);
+  assert.deepEqual(state.selectedRepos, [GG_API, GG_DOCS]);
+  assert.equal(state.detailsData, null);
+  assert.equal(state.selectedHash, null);
+  assert.equal(state.checkedHashes.size, 0);
+  assert.equal(JSON.parse(saved['gitGraph.ui.proj-toggle']).selectedRepos.join(), `${GG_API},${GG_DOCS}`);
+  assert.equal(JSON.parse(saved['gitGraph.ui.proj-toggle']).selectedRepo, GG_API);
+  await flush();
+  assert.deepEqual(asked.sort(), [GG_API, GG_DOCS]);
+  assert.deepEqual(state.rows.map(r => r.hash).sort(), ['r0:api1', 'r2:ocs1'].sort());
+
+  // Taking away the last one shown changes nothing.
+  assert.equal(view.gitGraphChangeSelection(project, state, body, () => global.gitRepoToggle(state, repos, repos[0])), true, 'api goes, docs stays');
+  assert.equal(state.selectedRepo, GG_DOCS, 'the first one left becomes the primary');
+  assert.deepEqual(state.selectedRepos, [GG_DOCS]);
+  assert.equal(view.gitGraphChangeSelection(project, state, body, () => global.gitRepoToggle(state, repos, repos[2])), false);
+  await flush();
+
+  // A name click shows that repository alone, and the table is a plain one again: plain hashes, no slices.
+  asked.length = 0;
+  assert.equal(view.gitGraphChangeSelection(project, state, body, () => global.gitRepoSelectOnly(state, repos, repos[1])), true);
+  await flush();
+  assert.deepEqual(state.selectedRepos, [GG_WEB]);
+  assert.deepEqual(asked, [GG_WEB]);
+  assert.equal(state.slices.size, 0);
+  assert.deepEqual(state.rows.map(r => r.hash), ['web1']);
+});
+
+test('the primary\'s settings follow it from slice to state when another repository becomes the primary', async () => {
+  const { state, project } = ggMulti('proj-primary-swap');
+  global.localStorage = { setItem() {}, getItem() { return null; } };
+  global.window = { api: { getProjectGitGraph: () => Promise.resolve({ ok: true, commits: [], refs: ggNoRefs(), hasMore: false }) } };
+  ggFill(state, {
+    [GG_API]: { branchSelection: ['main'], showStashesPref: true, repoConfig: { customDisplayName: 'api' }, remotes: [{ name: 'origin' }] },
+    [GG_WEB]: { branchSelection: ['ui'], showStashesPref: false, repoConfig: { customDisplayName: 'web' }, remotes: [{ name: 'upstream' }], headBranchName: 'ui' },
+  });
+  state.branchSelection = ['main-edited-in-the-primary'];
+  const repos = state.repositories;
+  view.gitGraphChangeSelection(project, state, fakeElement(), () => global.gitRepoToggle(state, repos, repos[0]));
+  assert.equal(state.selectedRepo, GG_WEB);
+  assert.deepEqual(state.branchSelection, ['ui'], 'the new primary\'s selection');
+  assert.equal(state.showStashesPref, false);
+  assert.equal(state.repoConfig.customDisplayName, 'web');
+  assert.deepEqual(state.remotes, [{ name: 'upstream' }]);
+  assert.equal(state.headBranchName, 'ui');
+  await flush();
+  assert.equal(state.slices.has(GG_API), false, 'the repository that left has no slice');
+});
+
+test('a patch to another repository\'s config lands on its slice; the primary\'s goes through the state', async () => {
+  const { state, project } = ggMulti('proj-patch-for');
+  ggFill(state, { [GG_API]: {}, [GG_WEB]: {} });
+  const calls = [];
+  global.window = {
+    api: {
+      setGitGraphRepoConfig: (_id, folder, patch) => {
+        calls.push(folder);
+        return Promise.resolve({ ok: true, config: { branchDropdownSelection: ['x'], showStashes: false, ...patch } });
+      },
+    },
+  };
+  await settings.gitGraphPatchRepoConfigFor(project, state, GG_WEB, { showTags: false });
+  assert.deepEqual(state.slices.get(GG_WEB).branchSelection, ['x']);
+  assert.equal(state.slices.get(GG_WEB).showStashesPref, false);
+  assert.equal(state.slices.get(GG_WEB).showTags, false);
+  assert.deepEqual(state.branchSelection, 'all', 'the state is the primary\'s, untouched');
+  await settings.gitGraphPatchRepoConfigFor(project, state, GG_API, { showTags: true });
+  assert.deepEqual(state.branchSelection, ['x'], 'the primary\'s patch applies to the state');
+  assert.deepEqual(state.slices.get(GG_API).branchSelection, ['x'], 'and to its slice');
+  assert.deepEqual(calls, [GG_WEB, GG_API]);
+});
+
+test('the settings drawer says which repository its settings are, once several are shown', () => {
+  const { state } = ggMulti('proj-settings-title');
+  assert.match(settings.gitGraphSettingsHeaderHtml(state), /<div class="gg-settings-header">Repository Settings: api<button/);
+  state.selectedRepos = [GG_API];
+  assert.match(settings.gitGraphSettingsHeaderHtml(state), /<div class="gg-settings-header">Repository Settings<button/);
+});
+
+test('Find also matches the repository\'s name and the plain hash', () => {
+  const rows = render.gitGraphNamespaceRows([ggCommit('abc1234', '2024-03-01T00:00:00Z')], 'r1', GG_WEB);
+  rows[0].subject = 'unrelated';
+  assert.deepEqual(view.gitGraphFindMatches(rows, 'web', false), [0], 'the repository\'s name');
+  assert.deepEqual(view.gitGraphFindMatches(rows, 'abc1234', false), [0], 'the plain hash, not only the key');
+  assert.deepEqual(view.gitGraphFindMatches(rows, 'nothing', false), []);
+});
+
+test('a commit asked for from elsewhere is found by the key of its own repository', () => {
+  const { state, project } = ggMulti('proj-focus-multi');
+  ggFill(state, {
+    [GG_API]: { rawCommits: [ggCommit('same', '2024-03-02T00:00:00Z')] },
+    [GG_WEB]: { rawCommits: [ggCommit('same', '2024-03-01T00:00:00Z')] },
+  });
+  global.window = { api: { getGitGraphCommitDetail: () => new Promise(() => {}) } };
+  state.pendingFocusHash = 'same';
+  state.pendingFocusRepo = GG_WEB;
+  view.gitGraphFocusPending(project, state, fakeElement());
+  assert.equal(state.selectedHash, 'r1:same', 'the commit of the repository asked for, though the hash is in both');
+  assert.equal(state.detailsData.repoPath, GG_WEB);
+  assert.equal(state.pendingFocusHash, null);
+});
+
+test('with one repository shown, none of the several-repository state is used: plain keys, no slices, the old load', async () => {
+  const { state, project } = ggMulti('proj-single-as-ever', [GG_WEB]);
+  state.slices.set('stale', { path: 'stale' });
+  const calls = [];
+  global.window = { api: { getProjectGitGraph: (_id, folder, opts) => { calls.push([folder, opts.limit, opts.refsUnchanged]); return Promise.resolve({ ok: true, commits: [ggCommit('b1', '2024-03-01T00:00:00Z')], refs: ggNoRefs(), hasMore: false }); } } };
+  await view.gitGraphLoadGraph(project, state, fakeElement(), { reset: true });
+  assert.deepEqual(calls, [[GG_WEB, 300, false]], 'the initial load, in full, for the one repository');
+  assert.deepEqual(state.rows.map(r => r.hash), ['b1']);
+  assert.equal(state.slices.size, 0);
+  assert.equal(view.gitGraphIsMulti(state), false);
+  assert.equal(state.loadedKey, GG_WEB);
+});
+
+test('a History loaded for other repositories is loaded again when a view hands over another selection', async () => {
+  const project = { id: 'proj-carried', root: GG_API, folders: [GG_API, GG_WEB].map(p => ({ path: p })) };
+  const state = view.gitGraphState(project.id);
+  state.repositories = [GG_API, GG_WEB].map(p => ({ path: p, git: true }));
+  state.selectedRepo = GG_API;
+  state.selectedRepos = [GG_API];
+  state.loadedKey = GG_API;
+  state.rows = [ggCommit('a1', '2024-03-01T00:00:00Z')];
+  const asked = [];
+  global.document = { addEventListener() {}, removeEventListener() {}, getElementById: () => null };
+  global.selectedProject = () => project;
+  global.projectTab = () => 'git'; global.projectGitView = () => 'history';
+  global.localStorage = { setItem() {}, getItem() { return null; } };
+  global.window = { api: { getProjectGitInfo: () => Promise.resolve({ ok: true, repositories: state.repositories }), getProjectGitGraph: (_id, folder) => { asked.push(folder); return Promise.resolve({ ok: true, commits: [], refs: ggNoRefs(), hasMore: false }); } } };
+  const body = fakeElement();
+  // Pull Requests or Worktrees handed over both repositories.
+  state.selectedRepos = [GG_API, GG_WEB];
+  view.renderProjectGitGraphTab(project, body);
+  await flush();
+  assert.deepEqual(asked.sort(), [GG_API, GG_WEB]);
+  assert.equal(state.loadedKey, `${GG_API}\n${GG_WEB}`);
+});
+
+test('the lanes of the repositories sit side by side: the layout reads the keys, and every edge points at a row', () => {
+  const { computeGitGraphLayout } = require('../public/git-graph-layout');
+  global.computeGitGraphLayout = computeGitGraphLayout;
+  try {
+    const { state } = ggMulti('proj-layout-multi');
+    ggFill(state, {
+      [GG_API]: { rawCommits: [ggCommit('a3', '2024-03-06T00:00:00Z', ['a2']), ggCommit('a2', '2024-03-04T00:00:00Z', ['a1']), ggCommit('a1', '2024-03-02T00:00:00Z')], headHash: 'a3', uncommitted: { changeCount: 1 } },
+      [GG_WEB]: { rawCommits: [ggCommit('b2', '2024-03-05T00:00:00Z', ['b1']), ggCommit('b1', '2024-03-03T00:00:00Z')], headHash: 'b2', uncommitted: { changeCount: 2 } },
+    });
+    assert.equal(state.rows.length, state.layout.length);
+    const keys = new Set(state.rows.map(r => r.hash));
+    const laneOf = (key) => state.layout[state.rows.findIndex(r => r.hash === key)].lane;
+    assert.notEqual(laneOf('r0:a3'), laneOf('r1:b2'), 'two repositories never share a lane');
+    assert.equal(laneOf('r0:a3'), laneOf('r0:a1'));
+    assert.equal(laneOf('r1:b2'), laneOf('r1:b1'));
+    for (const entry of state.layout) for (const edge of entry.edges) assert.ok(keys.has(edge.parentHash), `${edge.parentHash} is a row`);
+    assert.notEqual(laneOf('r0:#uncommitted'), laneOf('r1:#uncommitted'));
+  } finally {
+    delete global.computeGitGraphLayout;
+  }
+});
+
+test('the repositories shown last time come back when the History opens', async () => {
+  const project = { id: 'proj-restore', root: GG_API, folders: [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p })) };
+  const stored = { 'gitGraph.ui.proj-restore': JSON.stringify({ selectedRepo: GG_WEB, selectedRepos: [GG_API, GG_WEB] }) };
+  global.localStorage = { setItem: (k, v) => { stored[k] = v; }, getItem: (k) => stored[k] || null };
+  global.document = { addEventListener() {}, removeEventListener() {}, getElementById: () => null };
+  global.selectedProject = () => project;
+  global.projectTab = () => 'git'; global.projectGitView = () => 'history';
+  const asked = [];
+  global.window = {
+    api: {
+      getProjectGitInfo: () => Promise.resolve({ ok: true, repositories: [GG_API, GG_WEB, GG_DOCS].map(p => ({ path: p, git: true })) }),
+      getProjectGitGraph: (_id, folder) => { asked.push(folder); return Promise.resolve({ ok: true, commits: [ggCommit(`${folder.slice(-3)}1`, '2024-03-01T00:00:00Z')], refs: ggNoRefs(), hasMore: false }); },
+    },
+  };
+  const body = fakeElement();
+  view.renderProjectGitGraphTab(project, body);
+  await flush();
+  await flush();
+  const state = view.gitGraphState(project.id);
+  assert.equal(state.selectedRepo, GG_WEB, 'the primary');
+  assert.deepEqual(state.selectedRepos, [GG_API, GG_WEB]);
+  assert.deepEqual(asked.sort(), [GG_API, GG_WEB]);
+  assert.match(body.innerHTML, /gg-multi-repo/);
 });

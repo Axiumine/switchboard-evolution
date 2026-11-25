@@ -32,6 +32,9 @@ const modules = {
   'donate.js': 'apps/desktop/public/donate.js',
   'knowledge-model.js': 'apps/desktop/public/knowledge-model.js',
   'actions-model.js': 'apps/desktop/public/actions-model.js',
+  'repo-colors.js': 'apps/desktop/public/repo-colors.js',
+  'repo-selection.js': 'apps/desktop/public/repo-selection.js',
+  'action-icons.js': 'apps/desktop/public/action-icons.js',
 };
 
 const header = (file) =>

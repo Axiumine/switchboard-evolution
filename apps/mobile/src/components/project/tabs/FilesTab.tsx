@@ -517,7 +517,9 @@ export function FilesTab({ project }: { project: Project }) {
             accessibilityState={{ selected: active }}
           >
             <Ionicons name={r.kind === 'project' ? 'document-text-outline' : r.kind === 'worktree' ? 'git-branch-outline' : 'folder-outline'} size={14} color={active ? colors.accent : colors.textFaint} />
-            <Text style={[styles.rootLabel, active && styles.rootLabelActive]} numberOfLines={1}>{r.label}</Text>
+            <Text style={[styles.rootLabel, active && styles.rootLabelActive]} numberOfLines={1}>
+              {r.branch ? <>{r.name}{' · '}<Text style={styles.rootBranch}>{r.branch}</Text></> : r.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -660,6 +662,7 @@ const styles = StyleSheet.create({
   rootTabActive: { borderColor: 'rgba(128,136,255,0.5)', backgroundColor: 'rgba(128,136,255,0.16)' },
   rootLabel: { color: colors.textDim, fontSize: 13.5, fontWeight: '600', flexShrink: 1 },
   rootLabelActive: { color: '#e4e4fa' },
+  rootBranch: { fontWeight: '700' },
   toolbar: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: spacing.lg, paddingRight: spacing.sm, height: 44 },
   toolbarTitle: { flex: 1, color: colors.textDim, fontSize: 12.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   tool: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },

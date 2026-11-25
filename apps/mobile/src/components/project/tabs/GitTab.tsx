@@ -7,7 +7,7 @@ import { GitGraphView } from '@/components/git/GitGraphView';
 import { RepositoryBlock } from '@/components/git/RepositoryBlock';
 import { usePullRefresh } from '@/components/PullRefresh';
 import { useGitInfo } from '@/git/info-query';
-import { chooseRepo, historyRepos, type RepoRef } from '@/git/repo-choice';
+import { carryRepoPatch, chooseRepo, historyRepos, repoColors, type RepoRef } from '@/git/repo-choice';
 import { useCanStage } from '@/git/stage-requests';
 import type { Project } from '@/projects/model';
 import { GIT_VIEWS, type GitView } from '@/projects/tabs';
@@ -15,18 +15,19 @@ import { useProjectUi } from '@/projects/ui-store';
 import { colors, spacing } from '@/theme';
 import { RepoChips } from '../RepoChips';
 import { SectionLink } from '../Section';
+import { useRepoSelection } from '../useRepoSelection';
 import { ActionsTab } from './ActionsTab';
 import { PullRequestsTab } from './PullRequestsTab';
 import { WorktreesTab } from './WorktreesTab';
 
 /**
- * The Git tab, as on the desktop: Changes | History | Worktrees | Pull
+ * The Git tab, as on the desktop: History | Changes | Worktrees | Pull
  * Requests (PRs) | Actions. Each view is
  * built when first shown and kept, so its scroll and sheets survive switching;
  * the project remembers which one was open.
  */
 export function GitTab({ project, active = true }: { project: Project; active?: boolean }) {
-  const [view, patchUi] = useProjectUi(project.id, (ui) => ui.gitView ?? 'changes');
+  const [view, patchUi] = useProjectUi(project.id, (ui) => ui.gitView ?? 'history');
   const [visited, setVisited] = useState<GitView[]>([view]);
   if (!visited.includes(view)) setVisited([...visited, view]);
 
@@ -73,6 +74,7 @@ function ChangesView({ project, active }: { project: Project; active: boolean })
   const canStage = useCanStage();
   const [fileView, setFileView] = useState<FileView>('list');
   const [gitRepo, patchUi] = useProjectUi(project.id, (ui) => ui.gitRepo);
+  const [gitRepos] = useProjectUi(project.id, (ui) => ui.gitRepos);
   const info = useGitInfo(project.id);
   const repositories = info.data?.repositories || [];
   const repo = chooseRepo(repositories, gitRepo);
@@ -83,7 +85,7 @@ function ChangesView({ project, active }: { project: Project; active: boolean })
 
   return (
     <View style={styles.body}>
-      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => patchUi({ gitRepo: path })} />
+      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => patchUi(carryRepoPatch({ gitRepo, gitRepos }, path))} />
       <ScrollView refreshControl={pull}>
         {repo ? (
           <View style={styles.toggleRow}>
@@ -99,7 +101,7 @@ function ChangesView({ project, active }: { project: Project; active: boolean })
             repo={repo}
             tree={fileView === 'tree'}
             canStage={canStage}
-            onOpenHistory={() => patchUi({ gitView: 'history', gitRepo: repo.path })}
+            onOpenHistory={() => patchUi({ gitView: 'history', ...carryRepoPatch({ gitRepo, gitRepos }, repo.path) })}
           />
         ) : null}
         {!info.isLoading && !repo && !info.data?.error ? (
@@ -113,9 +115,8 @@ function ChangesView({ project, active }: { project: Project; active: boolean })
   );
 }
 
-/** The Git Graph of the selected repository, with its actions, under the repository chips. */
+/** The Git Graph of the selected repositories, merged, with its actions, under the repository chips. */
 function HistoryView({ project }: { project: Project }) {
-  const [gitRepo, patchUi] = useProjectUi(project.id, (ui) => ui.gitRepo);
   // The repositories are read by Changes too: use what is cached. Until they arrive, the project's folders stand in.
   const info = useGitInfo(project.id, false);
   const known = info.data?.repositories;
@@ -123,19 +124,23 @@ function HistoryView({ project }: { project: Project }) {
     () => historyRepos(known ?? project.folders.map((folder): RepoRef => ({ path: folder.path }))),
     [known, project.folders],
   );
-  const repo = chooseRepo(repositories, gitRepo);
+  const { selection, only, toggle, patchUi } = useRepoSelection(project.id, repositories);
+  const colorOf = useMemo(() => repoColors(project), [project]);
+  const primary = selection.primary;
 
   return (
     <View style={styles.body}>
-      <RepoChips repos={repositories} selected={repo?.path ?? null} onSelect={(path) => patchUi({ gitRepo: path })} />
-      {repo ? (
-        // Its own state (open row, selection, page) belongs to one repository.
+      <RepoChips repos={repositories} selected={primary} onSelect={only} checked={selection.paths} onToggle={toggle} repoColors={colorOf} />
+      {primary ? (
+        // Its own state (open row, selection, pages) belongs to the repositories it shows.
         <GitGraphView
-          key={repo.path}
+          key={selection.paths.join('\n')}
           projectId={project.id}
-          folder={repo.path}
+          folders={selection.paths}
+          primary={primary}
+          repoColors={colorOf}
           embedded
-          onReviewChanges={() => patchUi({ gitView: 'changes', gitRepo: repo.path })}
+          onReviewChanges={() => patchUi({ gitView: 'changes', gitRepo: primary })}
         />
       ) : (
         <View style={styles.empty}>
