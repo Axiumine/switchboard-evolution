@@ -690,7 +690,7 @@ function showSession(sessionId) {
       fitAndScroll(entry);
     }
   }
-  // The Projects tab keeps the project around the terminal (projects-view.js).
+  // The Projects and Sessions tabs keep a project's session under its project's header and tabs (projects-view.js).
   if (typeof onSessionShown === 'function') onSessionShown(sessionId);
 }
 
