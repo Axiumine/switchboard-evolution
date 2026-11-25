@@ -442,7 +442,8 @@ function renderProjects(projects, resort) {
 // keeps its order under one key like a folder does.
 function renderFlatSessions(projects, resort) {
   const newSidebar = document.createElement('div');
-  const labelOf = folderPath => sessionFolderLabel(folderPath, typeof projectRootLabel === 'function' ? projectRootLabel(folderPath) : null);
+  // The folder itself: a session's project is named beside it (buildSessionItem).
+  const labelOf = folderPath => sessionFolderLabel(folderPath);
   const result = processProjectSessions(flatSessionsFolder(projects, labelOf), resort);
   const newSortedOrder = [];
   const shown = [];
@@ -869,15 +870,6 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   timeEl.className = 'session-time';
   timeEl.title = session.sessionId;
   timeEl.textContent = timeStr + (session.messageCount ? ' \u00b7 ' + session.messageCount + ' msgs' : '');
-  // A session of a project names it first, before its status (the CLI mark and its dot).
-  const owner = typeof projectForSession === 'function' ? projectForSession(session)?.project : null;
-  if (owner) {
-    const projectEl = document.createElement('span');
-    projectEl.className = 'session-project';
-    projectEl.textContent = owner.name;
-    projectEl.title = `Project: ${owner.name}`;
-    metaEl.append(projectEl);
-  }
   metaEl.append(mark, timeEl);
   // Started by a scheduled task: a clock, with which one and when in its tooltip.
   if (session.scheduleId && typeof scheduleChipHtml === 'function') {
@@ -932,11 +924,20 @@ function buildSessionItem(session, { folderLabel = '' } = {}) {
   }
 
   footer.append(metaEl, actions);
-  // The middle line: the folder or project, and at its right, under the
-  // star, what the live session uses (app.js paintSessionMemory). Without a
-  // folder the line shows only while there is a figure.
+  // The middle line: the project the session belongs to and, in the flat
+  // list, its folder; at its right, under the star, what the live session
+  // uses (app.js paintSessionMemory). With neither the line shows only while
+  // there is a figure.
+  const owner = typeof projectForSession === 'function' ? projectForSession(session)?.project : null;
   const middle = document.createElement('div');
-  middle.className = 'session-middle' + (folderLabel ? '' : ' session-middle--bare');
+  middle.className = 'session-middle' + (folderLabel || owner ? '' : ' session-middle--bare');
+  if (owner) {
+    const projectEl = document.createElement('span');
+    projectEl.className = 'session-project';
+    projectEl.textContent = owner.name;
+    projectEl.title = `Project: ${owner.name}`;
+    middle.append(projectEl);
+  }
   if (folderLabel) {
     const folderEl = document.createElement('div');
     folderEl.className = 'session-folder';

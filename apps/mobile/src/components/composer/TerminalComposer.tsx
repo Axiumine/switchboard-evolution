@@ -10,7 +10,7 @@ import { TERMINAL_BUTTONS } from '@/terminal/terminal-buttons.generated';
 import { colors, spacing } from '@/theme';
 import { AttachButton } from './AttachButton';
 import { AttachmentStrip } from './AttachmentStrip';
-import { CommandsButton } from './CommandsButton';
+import { useCommandsPanel } from './CommandsButton';
 import { CommandSuggestions } from './CommandSuggestions';
 import { ComposerField } from './ComposerField';
 import { SendButton } from './SendButton';
@@ -44,6 +44,13 @@ export function TerminalComposer({ sessionId, send, session, state = 'idle', pla
   // Only what is shown holds Send back.
   const uploading = canAttach && attachments.uploading;
   const canSend = (!!text || paths.length > 0) && !uploading && !(canAttach && attachments.failed);
+  const commands = useCommandsPanel({
+    sessionId,
+    session,
+    state,
+    write: send,
+    onInsert: (pick) => setText((prev) => (session?.type === 'terminal' ? appendToLine(prev, pick) : applyToDraft(prev, pick))),
+  });
 
   const submit = () => {
     if (!canSend) return;
@@ -69,15 +76,11 @@ export function TerminalComposer({ sessionId, send, session, state = 'idle', pla
       <TerminalKeys sessionId={sessionId} send={send} held={held} onHeldChange={setHeld} />
       {canAttach ? <AttachmentStrip attachments={attachments} hint={uploadHint(attachments.items, computer)} /> : null}
       <CommandSuggestions sessionId={sessionId} session={session} text={text} onPick={setText} />
+      {/* The Commands panel pinned in the page, over the row it types into. */}
+      {commands.dock}
       <View style={styles.row}>
         {canAttach ? <AttachButton attachments={attachments} /> : null}
-        <CommandsButton
-          sessionId={sessionId}
-          session={session}
-          state={state}
-          write={send}
-          onInsert={(pick) => setText((prev) => (session?.type === 'terminal' ? appendToLine(prev, pick) : applyToDraft(prev, pick)))}
-        />
+        {commands.button}
         <ComposerField value={text} onChangeText={onChangeText} placeholder={placeholder} minHeight={48} />
         <SendButton onPress={submit} disabled={!canSend} busy={uploading} />
       </View>

@@ -47,3 +47,12 @@ describe('a window spec', () => {
     expect(windowTitle({ kind: 'web', url: 'https://github.com/acme/widgets/pull/4', title: '' })).toBe('Pull request');
   });
 });
+
+it('a session\'s Commands panel in a window: its session, its CLI, its title in the caption', () => {
+  const spec = parseWindowSpec(JSON.stringify({ kind: 'commands', sessionId: 's1', runtime: 'codex', type: null, title: 'Fix the build' }));
+  expect(spec).toEqual({ kind: 'commands', sessionId: 's1', runtime: 'codex', type: null, title: 'Fix the build' });
+  expect(windowTitle(spec!)).toBe('Commands · Fix the build');
+  expect(windowTitle({ kind: 'commands', sessionId: 's1', runtime: null, type: null, title: '' })).toBe('Commands');
+  // Without a session there is nothing to show.
+  expect(parseWindowSpec(JSON.stringify({ kind: 'commands' }))).toBeNull();
+});

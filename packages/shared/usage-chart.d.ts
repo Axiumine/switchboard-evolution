@@ -87,6 +87,12 @@ export function formatDisk(bytes: number, platform: string | undefined): string;
 export function formatPercent(part: number, total: number): string;
 export function ownerKey(owner: Pick<UsageOwner, 'kind' | 'id'>): string;
 
+/** The colour band of what one session or task uses, as the Task Manager's bars: 'mid' from 1 GB, 'high' from 2 GB. */
+export function memoryLevel(bytes: number): 'low' | 'mid' | 'high';
+
+/** What each live session uses, by session id, from a measurement (get-process-usage). */
+export function sessionMemory(data: Pick<UsageData, 'owners'> | null | undefined): Map<string, number>;
+
 export function memoryTotals(data: UsageData | null | undefined): {
   installed: number;
   used: number | null;

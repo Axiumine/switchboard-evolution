@@ -47,6 +47,19 @@
 .cmdp-search:focus { border-color: rgb(from var(--accent) r g b / 0.6); }
 .cmdp-tabs { margin: 0 10px 8px; align-self: flex-start; }
 .cmdp-clis { flex-shrink: 0; }
+/* Pin, a window of its own, close: at the top right. */
+.cmdp-tools { display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: 2px; }
+.cmdp-tool {
+  width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 6px; color: #7a7a90; cursor: pointer; padding: 0;
+}
+.cmdp-tool:hover { color: #d0d0e8; background: rgba(255,255,255,0.06); }
+.cmdp-tool.on { color: color-mix(in srgb, var(--accent) 92%, white); background: rgb(from var(--accent) r g b / 0.14); }
+/* In a window of its own (commands.html): the whole window. */
+.cmdp--window {
+  inset: 0; width: auto !important; height: auto; border: none; border-radius: 0; box-shadow: none;
+}
+body.commands-window { margin: 0; background: #1b1b26; overflow: hidden; }
 
 .cmdp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 46%) minmax(0, 1fr); border-top: 1px solid rgba(255,255,255,0.07); }
 .cmdp-list { overflow-y: auto; padding: 4px; border-right: 1px solid rgba(255,255,255,0.07); }

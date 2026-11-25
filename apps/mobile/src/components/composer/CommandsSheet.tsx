@@ -13,18 +13,28 @@ import {
 import { colors, spacing } from '@/theme';
 
 /**
- * The command catalog of a session, full height: what its CLI understands
- * (slash commands, skills, MCP servers, its own commands and flags, its
- * keys), searchable, by tab. A tap on a row shows what the command takes and
- * does. Insert hands the text to the composer (`onInsert`), without Enter;
- * Run, for a command that needs no argument while the session is idle,
- * writes it and Enter (`write`), asking first for one that ends the session,
- * replaces the conversation, signs in or out or writes files. The CLI's own
- * commands and flags are copied in its session.
+ * The command catalog of a session: what its CLI understands (slash commands,
+ * skills, MCP servers, its own commands and flags, its keys), searchable, by
+ * tab. A tap on a row shows what the command takes and does. Insert hands the
+ * text to the composer (`onInsert`), without Enter; Run, for a command that
+ * needs no argument while the session is idle, writes it and Enter (`write`),
+ * asking first for one that ends the session, replaces the conversation,
+ * signs in or out or writes files. The CLI's own commands and flags are
+ * copied in its session.
+ *
+ * Shown three ways, as the desktop's palette: full height (`sheet`, closed by
+ * a pick), pinned in the session's page above the composer (`docked`, it
+ * stays for the next pick), or in a window of its own (`window`, on DeX or a
+ * tablet; a pick types into the session). At the top right: the pin, the
+ * window (where windows can open) and close.
  */
-export function CommandsSheet({ visible, onClose, sessionId, runtime, state, isTerminal, clis, write, onInsert, onRan }: {
-  visible: boolean;
-  onClose: () => void;
+export function CommandsPanel({ mode, onClose, onPin, onWindow, sessionId, runtime, state, isTerminal, clis, write, onInsert, onRan, height }: {
+  mode: 'sheet' | 'docked' | 'window';
+  onClose?: () => void;
+  /** The pin: from a sheet it pins the panel in the page, docked it lets it go back to a sheet. */
+  onPin?: () => void;
+  /** Open it in a window of its own (only where windows can open). */
+  onWindow?: () => void;
   sessionId: string;
   /** The session's CLI as the phone knows it. */
   runtime?: string | null;
@@ -36,15 +46,18 @@ export function CommandsSheet({ visible, onClose, sessionId, runtime, state, isT
   write: (data: string) => unknown;
   onInsert: (text: string) => void;
   onRan?: (entry: CommandDoc) => void;
+  /** Docked: how tall it is. */
+  height?: number;
 }) {
-  const insets = useWindowInsets();
   const [query, setQuery] = useState('');
   const [chosenTab, setChosenTab] = useState<CatalogTab['id'] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [cli, setCli] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const shellCli = isTerminal ? cli || clis[0] || null : null;
-  const { data: catalog, isLoading, error } = useCommandCatalog(sessionId, { enabled: visible, cli: shellCli, runtime: isTerminal ? 'terminal' : runtime || 'claude' });
+  const { data: catalog, isLoading, error } = useCommandCatalog(sessionId, { enabled: true, cli: shellCli, runtime: isTerminal ? 'terminal' : runtime || 'claude' });
+  // Docked or in its own window, a pick leaves it open for the next one.
+  const stays = mode !== 'sheet';
 
   const tabs = useMemo(() => tabsFor(catalog), [catalog]);
   const tab = chosenTab && tabs.some((t) => t.id === chosenTab) ? chosenTab : tabs[0]?.id ?? null;
@@ -54,10 +67,8 @@ export function CommandsSheet({ visible, onClose, sessionId, runtime, state, isT
   const version = catalog?.version?.session || catalog?.version?.installed || null;
   const target = catalog?.target ?? (isTerminal ? 'terminal' : 'agent');
 
-  const reset = () => { setQuery(''); setChosenTab(null); setOpenId(null); setCopied(null); };
-
   const insert = (entry: CommandDoc, text: string) => {
-    const go = () => { onClose(); onInsert(text); };
+    const go = () => { if (!stays) onClose?.(); onInsert(text); };
     if (state === 'attention') {
       Alert.alert('Insert anyway?', stateNotice(entry, state) ?? undefined, [
         { text: 'Cancel', style: 'cancel' },
@@ -70,7 +81,7 @@ export function CommandsSheet({ visible, onClose, sessionId, runtime, state, isT
 
   const run = (entry: CommandDoc, text: string) => {
     const go = () => {
-      onClose();
+      if (!stays) onClose?.();
       runCommand(write, text)
         .then(() => onRan?.(entry))
         .catch((err: any) => Alert.alert('Could not run it', err?.message || String(err)));
@@ -129,51 +140,83 @@ export function CommandsSheet({ visible, onClose, sessionId, runtime, state, isT
   const empty = isLoading
     ? <ActivityIndicator color={colors.textDim} style={styles.empty} />
     : <Text style={[styles.empty, styles.emptyText]}>{error ? `Could not load the commands: ${(error as Error).message}` : catalog ? 'Nothing matches.' : 'No commands for this session.'}</Text>;
+  const docked = mode === 'docked';
+  const pinned = mode === 'docked';
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} onShow={reset}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <View style={styles.header}>
-          <Text style={styles.title} accessibilityRole="header">{catalog ? `${cliLabel(catalog.cli)} commands` : 'Commands'}</Text>
-          <Pressable onPress={onClose} hitSlop={8} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
-            <Ionicons name="close" size={24} color={colors.text} />
+    <View style={docked ? [styles.dock, { height }] : styles.fill}>
+      <View style={[styles.header, docked && styles.headerDocked]}>
+        <Text style={[styles.title, docked && styles.titleDocked]} accessibilityRole="header" numberOfLines={1}>{catalog ? `${cliLabel(catalog.cli)} commands` : 'Commands'}</Text>
+        {onPin ? (
+          <Pressable
+            onPress={onPin}
+            hitSlop={6}
+            style={[styles.tool, pinned && styles.toolOn]}
+            accessibilityRole="button"
+            accessibilityLabel={pinned ? 'Unpin: open it full height' : 'Pin: keep it open in the page'}
+            accessibilityState={{ selected: pinned }}
+          >
+            <Ionicons name={pinned ? 'pin' : 'pin-outline'} size={19} color={pinned ? colors.accent : colors.textDim} />
           </Pressable>
-        </View>
-        {isTerminal && clis.length > 1 ? (
-          <Chips items={clis.map((c) => ({ id: c, label: cliLabel(c) }))} value={shellCli} onChange={(id) => { setCli(id); setChosenTab(null); setOpenId(null); }} label="CLI" />
         ) : null}
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={16} color={colors.textFaint} />
-          <TextInput
-            value={query}
-            onChangeText={(text) => { setQuery(text); setOpenId(null); }}
-            placeholder="Search commands"
-            placeholderTextColor={colors.textFaint}
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-            style={styles.search}
-            accessibilityLabel="Search commands"
-          />
-        </View>
-        {!query.trim() && tabs.length > 1 ? (
-          <Chips items={tabs} value={tab} onChange={(id) => { setChosenTab(id as CatalogTab['id']); setOpenId(null); }} label="Kind" />
+        {onWindow ? (
+          <Pressable onPress={onWindow} hitSlop={6} style={styles.tool} accessibilityRole="button" accessibilityLabel="Open in a window of its own">
+            <Ionicons name="open-outline" size={19} color={colors.textDim} />
+          </Pressable>
         ) : null}
-        <FlatList
-          data={entries}
-          keyExtractor={(item) => item.id}
-          renderItem={renderRow}
-          ListEmptyComponent={empty}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          initialNumToRender={20}
-          contentContainerStyle={styles.list}
+        {onClose ? (
+          <Pressable onPress={onClose} hitSlop={8} style={styles.tool} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={docked ? 21 : 24} color={colors.text} />
+          </Pressable>
+        ) : null}
+      </View>
+      {isTerminal && clis.length > 1 ? (
+        <Chips items={clis.map((c) => ({ id: c, label: cliLabel(c) }))} value={shellCli} onChange={(id) => { setCli(id); setChosenTab(null); setOpenId(null); }} label="CLI" />
+      ) : null}
+      <View style={styles.searchRow}>
+        <Ionicons name="search" size={16} color={colors.textFaint} />
+        <TextInput
+          value={query}
+          onChangeText={(text) => { setQuery(text); setOpenId(null); }}
+          placeholder="Search commands"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          style={styles.search}
+          accessibilityLabel="Search commands"
         />
-        {catalog ? (
-          <Text style={styles.foot} numberOfLines={1}>
-            {[`${cliLabel(catalog.cli)}${version ? ` ${version}` : ''}`, catalog.docs?.generatedAt ? `docs of ${formatDay(catalog.docs.refreshedAt || catalog.docs.generatedAt)}` : null].filter(Boolean).join(' · ')}
-          </Text>
-        ) : null}
+      </View>
+      {!query.trim() && tabs.length > 1 ? (
+        <Chips items={tabs} value={tab} onChange={(id) => { setChosenTab(id as CatalogTab['id']); setOpenId(null); }} label="Kind" />
+      ) : null}
+      <FlatList
+        data={entries}
+        keyExtractor={(item) => item.id}
+        renderItem={renderRow}
+        ListEmptyComponent={empty}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        initialNumToRender={20}
+        contentContainerStyle={styles.list}
+      />
+      {catalog && !docked ? (
+        <Text style={styles.foot} numberOfLines={1}>
+          {[`${cliLabel(catalog.cli)}${version ? ` ${version}` : ''}`, catalog.docs?.generatedAt ? `docs of ${formatDay(catalog.docs.refreshedAt || catalog.docs.generatedAt)}` : null].filter(Boolean).join(' · ')}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** The panel full height, over the session; a pick closes it. */
+export function CommandsSheet({ visible, ...props }: Omit<Parameters<typeof CommandsPanel>[0], 'mode' | 'height'> & { visible: boolean }) {
+  const insets = useWindowInsets();
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={props.onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        {/* Made afresh at each opening: no search or open row left from the last time. */}
+        {visible ? <CommandsPanel mode="sheet" {...props} /> : null}
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -289,9 +332,15 @@ const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  header: { height: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg },
+  fill: { flex: 1, backgroundColor: colors.background },
+  // Pinned above the composer: a part of the page, its own top line.
+  dock: { backgroundColor: colors.background, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  header: { height: 52, flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: spacing.lg, paddingRight: spacing.sm },
+  headerDocked: { height: 42 },
   title: { flex: 1, color: colors.text, fontSize: 17, fontWeight: '700' },
-  close: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  titleDocked: { fontSize: 15 },
+  tool: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  toolOn: { backgroundColor: 'rgba(128,136,255,0.16)' },
   searchRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.sm,
     paddingHorizontal: spacing.md, borderRadius: 10, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,

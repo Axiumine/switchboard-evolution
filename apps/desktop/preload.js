@@ -257,6 +257,8 @@ contextBridge.exposeInMainWorld('api', {
   writeClipboard: (text) => ipcRenderer.invoke('clipboard-write-text', text),
   // A pull request's page on GitHub in a window of its own (main.js openWebWindow).
   openWebWindow: (url, title) => ipcRenderer.invoke('open-web-window', url, title),
+  // The terminal's Commands palette for one session, in a window of its own (main.js openCommandsWindow).
+  openCommandsWindow: (info) => ipcRenderer.invoke('open-commands-window', info),
 
   // Send (fire-and-forget)
   sendInput: (id, data) => ipcRenderer.send('terminal-input', id, data),
