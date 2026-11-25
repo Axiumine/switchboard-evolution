@@ -604,10 +604,14 @@ function bindGitDiffPane(project, state, repo, body, item, { key, cached, pickab
 // Mode goes back to the diff and drops what is not saved. A file stays in
 // edit mode while another file is looked at, and its rows show a pencil.
 
+/** The text of a file in edit mode, with the file's line breaks (CRLF stays CRLF). */
+function gitEditText(view) {
+  return window.cmGetText ? window.cmGetText(view) : view.state.doc.toString();
+}
+
 /** Whether a file in edit mode has text that is not saved. */
 function gitEditDirty(session) {
-  const doc = session.view.state.doc;
-  return doc.length !== session.saved.length || doc.toString() !== session.saved;
+  return gitEditText(session.view) !== session.saved;
 }
 
 /** Save is on with unsaved text, and says so while it saves. */
@@ -648,6 +652,8 @@ async function gitStartEdit(project, state, repo, body, item) {
   session.view = window.createUnifiedMergeViewer(host, result.base, result.content, item.change.path, {
     readOnly: false, mergeControls: false, collapse: false, onDocChange: () => gitEditButtons(body, session),
   });
+  // What an edit differs from: the text as the editor gives it back, its line breaks made one kind.
+  session.saved = gitEditText(session.view);
   // ⌘S in the editor.
   host.addEventListener('cm-save', (event) => {
     event.stopPropagation();
@@ -661,7 +667,7 @@ async function gitStartEdit(project, state, repo, body, item) {
 
 async function gitSaveEdit(project, state, repo, body, item, session, { force = false } = {}) {
   if (session.busy || (!force && !gitEditDirty(session))) return;
-  const text = session.view.state.doc.toString();
+  const text = gitEditText(session.view);
   session.busy = true;
   gitEditButtons(body, session);
   let result;

@@ -188,7 +188,8 @@ function renderKnowledgeQuery(project, view, folder, body) {
   const host = view.querySelector('[data-kn-editor]');
   let editor = null;
   if (typeof window.createEditableViewer === 'function') {
-    editor = window.createEditableViewer(host, d.text, 'query.cypher', { wrap: true, onChange: () => { d.text = editor.state.doc.toString(); } });
+    // A query box: the editor without its status bar.
+    editor = window.createEditableViewer(host, d.text, 'query.cypher', { wrap: true, statusBar: false, onChange: () => { d.text = editor.state.doc.toString(); } });
   } else {
     host.innerHTML = `<textarea class="ws-input mono kn-query-text" spellcheck="false">${escapeHtml(d.text)}</textarea>`;
     host.querySelector('textarea').oninput = (e) => { d.text = e.target.value; };
@@ -344,15 +345,33 @@ function renderKnowledgeAdr(project, view, folder, body) {
   });
   const area = view.querySelector('[data-kn-field="draft"]');
   if (area) {
-    area.oninput = () => {
-      d.draft = area.value;
+    const changed = () => {
       const bytes = KnowledgeModel.utf8Bytes(d.draft);
       const label = view.querySelector('[data-kn-bytes]');
       label.textContent = `${knNumber(bytes)} / 8,000 bytes`;
       label.classList.toggle('kn-error-text', bytes > 8000);
       view.querySelector('[data-kn-act="save"]').disabled = bytes > 8000;
     };
-    area.focus();
+    if (typeof window.createCodeEditor === 'function') {
+      // The app's editor, in Markdown: find and replace, go to a heading, the rest.
+      const host = document.createElement('div');
+      host.className = 'kn-adr-text kn-adr-editor';
+      area.replaceWith(host);
+      const editor = window.createCodeEditor(host, {
+        doc: d.draft, language: 'markdown', wrap: true,
+        onChange: () => { d.draft = window.cmGetText(editor); changed(); },
+      });
+      // Cmd/Ctrl+S saves, as the Save button.
+      host.addEventListener('cm-save', (e) => {
+        e.stopPropagation();
+        const save = view.querySelector('[data-kn-act="save"]');
+        if (save && !save.disabled) save.click();
+      });
+      editor.focus();
+    } else {
+      area.oninput = () => { d.draft = area.value; changed(); };
+      area.focus();
+    }
   }
 }
 

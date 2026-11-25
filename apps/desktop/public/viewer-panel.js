@@ -21,6 +21,16 @@
  * With `autosaveMs`, an edit is saved that long after the typing stops
  * (the Note's pad); Save and Cmd/Ctrl+S still work as everywhere else.
  *
+ * The editor is the app's one editor (createCodeEditor, codemirror-bundle.js).
+ * Its find bar (Cmd/Ctrl+F, replace with ⌥⌘F or Ctrl+H), go to line (Ctrl+G)
+ * and go to symbol (Cmd/Ctrl+Shift+O) open from the toolbar too, from its
+ * Find button, and when no field has the focus (the last viewer used); in a
+ * Markdown or JSON preview Cmd/Ctrl+F searches the rendered text. The title
+ * shows a dot while there are unsaved changes; showing another file asks
+ * about them first (confirmLeave). A change on disk while there are none
+ * reloads the text in place, keeping the cursor; with unsaved changes it asks
+ * (Reload, Keep Mine, Compare) instead of losing them.
+ *
  * Depends on: viewer-toolbar.js, codemirror-bundle.js
  */
 
@@ -46,6 +56,46 @@ function setViewerFontStep(step) {
   try { localStorage.setItem(VIEWER_FONT_STEP_KEY, String(value)); } catch {}
   window.dispatchEvent(new CustomEvent(VIEWER_FONT_STEP_EVENT, { detail: value }));
 }
+
+const IS_MAC_VIEWER = /Mac|iPhone|iPad/.test(navigator.platform);
+
+/**
+ * Which of the editor's keys `e` is, as its find bar takes them
+ * (codemirror-bundle.js, editor/find.mjs): find, replace, next, previous,
+ * gotoLine, symbol; null for any other key.
+ */
+function viewerFindKey(e) {
+  const key = (e.key || '').toLowerCase();
+  const mod = IS_MAC_VIEWER ? e.metaKey : e.ctrlKey;
+  const replace = IS_MAC_VIEWER
+    ? e.metaKey && e.altKey && !e.ctrlKey && e.code === 'KeyF'
+    : e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && key === 'h';
+  if (replace) return 'replace';
+  if (mod && !e.altKey && !e.shiftKey && key === 'f') return 'find';
+  if (key === 'f3' || (IS_MAC_VIEWER && e.metaKey && !e.altKey && !e.ctrlKey && e.code === 'KeyG')) return e.shiftKey ? 'previous' : 'next';
+  if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'g') return 'gotoLine';
+  if (mod && e.shiftKey && !e.altKey && key === 'o') return 'symbol';
+  return null;
+}
+
+function isTypingTarget(el) {
+  return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || ''));
+}
+
+// Every viewer of this window, and the one used last: Cmd/Ctrl+F pressed where
+// no field has the focus (a row of the sidebar, the page) opens its find bar.
+const viewerPanels = new Set();
+let lastViewerPanel = null;
+
+document.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented) return;
+  const action = viewerFindKey(e);
+  if (!action || isTypingTarget(e.target)) return;
+  for (const panel of viewerPanels) if (panel.container.contains(e.target)) return;
+  const shown = [...viewerPanels].filter(panel => panel.isShown());
+  const panel = shown.includes(lastViewerPanel) ? lastViewerPanel : shown[shown.length - 1];
+  if (panel && panel.runFindKey(action, e)) e.preventDefault();
+});
 
 class ViewerPanel {
   /**
@@ -86,6 +136,7 @@ class ViewerPanel {
       copyContent: !!opts.copyContent,
       preview: true,
       wrap: true,
+      find: true,
       gotoLine: true,
       save: !!opts.onSave,
       openExternal: true,
@@ -105,10 +156,18 @@ class ViewerPanel {
     this.editorEl.className = 'viewer-panel-editor';
     container.appendChild(this.editorEl);
 
+    // Where the find bar of the preview sits: over the top of the preview.
+    this.previewFindHost = document.createElement('div');
+    this.previewFindHost.className = 'viewer-find-anchor';
+    container.appendChild(this.previewFindHost);
+    this._previewFindBar = null;
+
     // Create preview area
     this.previewEl = document.createElement('div');
     this.previewEl.className = 'markdown-preview';
     this.previewEl.style.display = 'none';
+    // A click in the preview gives it the focus, so that its keys (Cmd/Ctrl+F) reach this panel.
+    this.previewEl.tabIndex = -1;
     container.appendChild(this.previewEl);
 
     // Wire toolbar events
@@ -123,6 +182,11 @@ class ViewerPanel {
 
     // Listen for Cmd/Ctrl+S from CM editors
     container.addEventListener('cm-save', () => this._save());
+
+    // The editor's keys from the toolbar and the preview; this panel as the last one used.
+    container.addEventListener('keydown', (e) => this._onKeyDown(e));
+    container.addEventListener('focusin', () => { lastViewerPanel = this; });
+    viewerPanels.add(this);
 
     // Listen for file changes from main process
     this._onFileChanged = (changedPath) => {
@@ -146,8 +210,13 @@ class ViewerPanel {
       toolbar.wrapBtn.addEventListener('click', () => this._toggleWrap());
     }
 
+    if (toolbar.findBtn) {
+      toolbar.findBtn.addEventListener('click', () => this.openFind());
+    }
+
     if (toolbar.gotoLineBtn) {
       toolbar.gotoLineBtn.addEventListener('click', () => {
+        if (this.previewMode) this._setPreview(false);
         if (this.editorView && window.cmOpenGotoLine) {
           window.cmOpenGotoLine(this.editorView);
         }
@@ -185,7 +254,9 @@ class ViewerPanel {
     }
 
     if (toolbar.closeBtn && opts.onClose) {
-      toolbar.closeBtn.addEventListener('click', () => opts.onClose());
+      toolbar.closeBtn.addEventListener('click', async () => {
+        if (await this.confirmLeave()) opts.onClose();
+      });
     }
 
     if (toolbar.copyPathBtn) {
@@ -221,7 +292,9 @@ class ViewerPanel {
   open(title, filePath, content = '', preview = {}) {
     this._unwatchFile();
     this._clearPreview();
+    this._hideConflict();
     this._openVersion++;
+    lastViewerPanel = this;
 
     const previousPath = this.filePath;
     this.filePath = filePath;
@@ -242,7 +315,7 @@ class ViewerPanel {
     if (this.toolbar.previewBtn) {
       this.toolbar.previewBtn.style.display = !isMedia && (isMd || isHtml || isJson) ? '' : 'none';
     }
-    for (const key of ['wrapBtn', 'gotoLineBtn', 'saveBtn', 'copyContentBtn', 'fontSmallerBtn', 'fontLargerBtn']) {
+    for (const key of ['wrapBtn', 'findBtn', 'gotoLineBtn', 'saveBtn', 'copyContentBtn', 'fontSmallerBtn', 'fontLargerBtn']) {
       if (this.toolbar[key]) this.toolbar[key].style.display = isMedia ? 'none' : '';
     }
 
@@ -284,10 +357,13 @@ class ViewerPanel {
     if (!this.editorView) {
       this._createEditor(content, filePath);
     } else {
-      this.editorView.dispatch({
-        changes: { from: 0, to: this.editorView.state.doc.length, insert: content },
-      });
+      this._setEditorText(content);
     }
+    // What an edit differs from: the text as the editor gives it back (its
+    // line breaks made one kind), so a file of mixed line breaks is not
+    // "changed" before anything is typed.
+    this._savedContent = this.getContent();
+    this._updateDirty();
 
     // Set wrap default based on file type
     this.wrapMode = isMd;
@@ -333,7 +409,15 @@ class ViewerPanel {
 
   _createEditor(content, filePath) {
     const onChange = () => this._edited();
-    if (this.opts.language === 'auto') {
+    if (window.createCodeEditor) {
+      this.editorView = window.createCodeEditor(this.editorEl, {
+        doc: content,
+        filename: filePath,
+        language: this.opts.language === 'auto' ? 'auto' : 'markdown',
+        wrap: this.wrapMode,
+        onChange,
+      });
+    } else if (this.opts.language === 'auto') {
       this.editorView = window.createEditableViewer(
         this.editorEl, content, filePath, { wrap: this.wrapMode, onChange },
       );
@@ -352,8 +436,104 @@ class ViewerPanel {
     return !!this.editorView && !!this.filePath && this._savedContent !== null && this.getContent() !== this._savedContent;
   }
 
+  /** The editor's text replaced with `content`, changing only what differs (the cursor stays). */
+  _setEditorText(content) {
+    if (!this.editorView) return;
+    if (window.cmSetText) window.cmSetText(this.editorView, content);
+    else this.editorView.dispatch({ changes: { from: 0, to: this.editorView.state.doc.length, insert: content } });
+  }
+
+  /** The title's dot follows whether there are unsaved changes. */
+  _updateDirty() {
+    if (this.toolbar.setDirty) this.toolbar.setDirty(this.isDirty());
+  }
+
+  /**
+   * Before this viewer shows another file or closes: with unsaved changes,
+   * ask whether to save them (Save, Don't Save, Cancel). Resolves to false
+   * when the user cancels, true when it can go on. An autosaving viewer saves.
+   */
+  async confirmLeave() {
+    if (!this.isDirty()) return true;
+    if (this.opts.autosaveMs) { await this.flush(); return true; }
+    if (!this.opts.onSave || !window.api.confirmUnsavedChanges) return true;
+    const name = this.toolbar.titleEl.textContent || this.filePath.split(/[\\/]/).pop();
+    const choice = await window.api.confirmUnsavedChanges(name);
+    if (choice === 'cancel') return false;
+    if (choice === 'save') {
+      await this._save({ quiet: true });
+      return !this.isDirty();
+    }
+    return true;
+  }
+
+  /** Whether this viewer is on screen with a text or a preview in it. */
+  isShown() {
+    return this.container.isConnected && this.container.getClientRects().length > 0 && !!this.filePath;
+  }
+
+  /** Cmd/Ctrl+F: the find bar of the editor, or of the preview while a Markdown or JSON preview is shown. */
+  openFind({ replace = false } = {}) {
+    if (this._isMedia()) return false;
+    if (this.previewMode) {
+      if (!replace && this._canFindInPreview()) {
+        this._previewFind().open();
+        return true;
+      }
+      this._setPreview(false);
+    }
+    if (!this.editorView || !window.cmOpenSearch) return false;
+    return window.cmOpenSearch(this.editorView, { replace });
+  }
+
+  _canFindInPreview() {
+    return this.previewMode && !this._isMedia() && this.previewType !== 'html' && !!window.cmCreatePreviewFind;
+  }
+
+  _previewFind() {
+    if (!this._previewFindBar) {
+      this._previewFindBar = window.cmCreatePreviewFind(this.previewFindHost, this.previewEl, {
+        onReplaceInSource: () => this.openFind({ replace: true }),
+      });
+    }
+    return this._previewFindBar;
+  }
+
+  /** One of the editor's keys (viewerFindKey), pressed outside its text: true when it did something. */
+  runFindKey(action, event) {
+    if (this.previewMode) {
+      if (action === 'find' || action === 'replace') return this.openFind({ replace: action === 'replace' });
+      if ((action === 'next' || action === 'previous') && this._canFindInPreview()) {
+        this._previewFind().findNext(action === 'next' ? 1 : -1);
+        return true;
+      }
+      if (action === 'gotoLine' || action === 'symbol') this._setPreview(false);
+      else return false;
+    }
+    if (!this.editorView) return false;
+    if (action === 'find' || action === 'replace') return this.openFind({ replace: action === 'replace' });
+    return !!(window.cmRunEditorKeys && window.cmRunEditorKeys(this.editorView, event));
+  }
+
+  /** Keys on the toolbar or the preview (the editor and its bars take their own). */
+  _onKeyDown(e) {
+    if (e.defaultPrevented) return;
+    if (this.editorView && this.editorView.dom.contains(e.target)) return;
+    if (e.target.closest && e.target.closest('.terminal-search-bar, .cm-symbol-picker, .viewer-conflict-bar')) return;
+    if (isTypingTarget(e.target)) return;
+    const mod = IS_MAC_VIEWER ? e.metaKey : e.ctrlKey;
+    if (mod && !e.shiftKey && !e.altKey && (e.key || '').toLowerCase() === 's' && this.editorView) {
+      e.preventDefault();
+      this._save();
+      return;
+    }
+    const action = viewerFindKey(e);
+    if (action && this.runFindKey(action, e)) e.preventDefault();
+  }
+
   /** After an edit: with autosave, save once the typing has stopped. */
   _edited() {
+    this._updateDirty();
     if (!this.opts.autosaveMs || !this.opts.onSave) return;
     clearTimeout(this._autosaveTimer);
     this._autosaveTimer = setTimeout(() => {
@@ -369,6 +549,7 @@ class ViewerPanel {
 
   _togglePreview() {
     if (this._isMedia() || (!this._isMarkdown(this.filePath) && !this._isJson(this.filePath) && this.previewType !== 'html')) return;
+    if (this.previewMode && this._previewFindBar) this._previewFindBar.close({ focus: false });
     this.previewMode = !this.previewMode;
     if (this.previewMode) this._renderPreview();
     else this._clearPreview();
@@ -462,6 +643,8 @@ class ViewerPanel {
       this.previewEl.style.display = 'block';
       this.previewEl.innerHTML = window.marked.parse(this.getContent());
     }
+    // The text was drawn again: an open find bar searches it again.
+    if (this._previewFindBar) this._previewFindBar.refresh();
   }
 
   /** The tree from the live buffer, or where the file breaks and a way to get there. */
@@ -495,6 +678,7 @@ class ViewerPanel {
   }
 
   _clearPreview() {
+    if (this._previewFindBar) this._previewFindBar.close({ focus: false });
     this.previewEl.replaceChildren();
     this.previewEl.style.display = 'none';
     if (this._objectUrl) URL.revokeObjectURL(this._objectUrl);
@@ -528,6 +712,9 @@ class ViewerPanel {
       const result = await this.opts.onSave(filePath, content);
       if (result && result.ok !== false) {
         if (this.filePath === filePath && typeof this._savedContent === 'string') this._savedContent = content;
+        // What was on disk has been replaced: the question about it is answered.
+        if (this.filePath === filePath) this._hideConflict();
+        this._updateDirty();
         // An autosave says nothing: the button flashing every few seconds would only distract.
         if (!quiet) this.toolbar.flashSave();
       }
@@ -580,13 +767,16 @@ class ViewerPanel {
     return result;
   }
 
+  /** The editor's text, with the file's line breaks (CRLF stays CRLF). */
   getContent() {
-    return this.editorView ? this.editorView.state.doc.toString() : '';
+    if (!this.editorView) return '';
+    return window.cmGetText ? window.cmGetText(this.editorView) : this.editorView.state.doc.toString();
   }
 
   destroy() {
     this._unwatchFile();
     clearTimeout(this._autosaveTimer);
+    this._hideConflict();
     this._savedContent = null;
     this._openVersion++;
     this._destroyEditor();
@@ -594,6 +784,7 @@ class ViewerPanel {
     this.filePath = '';
     this.previewMode = false;
     this._jsonState = { open: null };
+    this._updateDirty();
   }
 
   _destroyEditor() {
@@ -601,9 +792,10 @@ class ViewerPanel {
       this.editorView.destroy();
       this.editorView = null;
     }
-    // Clear stale search/goto-line bar references so they get recreated with the new editor
+    // Clear stale search/goto-line/symbol bar references so they get recreated with the new editor
     delete this.editorEl._cmSearchBar;
     delete this.editorEl._cmGotoLine;
+    delete this.editorEl._cmSymbolPicker;
     this.editorEl.innerHTML = '';
   }
 
@@ -634,19 +826,91 @@ class ViewerPanel {
     }
 
     const newContent = result.content;
-    const currentContent = this.getContent();
-    this._savedContent = newContent;
-    if (newContent === currentContent) return;
+    const sameText = (a, b) => (window.cmNormalizeEol ? window.cmNormalizeEol(a, '\n') === window.cmNormalizeEol(b, '\n') : a === b);
+    if (sameText(newContent, this.getContent())) {
+      // On disk is what the editor has (the save just made, or the same edit).
+      this._savedContent = this.getContent();
+      this._hideConflict();
+      this._updateDirty();
+      return;
+    }
+    if (this.isDirty()) {
+      // Unsaved changes are never overwritten: ask.
+      this._showConflict(newContent);
+      return;
+    }
+    this._applyDiskContent(newContent);
+  }
 
-    if (this.editorView) {
-      this.editorView.dispatch({
-        changes: { from: 0, to: this.editorView.state.doc.length, insert: newContent },
+  /** The file as it is on disk in the editor (only what changed), as the text an edit differs from. */
+  _applyDiskContent(content) {
+    this._hideConflict();
+    this._setEditorText(content);
+    this._savedContent = this.getContent();
+    this._updateDirty();
+    if (this.previewMode) this._renderPreview();
+  }
+
+  // ── The file changed on disk while there are unsaved changes ──────
+
+  _showConflict(diskContent) {
+    this._diskContent = diskContent;
+    if (!this.conflictEl) {
+      const bar = document.createElement('div');
+      bar.className = 'viewer-conflict-bar';
+      bar.setAttribute('role', 'alert');
+      bar.innerHTML = `
+        <span class="viewer-conflict-text">This file changed on disk, and you have unsaved changes.</span>
+        <button type="button" class="viewer-conflict-btn" data-act="reload" title="Take the file as it is on disk; your changes are lost">Reload</button>
+        <button type="button" class="viewer-conflict-btn" data-act="keep" title="Keep your changes; saving writes them over the file">Keep Mine</button>
+        <button type="button" class="viewer-conflict-btn" data-act="compare" title="See the file on disk next to your changes">Compare</button>`;
+      bar.addEventListener('click', (e) => {
+        const act = e.target.closest('[data-act]')?.dataset.act;
+        if (act === 'reload') this._applyDiskContent(this._diskContent);
+        else if (act === 'keep') this._hideConflict();
+        else if (act === 'compare') this._toggleCompare();
       });
+      this.toolbar.el.after(bar);
+      this.conflictEl = bar;
     }
+    this.conflictEl.hidden = false;
+    if (this._compareView) this._toggleCompare(true);
+  }
 
-    if (this.previewMode) {
-      this._renderPreview();
-    }
+  _hideConflict() {
+    this._closeCompare();
+    if (this.conflictEl) this.conflictEl.hidden = true;
+  }
+
+  /** Compare: the file on disk (as the original) and the editor's text, in one column; again to go back. */
+  _toggleCompare(refresh = false) {
+    if (this._compareView && !refresh) { this._closeCompare(); return; }
+    this._closeCompare();
+    if (!window.createUnifiedMergeViewer) return;
+    if (this.previewMode) this._setPreview(false);
+    const host = document.createElement('div');
+    host.className = 'viewer-panel-editor viewer-compare';
+    this.editorEl.after(host);
+    this.editorEl.style.display = 'none';
+    this._compareHost = host;
+    this._compareView = window.createUnifiedMergeViewer(host, this._diskContent || '', this.getContent(), this.filePath, { readOnly: true });
+    const button = this.conflictEl && this.conflictEl.querySelector('[data-act="compare"]');
+    if (button) button.textContent = 'Back to Editor';
+    const text = this.conflictEl && this.conflictEl.querySelector('.viewer-conflict-text');
+    if (text) text.textContent = 'Red is the file on disk, green your unsaved changes.';
+  }
+
+  _closeCompare() {
+    if (!this._compareView) return;
+    this._compareView.destroy();
+    this._compareView = null;
+    this._compareHost.remove();
+    this._compareHost = null;
+    if (!this.previewMode && !this._isMedia()) this.editorEl.style.display = '';
+    const button = this.conflictEl && this.conflictEl.querySelector('[data-act="compare"]');
+    if (button) button.textContent = 'Compare';
+    const text = this.conflictEl && this.conflictEl.querySelector('.viewer-conflict-text');
+    if (text) text.textContent = 'This file changed on disk, and you have unsaved changes.';
   }
 
   _isMarkdown(filePath) {

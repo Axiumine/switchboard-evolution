@@ -1881,6 +1881,76 @@ body { display: flex; flex-direction: column; }
 }
 .terminal-search-bar .cm-find-opt.on { color: #e8e8ff; background: rgb(from var(--accent) r g b / 0.24); border-color: rgb(from var(--accent) r g b / 0.6); }
 .terminal-search-bar .cm-replace-one, .terminal-search-bar .cm-replace-all { padding: 2px 3px; display: inline-flex; align-items: center; }
+/* The find and replace fields grow to five lines for a query of several (Ctrl+Enter). */
+.cm-find-box textarea.terminal-search-input {
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  font-family: inherit;
+  line-height: 16px;
+  display: block;
+}
+/* The matches on the scrollbar, as VS Code's overview ruler. */
+.cm-find-ruler { position: absolute; right: 0; width: 8px; pointer-events: none; z-index: 4; }
+.cm-find-ruler-mark { position: absolute; left: 1px; right: 1px; height: 2px; border-radius: 1px; background: rgba(234,165,73,0.55); }
+.cm-find-ruler-mark.active { height: 3px; background: #EAA549; }
+/* Find in a rendered preview: the matches in the text, the bar over the preview's top. */
+::highlight(editor-preview-find) { background-color: #515C6A; color: #fff; }
+::highlight(editor-preview-find-active) { background-color: #EAA549; color: #171717; }
+.viewer-find-anchor { position: relative; height: 0; z-index: 20; flex: none; }
+
+/* The editor's status bar: cursor, indentation, line breaks, encoding, language. */
+.cm-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 6px;
+  font: 11px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: rgba(255,255,255,0.5);
+  background: #1d1e26;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: none;
+}
+.cm-status-spacer { flex: 1; min-width: 4px; }
+.cm-status-item { background: none; border: 0; color: inherit; font: inherit; padding: 3px 6px; border-radius: 4px; flex-shrink: 0; }
+button.cm-status-item { cursor: pointer; }
+button.cm-status-item:hover:not(:disabled) { background: rgba(255,255,255,0.08); color: #e6e6f4; }
+button.cm-status-item:disabled { cursor: default; }
+.cm-status-whitespace { font-size: 12px; }
+.cm-status-whitespace.on { color: var(--accent); }
+
+/* Go to Symbol: a list over the top of the editor, filtered as you type. */
+.cm-symbol-picker {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, calc(100% - 24px));
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: #1e1e2e;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+}
+.cm-symbol-picker .terminal-search-input { width: 100%; box-sizing: border-box; }
+.cm-symbol-list { max-height: 300px; overflow-y: auto; }
+.cm-symbol-row { display: flex; align-items: center; gap: 8px; height: 24px; padding-right: 8px; border-radius: 4px; font-size: 12px; color: #c8c8dc; cursor: pointer; white-space: nowrap; }
+.cm-symbol-row:hover { background: rgba(255,255,255,0.06); }
+.cm-symbol-row.active { background: rgb(from var(--accent) r g b / 0.22); color: #fff; }
+.cm-symbol-kind { width: 16px; flex-shrink: 0; text-align: center; font: 600 10px 'SF Mono', Menlo, monospace; color: #bd93f9; }
+.cm-symbol-kind-function, .cm-symbol-kind-method { color: #50fa7b; }
+.cm-symbol-kind-heading { color: #8be9fd; }
+.cm-symbol-kind-key, .cm-symbol-kind-selector { color: #f1fa8c; }
+.cm-symbol-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cm-symbol-container { margin-left: auto; padding-left: 12px; color: #6a6a80; font-size: 11px; }
+.cm-symbol-empty { padding: 6px 8px; color: #7a7a90; font-size: 12px; }
 
 /* ========== SESSION GRID ========== */
 .message-search-bar { top: 44px; max-width: calc(100% - 24px); right: 12px; }
@@ -2118,6 +2188,36 @@ body { display: flex; flex-direction: column; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* The title's dot while the file has unsaved changes. */
+.viewer-toolbar-dirty { flex-shrink: 0; margin-left: -4px; font-size: 9px; color: #e6e6f4; }
+.viewer-toolbar-dirty[hidden] { display: none; }
+
+/* The file changed on disk while there are unsaved changes: Reload, Keep Mine, Compare. */
+.viewer-conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  flex: none;
+  background: rgba(234,165,73,0.12);
+  border-bottom: 1px solid rgba(234,165,73,0.35);
+  color: #f0d8b0;
+  font-size: 12px;
+}
+.viewer-conflict-bar[hidden] { display: none; }
+.viewer-conflict-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-conflict-btn {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid rgba(234,165,73,0.45);
+  background: rgba(234,165,73,0.08);
+  color: #f6e2bf;
+  font: inherit;
+  cursor: pointer;
+}
+.viewer-conflict-btn:hover { background: rgba(234,165,73,0.2); }
 
 .viewer-toolbar-path {
   font-size: 10px;
@@ -9673,6 +9773,8 @@ body.file-window .markdown-preview { flex: 1; min-height: 0; }
 .kn-adr-body code { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11.5px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 4px; }
 .kn-adr-edit { display: flex; flex-direction: column; gap: 8px; max-width: 980px; }
 .kn-adr-text { width: 100%; min-height: 360px; height: 55vh; padding: 10px 12px; line-height: 1.55; resize: vertical; }
+.kn-adr-text.kn-adr-editor { padding: 0; overflow: hidden; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); background: #121218; }
+.kn-adr-editor .cm-editor { height: 100%; }
 .kn-adr-foot { display: flex; align-items: center; gap: 8px; }
 .kn-gap-details summary { padding: 4px 14px; }
 .kn-impact-files .kn-result-name { font-weight: 500; color: #c8c8dc; }

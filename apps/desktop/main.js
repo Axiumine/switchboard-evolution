@@ -1136,6 +1136,25 @@ ipcMain.handle('save-file-for-panel', async (_event, filePath, content) => {
   }
 });
 
+// An editor with unsaved changes is about to show another file or close:
+// Save, Don't Save or Cancel, asked over the window that asked.
+ipcMain.handle('confirm-unsaved-changes', async (event, fileName) => {
+  const sender = event?.sender ? BrowserWindow.fromWebContents(event.sender) : null;
+  const win = sender && !sender.isDestroyed() ? sender : mainWindow;
+  const name = typeof fileName === 'string' && fileName ? fileName : 'this file';
+  const options = {
+    type: 'warning',
+    message: `Do you want to save the changes you made to ${name}?`,
+    detail: 'Your changes will be lost if you don\'t save them.',
+    buttons: ['Save', 'Don\'t Save', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  };
+  const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  return ['save', 'discard', 'cancel'][response] || 'cancel';
+});
+
 // ── File Watching (for viewer panels) ────────────────────────────────
 const fileWatchers = new Map(); // filePath → FSWatcher
 
