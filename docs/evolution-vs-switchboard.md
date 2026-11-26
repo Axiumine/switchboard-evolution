@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.19.0 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.19.1 (November 2026).
 
 ## At a glance
 
@@ -45,13 +45,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 25 Nov | Switchboard Evolution 1.18.1 | A session's row reads alike on the desktop and the phone, on three lines: its title and star; its project, its folder in a list without folder headers, and what the live session uses at the right; its CLI, status, age, messages and buttons. The phone's Projects tab shows what each session uses too. The Commands palette has a pin that keeps it open in the page and a button that opens it in a window of its own, on the desktop and the phone. |
 | 26 Nov | Switchboard Evolution 1.18.2 | The phone's project Overview lists its sessions with the rows of the project's drawer, as the desktop's track cards do: the title and star, then the state, the CLI, the age, the messages and what the session uses. The desktop carries gh 2.106.0. |
 | 26 Nov | Switchboard Evolution 1.19.0 | The Env tab, on the desktop and the phone: every project has a `local.env.sh` in its project folder, and each attached folder can have one. Before a session or a terminal starts, its shell sources them after the user's own startup files: in the project folder only the project's, in an attached folder the project's and then the folder's, so the folder wins. |
+| 26 Nov | Switchboard Evolution 1.19.1 | In the desktop's Pull Requests view, a text file that GitHub takes for binary (one with a NUL byte, as a prompt template that uses NULs as delimiters) shows its diff: the app reads its two versions from GitHub and compares them, each NUL shown as ␀. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.19.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.19.1, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
