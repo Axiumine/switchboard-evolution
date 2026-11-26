@@ -24,7 +24,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const GH_VERSION = '2.105.0';
+const GH_VERSION = '2.106.0';
 const RELEASES = 'https://github.com/cli/cli/releases/download';
 const LATEST_API = 'https://api.github.com/repos/cli/cli/releases/latest';
 // electron-builder's Arch enum (builder-util), by number.
@@ -45,7 +45,7 @@ function ghTarget(platform, arch) {
   };
 }
 
-/** The release asset of a target: gh_2.105.0_macOS_arm64.zip. */
+/** The release asset of a target: gh_2.106.0_macOS_arm64.zip. */
 function assetName(target, version = GH_VERSION) {
   return `gh_${version}_${target.name}.${target.ext}`;
 }
