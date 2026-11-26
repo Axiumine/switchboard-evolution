@@ -83,6 +83,7 @@ function setActiveSession(id) {
   // Update file panel to show this session's open files/diffs
   if (typeof switchPanel === 'function') switchPanel(id);
   if (typeof updateCommandCatalogButton === 'function') updateCommandCatalogButton();
+  if (typeof updatePromptImproverButton === 'function') updatePromptImproverButton();
 }
 // Persist slug group expand state across reloads
 function getExpandedSlugs() {
@@ -981,6 +982,7 @@ function updateTerminalHeader() {
     : '';
   terminalStopBtn.style.display = running ? '' : 'none';
   if (typeof updateCommandCatalogButton === 'function') updateCommandCatalogButton();
+  if (typeof updatePromptImproverButton === 'function') updatePromptImproverButton();
   updatePtyTitle();
 }
 
@@ -1958,4 +1960,4 @@ quotaGaugeEl.addEventListener('click', () => {
 // --- Initialize file panel (MCP bridge UI) ---
 if (typeof initFilePanel === 'function') initFilePanel();
 // The Commands button goes before the project files button initFilePanel adds.
-if (typeof initCommandCatalog === 'function') initCommandCatalog();
+if (typeof initCommandCatalog === 'function') initCommandCatalog().then(() => { if (typeof initPromptImprover === 'function') initPromptImprover(); });

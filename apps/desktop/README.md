@@ -63,6 +63,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 - **Built-in terminal** — Connect to running sessions or launch new ones without leaving the app.
 - **Status notifications** — In-app alerts when a session is waiting for permission approval or user input.
 - **Session grid** — Live terminals for all open sessions on one screen.
+- **Prompt improver** — A button next to Commands in a session's terminal (Cmd/Ctrl+Shift+P) reads the prompt you are typing to the CLI, has it rewritten with the commands, skills and MCP servers the session has, and puts the result back in its place (or inserts or copies it); nothing is sent. It runs the CLI you are signed in to (`claude -p`, `codex exec --ephemeral`, `opencode run`) once and out of sight, on your subscription, with no API key, and leaves no session behind. The rewriting instructions are yours to edit in Settings › Prompt improver; the phone has the same button beside "/".
 - **Per-CLI launch options** — Permission mode, worktree, sandbox, approval policy, model, and effort, set per session, per project, or globally.
 - **IDE emulation** (Claude only) — Review and edit Claude's proposed diffs in a side panel before they land.
 - **Projects** — Group work by what it is, not where it lives: a folder on disk, a brief the agent reads, a plan, a todo list, and the sessions filed under it.

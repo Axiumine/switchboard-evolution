@@ -404,6 +404,14 @@ contextBridge.exposeInMainWorld('api', {
   onCommandCatalogUpdated: (callback) => {
     ipcRenderer.on('command-catalog-updated', (_event, info) => callback(info));
   },
+  // The prompt improver (prompt-improver.js): rewrite a session's prompt with its CLI, and its settings.
+  improvePrompt: (sessionId, prompt, options) => ipcRenderer.invoke('improve-prompt', sessionId, prompt, options),
+  cancelPromptImprovement: (sessionId) => ipcRenderer.invoke('cancel-prompt-improvement', sessionId),
+  getPromptImproverSettings: () => ipcRenderer.invoke('get-prompt-improver-settings'),
+  setPromptImproverSettings: (changes) => ipcRenderer.invoke('set-prompt-improver-settings', changes),
+  onPromptImproverSettingsChanged: (callback) => {
+    ipcRenderer.on('prompt-improver-settings-changed', (_event, settings) => callback(settings));
+  },
   listProjectDirectory: (projectPath, relativePath) => ipcRenderer.invoke('list-project-directory', projectPath, relativePath),
   readProjectFile: (projectPath, relativePath) => ipcRenderer.invoke('read-project-file', projectPath, relativePath),
   searchProjectFiles: (root, options) => ipcRenderer.invoke('search-project-files', root, options),

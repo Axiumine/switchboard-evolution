@@ -15,6 +15,8 @@ const { createRemoteTunnels } = require('./remote-tunnels');
 const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
 const { readViewerEntriesSince } = require('./transcript-reader');
+const { createPromptImprover } = require('./prompt-improver');
+const PromptImproverModel = require('./public/prompt-improver-model');
 const { markBusy, markIdle, applyStatusReport, takeStatusRecords } = require('./cli-state');
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
@@ -426,6 +428,8 @@ require('./remote-git-graph');
 // What of the Worktrees tab a paired phone may use.
 require('./remote-worktrees');
 require('./remote-knowledge');
+// The prompt improver and its settings, for a paired phone.
+require('./remote-prompt-improver');
 // What of the Pull Requests tab a paired phone may use.
 require('./remote-pull-requests');
 // What of the Actions view a paired phone may use (not the downloads).
@@ -1865,6 +1869,83 @@ ipcMain.handle('get-command-catalog', (_event, sessionId, options) => {
   return catalog;
 });
 
+// --- IPC: prompt improver --- (rewrites the prompt being written to a
+// session's CLI with that CLI, or the one chosen in Settings, run once out of
+// sight under the user's own sign-in: prompt-improver.js). Its settings are
+// `promptImprover` in the global settings (public/prompt-improver-model.js).
+const promptImprover = createPromptImprover({
+  getSettings: () => (getSetting('global') || {}).promptImprover,
+  getContext: async (sessionId, hint) => {
+    const ctx = commandCatalogContext(sessionId, hint);
+    if (ctx.isPlainTerminal) return { isPlainTerminal: true };
+    const realId = activeSessions.get(sessionId)?.realSessionId || sessionId;
+    const row = getCachedSession(realId) || null;
+    const projectPath = ctx.projectPath || os.homedir();
+    let catalog = null;
+    try { catalog = commandCatalog.forSession(ctx); } catch (err) { log.warn('[prompt-improver] catalog', err.message); }
+    // The same environment files and project variables as the session (open-terminal).
+    const projectId = getMeta(realId)?.projectId || getMeta(sessionId)?.projectId || null;
+    let envFiles = [];
+    let projectEnv = {};
+    if (projectId) {
+      try { envFiles = await projects.envFilesFor(projectId, projectPath); } catch (err) { log.warn('[prompt-improver] env files', err.message); }
+      try {
+        const launch = projects.launchContext(projectId, projectPath);
+        if (launch && launch.addDirs.length) projectEnv = launch.env || {};
+      } catch (err) { log.warn('[prompt-improver] launch context', err.message); }
+    }
+    const requested = resolveShell(effectiveShellProfileId(projectPath));
+    const profile = isWslShell(requested.path) ? resolveShell('auto') : requested;
+    return {
+      runtime: ctx.runtime,
+      isPlainTerminal: false,
+      projectPath,
+      project: path.basename(projectPath),
+      version: (catalog && catalog.version && (catalog.version.session || catalog.version.installed)) || '',
+      entries: (catalog && catalog.entries) || [],
+      readEntries: row ? async () => readViewerEntriesSince(getHarness(row.runtime), row, 0).entries : null,
+      launch: { shell: profile.path, extraArgs: [...(profile.args || [])], envFiles },
+      env: { ...cleanPtyEnv, ...projectEnv },
+    };
+  },
+  newOpencodeId: () => getHarness('opencode').newSessionId(),
+  hideSession: (id) => setArchived(id, 1),
+  tmpDir: app.getPath('temp'),
+  log,
+});
+
+function promptImproverSettings() {
+  return PromptImproverModel.normalizeSettings((getSetting('global') || {}).promptImprover);
+}
+
+ipcMain.handle('improve-prompt', (_event, sessionId, prompt, options) => {
+  const opts = options && typeof options === 'object' ? options : {};
+  return promptImprover.improve(sessionId, prompt, {
+    mode: typeof opts.mode === 'string' ? opts.mode : undefined,
+    runtime: typeof opts.runtime === 'string' ? opts.runtime : null,
+  });
+});
+ipcMain.handle('cancel-prompt-improvement', (_event, sessionId) => ({ ok: promptImprover.cancel(sessionId) }));
+ipcMain.handle('get-prompt-improver-settings', () => ({
+  settings: promptImproverSettings(),
+  defaultTemplate: PromptImproverModel.DEFAULT_TEMPLATE,
+  placeholders: PromptImproverModel.PLACEHOLDERS,
+  clis: commandCatalog.clis().filter(harnessEnabled),
+}));
+// A change to some of the settings: the rest stay as they are; `template: null`
+// goes back to the default improver prompt.
+ipcMain.handle('set-prompt-improver-settings', (_event, changes) => {
+  const checked = PromptImproverModel.validateSettings(changes);
+  if (!checked.ok) return { ok: false, error: checked.error };
+  const current = promptImproverSettings();
+  const next = PromptImproverModel.normalizeSettings({
+    ...current, ...changes, models: { ...current.models, ...((changes && changes.models) || {}) },
+  });
+  setSetting('global', { ...(getSetting('global') || {}), promptImprover: next });
+  emit('prompt-improver-settings-changed', next);
+  return { ok: true, settings: next };
+});
+
 // Codex's model catalog, for model suggestions and the per-model reasoning
 // efforts in session and schedule settings.
 ipcMain.handle('get-codex-models', () => getHarness('codex')?.readModelCatalog?.() || []);
@@ -3220,6 +3301,16 @@ function shellEnvWrapperDir() {
   return shellEnvWrappers;
 }
 
+/** The shell profile a session in `projectPath` starts with: the project's, the global one, the default. */
+function effectiveShellProfileId(projectPath) {
+  const global = getSetting('global') || {};
+  const project = projectPath ? (getSetting('project:' + projectPath) || {}) : {};
+  let profileId = SETTING_DEFAULTS.shellProfile;
+  if (global.shellProfile !== undefined && global.shellProfile !== null) profileId = global.shellProfile;
+  if (project.shellProfile !== undefined && project.shellProfile !== null) profileId = project.shellProfile;
+  return profileId;
+}
+
 ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, sessionOptions) => {
   if (!mainWindow) return { ok: false, error: 'no window' };
   await sessionsReady;
@@ -3354,14 +3445,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   }
 
   // Resolve shell profile from effective settings
-  const effectiveProfileId = (() => {
-    const global = getSetting('global') || {};
-    const project = projectPath ? (getSetting('project:' + projectPath) || {}) : {};
-    let profileId = SETTING_DEFAULTS.shellProfile;
-    if (global.shellProfile !== undefined && global.shellProfile !== null) profileId = global.shellProfile;
-    if (project.shellProfile !== undefined && project.shellProfile !== null) profileId = project.shellProfile;
-    return profileId;
-  })();
+  const effectiveProfileId = effectiveShellProfileId(projectPath);
   // WSL profiles only work for plain terminals — Claude CLI sessions need the
   // Windows shell because session data lives on the Windows filesystem.
   const requestedProfile = resolveShell(effectiveProfileId);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { terminalSend, uploadHint } from '@/sessions/attachments';
@@ -13,6 +13,7 @@ import { AttachmentStrip } from './AttachmentStrip';
 import { useCommandsPanel } from './CommandsButton';
 import { CommandSuggestions } from './CommandSuggestions';
 import { ComposerField } from './ComposerField';
+import { useImproveButton } from './ImproveButton';
 import { SendButton } from './SendButton';
 import { TerminalKeys } from './TerminalKeys';
 import { useAttachments } from './useAttachments';
@@ -24,7 +25,8 @@ import { useAttachments } from './useAttachments';
  * typed in the field goes straight to the terminal with it (Ctrl and c is
  * Ctrl+C) instead of into the field. "/" beside Attach lists the CLI's
  * commands: a pick fills the field (at the end of a shell's line); in a CLI's
- * session a command being typed shows the ones that complete it.
+ * session a command being typed shows the ones that complete it, and the
+ * button after it improves the field's prompt (ImproveButton).
  */
 export function TerminalComposer({ sessionId, send, session, state = 'idle', placeholder = 'Type a command or reply…' }: {
   sessionId: string;
@@ -35,6 +37,9 @@ export function TerminalComposer({ sessionId, send, session, state = 'idle', pla
   placeholder?: string;
 }) {
   const [text, setText] = useState('');
+  // The field now, for an improvement that comes back after it changed.
+  const textNow = useRef(text);
+  useEffect(() => { textNow.current = text; }, [text]);
   const [held, setHeld] = useState<Modifiers>({});
   const attachments = useAttachments(sessionId);
   // An older computer cannot take files from the phone.
@@ -51,6 +56,8 @@ export function TerminalComposer({ sessionId, send, session, state = 'idle', pla
     write: send,
     onInsert: (pick) => setText((prev) => (session?.type === 'terminal' ? appendToLine(prev, pick) : applyToDraft(prev, pick))),
   });
+
+  const improve = useImproveButton({ sessionId, session, text, getText: () => textNow.current, setText });
 
   const submit = () => {
     if (!canSend) return;
@@ -81,6 +88,7 @@ export function TerminalComposer({ sessionId, send, session, state = 'idle', pla
       <View style={styles.row}>
         {canAttach ? <AttachButton attachments={attachments} /> : null}
         {commands.button}
+        {improve}
         <ComposerField value={text} onChangeText={onChangeText} placeholder={placeholder} minHeight={48} />
         <SendButton onPress={submit} disabled={!canSend} busy={uploading} />
       </View>

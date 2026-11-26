@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { DonateBox } from '@/components/DonateBox';
+import { usePromptImproverSupported } from '@/prompt-improver/queries';
 import { RoutePicker } from '@/components/RoutePicker';
 import { useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -26,7 +27,8 @@ function describe(status: ReturnType<typeof useConnection.getState>['status']): 
  * The Settings tab: the paired computer with its dot (green while connected),
  * the way it is reached (local network, Cloudflare, ngrok), the versions of
  * the paired Switchboard Evolution and of this app side by side, the source
- * code on GitHub, forgetting the computer, and the donation box.
+ * code on GitHub, the prompt improver's settings (when the computer has it),
+ * forgetting the computer, and the donation box.
  */
 export default function SettingsScreen() {
   const desktop = useConnection((s) => s.desktop);
@@ -34,6 +36,7 @@ export default function SettingsScreen() {
   const reconnect = useConnection((s) => s.reconnect);
   const setRoute = useConnection((s) => s.setRoute);
   const forget = useConnection((s) => s.forget);
+  const improver = usePromptImproverSupported();
 
   if (!desktop) return null;
   const hello = status.state === 'online' ? status.hello : null;
@@ -79,6 +82,17 @@ export default function SettingsScreen() {
         <Text style={styles.label}>Source code</Text>
         <Text style={[styles.value, styles.link]}>github.com/vivi7/switchboard-evolution</Text>
       </Pressable>
+      {improver ? (
+        <Pressable
+          onPress={() => router.push('/prompt-improver')}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Prompt improver settings"
+        >
+          <Text style={styles.label}>Prompt improver</Text>
+          <Text style={styles.value}>The ✦ button beside “/”: its CLI, context and prompt</Text>
+        </Pressable>
+      ) : null}
       {hello ? <Row label="This phone on the computer" value={hello.device.name} /> : null}
       <Row label="Addresses" value={`${desktop.addresses.join(', ')} (port ${desktop.port})`} />
       <Row label="Paired" value={new Date(desktop.pairedAt).toLocaleString()} />

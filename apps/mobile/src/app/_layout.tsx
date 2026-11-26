@@ -59,6 +59,8 @@ export default function RootLayout() {
             <Stack.Screen name="timeline" options={{ title: 'Timeline' }} />
             <Stack.Screen name="file-diff" options={{ title: 'Change' }} />
             <Stack.Screen name="schedule" options={{ title: 'Schedule' }} />
+            <Stack.Screen name="prompt-improver" options={{ title: 'Prompt improver' }} />
+            <Stack.Screen name="prompt-improver-template" options={{ title: 'Improver prompt' }} />
             <Stack.Screen name="git" options={{ title: 'Git' }} />
             <Stack.Screen name="diff" options={{ title: 'Diff' }} />
             <Stack.Screen name="graph" options={{ title: 'Git Graph' }} />
