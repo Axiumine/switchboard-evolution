@@ -2,7 +2,7 @@
   "expo": {
     "name": "Switchboard Evolution",
     "slug": "switchboard-e",
-    "version": "1.18.2",
+    "version": "1.19.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "switchboard-e",
