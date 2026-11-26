@@ -339,3 +339,18 @@ test('a phone asks for the command catalog of a session by its id, and nothing e
   // Phones hear when newer docs were read, to ask again.
   assert.equal(api.forwardsEvent('command-catalog-updated'), true);
 });
+
+test('a phone reads the Env tab\'s list, makes a local.env.sh and keeps it out of Git, with checked parameters', async () => {
+  const { api, calls } = setup({
+    'project-env-files': (id) => ({ ok: true, fileName: 'local.env.sh', entries: [{ path: '/work/p', kind: 'project', exists: true, gitIgnored: null }] }),
+    'create-project-env-file': (id, folder) => ({ ok: true, filePath: `${folder}/local.env.sh` }),
+    'exclude-project-env-file': (id, folder) => ({ ok: true, pattern: '/local.env.sh' }),
+  });
+  assert.equal((await api.call('project-env-files', ['p1'])).result.entries[0].kind, 'project');
+  assert.deepEqual((await api.call('create-project-env-file', ['p1', '/work/app'])).result, { ok: true, filePath: '/work/app/local.env.sh' });
+  assert.equal((await api.call('exclude-project-env-file', ['p1', '/work/app'])).result.pattern, '/local.env.sh');
+  assert.match((await api.call('create-project-env-file', ['p1', 'relative/app'])).error, /Wrong parameter 2/);
+  assert.match((await api.call('exclude-project-env-file', ['p1'])).error, /Wrong parameter 2/, 'the folder is required');
+  assert.equal(calls.length, 3);
+  assert.ok(api.capabilities().includes('project-env-files'));
+});

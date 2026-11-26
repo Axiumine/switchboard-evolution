@@ -78,8 +78,9 @@ const { shouldStartFresh, shouldBlockArchivedSession } = require('./session-laun
 const { createTerminalActivity } = require('./terminal-activity');
 
 // Shell profiles → shell-profiles.js
-const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs, quoteArgvForShell } = require('./shell-profiles');
+const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs, quoteArgvForShell, envSourcePrefix } = require('./shell-profiles');
 const { scanSchedules } = require('./schedule-runner');
+const shellEnv = require('./shell-env');
 const { encodeProjectPath } = require('./encode-project-path');
 const { resolveEffectiveSettings } = require('./resolve-effective-settings');
 const { listProjectDirectory, readProjectFile, readPreviewFile, openFileExternally, resolveProjectEntry, isViewableFile, previewType } = require('./project-files');
@@ -834,6 +835,11 @@ ipcMain.handle('list-env-files', guarded((folderPath) => ({
 })));
 ipcMain.handle('save-project-brief', guarded((id, content) => projects.saveBrief(id, content)));
 ipcMain.handle('create-project-file', guarded((id, name, content) => projects.createProjectFile(id, name, content)));
+// The Env tab: the local.env.sh of the project folder and of each attached
+// folder (projects.js envFilesState), made with + and kept out of Git on request.
+ipcMain.handle('project-env-files', guarded((id) => projects.envFilesState(id)));
+ipcMain.handle('create-project-env-file', guarded((id, folderPath) => projects.createEnvFile(id, folderPath)));
+ipcMain.handle('exclude-project-env-file', guarded((id, folderPath) => projects.excludeEnvFile(id, folderPath)));
 ipcMain.handle('add-project-files', guarded((id, sourcePaths) => projects.addProjectFiles(id, sourcePaths)));
 ipcMain.handle('list-recent-project-files', guarded((id) => projects.listRecentProjectFiles(id)));
 ipcMain.handle('get-project-plan', guarded((id) => projects.readProjectPlan(id)));
@@ -2158,7 +2164,7 @@ function createPageWindow(kind, spec, { offset = 0, bounds: place = null, inacti
 // and whether it stays on top. They close with the main window. A tab's
 // window can move to another tab (switch-project-window-tab). 'note' is the
 // project's note.md (public/note-panel.js), in a smaller window.
-const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'settings', 'note']);
+const PROJECT_WINDOW_TABS = new Set(['overview', 'plan', 'todos', 'files', 'git', 'knowledge', 'env', 'settings', 'note']);
 // webview: the Git tab's Pull Requests can open a pull request's page in a panel.
 const PROJECT_WINDOW_SPEC = { title: 'Switchboard', width: 1000, height: 760, minWidth: 520, minHeight: 360, onTop: false, webview: true };
 const NOTE_WINDOW_SPEC = { title: 'Note', width: 560, height: 640, minWidth: 340, minHeight: 260, onTop: false };
@@ -3205,6 +3211,14 @@ async function adoptHcSessions() {
 
 ipcMain.handle('get-terminal-engine', () => terminalEngineStatus);
 
+// The startup files through which a terminal sources its environment files,
+// written into the data folder once per run (shell-env.js).
+let shellEnvWrappers = null;
+function shellEnvWrapperDir() {
+  if (!shellEnvWrappers) shellEnvWrappers = shellEnv.ensureWrappers(path.join(dbModule.DATA_DIR, 'shell-env'));
+  return shellEnvWrappers;
+}
+
 ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, sessionOptions) => {
   if (!mainWindow) return { ok: false, error: 'no window' };
   await sessionsReady;
@@ -3296,6 +3310,20 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       } catch (err) {
         log.error('[projects] launch context failed', err);
       }
+    }
+  }
+
+  // The local.env.sh files the session's shell sources before it starts: in
+  // the project folder only the project's, in an attached folder the
+  // project's and then the folder's (projects.envFilesFor). A file that
+  // cannot be read is logged and the session starts without it.
+  let envFiles = [];
+  const envProjectId = sessionOptions?.projectId || getMeta(sessionId)?.projectId || null;
+  if (envProjectId) {
+    try {
+      envFiles = await projects.envFilesFor(envProjectId, projectPath);
+    } catch (err) {
+      log.error('[projects] environment files failed', err);
     }
   }
 
@@ -3399,12 +3427,23 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.6.6', FORCE_COLOR: '3', ITERM_SESSION_ID: '1',
       };
       delete terminalEnv.CLAUDECODE;
-      ptyProcess = spawnSessionPty(shell, shellArgs(shell, undefined, shellExtraArgs), {
+      // The environment files are sourced at the end of the shell's own
+      // startup, through the startup files of shell-env.js.
+      let terminalLaunch = { args: shellArgs(shell, undefined, shellExtraArgs), env: terminalEnv, files: [] };
+      if (envFiles.length && !isWsl) {
+        try {
+          terminalLaunch = shellEnv.terminalEnvLaunch(shell, envFiles, { wrapperDir: shellEnvWrapperDir(), env: terminalEnv, args: terminalLaunch.args });
+          if (terminalLaunch.files.length) log.info(`[env] ${sessionId} sources ${terminalLaunch.files.join(', ')}`);
+        } catch (err) {
+          log.error('[env] terminal startup files failed', err);
+        }
+      }
+      ptyProcess = spawnSessionPty(shell, terminalLaunch.args, {
         name: 'xterm-256color',
         cols: 120,
         rows: 30,
         cwd: isWsl ? os.homedir() : projectPath,
-        env: terminalEnv,
+        env: terminalLaunch.env,
       }, {
         sid: sessionId, kind: 'terminal', shell: path.basename(shell), projectPath,
         projectId: sessionOptions?.projectId, trackId: sessionOptions?.trackId,
@@ -3444,6 +3483,15 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
           return { ok: false, error: 'preLaunchCmd must not contain newlines' };
         }
         claudeCmd = pre + ' ' + claudeCmd;
+      }
+
+      // The environment files come first, after the user's own startup files
+      // (-l -i) and ahead of preLaunchCmd, so its wrapper and the CLI both see
+      // the variables. Only bash, zsh and sh (envSourcePrefix).
+      const envPrefix = envSourcePrefix(shell, envFiles);
+      if (envPrefix) {
+        claudeCmd = envPrefix + claudeCmd;
+        log.info(`[env] ${sessionId} sources ${envFiles.join(', ')}`);
       }
 
       // Start MCP server for this session so Claude CLI sends diffs/file opens to Switchboard

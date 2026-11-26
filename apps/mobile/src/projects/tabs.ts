@@ -1,4 +1,4 @@
-export type ProjectTab = 'overview' | 'session' | 'plan' | 'todos' | 'files' | 'git' | 'knowledge' | 'settings';
+export type ProjectTab = 'overview' | 'session' | 'plan' | 'todos' | 'files' | 'git' | 'knowledge' | 'env' | 'settings';
 
 /**
  * The project page's tabs, in the desktop's order. Session shows the session
@@ -13,6 +13,8 @@ export const PROJECT_TABS: readonly { key: ProjectTab; label: string }[] = [
   { key: 'git', label: 'Git' },
   // The code graph of the attached folders (codebase-memory-mcp), when the computer offers it.
   { key: 'knowledge', label: 'Node Knowledge' },
+  // The local.env.sh of the project folder and of each attached folder, when the computer offers it.
+  { key: 'env', label: 'Env' },
   { key: 'settings', label: 'Settings' },
 ];
 

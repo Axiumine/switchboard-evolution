@@ -148,6 +148,12 @@ allow('edit-plan-item', [isId, isPlanFile, isLine, isItemText, isString(2000)], 
 allow('append-plan-item', [isId, isPlanFile, isItemText]);
 allow('create-project-file', [isId, oneOf('plan.md', 'plan-tracker.md', 'todos.md', 'memory.md', 'note.md'), optional(isString(2_000_000))]);
 allow('save-project-brief', [isId, isString(2_000_000)]);
+// The Env tab: the local.env.sh of the project folder and of each attached folder
+// (projects.js checks that the folder is one of the project's). Reading and saving
+// one goes through read-project-file and save-project-file.
+allow('project-env-files', [isId]);
+allow('create-project-env-file', [isId, isPath]);
+allow('exclude-project-env-file', [isId, isPath]);
 
 // Files, inside a project's folders only (remote-files.js), and Claude's plans to read and save.
 allow('list-recent-project-files', [isId]);

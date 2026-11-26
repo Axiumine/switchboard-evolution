@@ -3,11 +3,13 @@ import { expect, test } from '@jest/globals';
 import { chooseFolder, folderLabel, impactArgs, linkableFolders, worktreeNote } from '@/knowledge/model';
 import { KNOWLEDGE_VIEWS, parseKnowledgeView, parseTab, PROJECT_TABS } from '@/projects/tabs';
 
-test('the project page has Node Knowledge between Git and Settings', () => {
+test('the project page has Node Knowledge between Git and Env, and Env right before Settings', () => {
   const keys = PROJECT_TABS.map((t) => t.key);
   expect(keys.indexOf('knowledge')).toBe(keys.indexOf('git') + 1);
-  expect(keys.indexOf('settings')).toBe(keys.indexOf('knowledge') + 1);
+  expect(keys.indexOf('env')).toBe(keys.indexOf('knowledge') + 1);
+  expect(keys.indexOf('settings')).toBe(keys.indexOf('env') + 1);
   expect(parseTab('knowledge')).toBe('knowledge');
+  expect(parseTab('env')).toBe('env');
 });
 
 test('the phone has every view of the desktop but the Lens', () => {

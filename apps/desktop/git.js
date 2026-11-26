@@ -881,6 +881,39 @@ async function ignorePaths(dir, paths, { untrack = false } = {}) {
   return { patterns, untracked };
 }
 
+/**
+ * Whether Git ignores `name` in dir: true or false, null when dir is not in a
+ * repository (or Git cannot run). A tracked file is not ignored, as for
+ * `git check-ignore` itself.
+ */
+function isIgnored(dir, name) {
+  return new Promise(resolve => {
+    execFile('git', ['check-ignore', '-q', '--', name], { cwd: dir, env: gitEnv() }, err => {
+      if (!err) resolve(true);
+      else resolve(err.code === 1 ? false : null);
+    });
+  });
+}
+
+/**
+ * Ignore one file of dir in this clone only: an anchored line in the
+ * repository's info/exclude, which is never committed and is shared by its
+ * worktrees. Never twice. Returns { pattern, file }.
+ */
+async function excludeLocally(dir, name) {
+  const prefix = (await runRaw(['rev-parse', '--show-prefix'], dir)).trim();
+  const pattern = changeActions.ignorePattern(prefix + name, false);
+  const file = path.resolve(dir, await run(['rev-parse', '--git-path', 'info/exclude'], dir));
+  let text = '';
+  try { text = await fs.promises.readFile(file, 'utf8'); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  if (!text.split('\n').map(line => line.replace(/\r$/, '')).includes(pattern)) {
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    const lead = text && !text.endsWith('\n') ? '\n' : '';
+    await fs.promises.writeFile(file, `${text}${lead}${pattern}\n`);
+  }
+  return { pattern, file };
+}
+
 // --- Git Graph read functions ---------------------------------------------
 // Everything below is read-only (git-actions.js is where mutation lives).
 // Every call adds --no-optional-locks (never contend with a write in
@@ -1121,7 +1154,7 @@ module.exports = {
   parseWorktreeList, worktreeList, worktreeLock, worktreeUnlock, worktreeMove, worktreePrune, worktreeRepair,
   deleteBranch, isUnmergedBranchError, isValidBranchName, listBranches, mergedBranches, defaultBranch, lastCommit,
   worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status, unpushedCommits, parseLogWithStat,
-  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths, readEditableFile, saveEditedFile,
+  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths, isIgnored, excludeLocally, readEditableFile, saveEditedFile,
   tagExists, toGitPath, safeRelativePath,
   logWithParents, forEachRef, stashList, remoteList, configListIncludes,
   blobAtRevision, isShallowRepo, rootCommitHashes, userDetails,

@@ -132,6 +132,7 @@ What "an app of its own" means:
 - Attached folders can be detached from the Overview card (with an offer to remove the worktree) and trusted for Claude Code once.
 - At start, the project of the reopened session opens.
 - A **Note** for each project (its `note.md`, made empty when first opened), from the project's header and menu: the file editor in a panel floating over the app, moved and resized, that opens again where it was left and saves itself as you type. It can move to a window of its own (on the phone: a DeX or tablet window).
+- An **Env** tab before Settings, on the desktop and the phone: the `local.env.sh` of the project folder (every project starts with one) and of each attached folder (made with +), edited in place, with the rules of what loads where. Before a session or a terminal starts, its shell sources them after the user's own startup files: in the project folder only the project's file, in an attached folder the project's and then the folder's, so the folder wins. A file Git would commit is flagged, with "Ignore in this clone" (`.git/info/exclude`).
 
 ### 6. Task Manager and resources
 

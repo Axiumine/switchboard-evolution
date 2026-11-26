@@ -12,9 +12,11 @@ import { SwipeTabs } from '@/components/project/SwipeTabs';
 import { FilesTab } from '@/components/project/tabs/FilesTab';
 import { GitTab } from '@/components/project/tabs/GitTab';
 import { KnowledgeTab } from '@/components/project/tabs/KnowledgeTab';
+import { EnvTab } from '@/components/project/tabs/EnvTab';
 import { folderChips } from '@/files/model';
 import { useGitInfo } from '@/git/info-query';
 import { useKnowledgeSupported } from '@/knowledge/queries';
+import { useEnvSupported } from '@/env/queries';
 import { OverviewTab } from '@/components/project/tabs/OverviewTab';
 import { PlanTab } from '@/components/project/tabs/PlanTab';
 import { SessionTab } from '@/components/project/tabs/SessionTab';
@@ -62,7 +64,12 @@ export default function ProjectScreen() {
   const refresh = useCallback(() => Promise.all([refetch(), plan.refetch()]), [refetch, plan]);
   // Node Knowledge only when the computer offers it (a desktop older than it does not).
   const knowledge = useKnowledgeSupported();
-  const tabs = useMemo(() => PROJECT_TABS.filter(({ key }) => (key !== 'session' || !!sessionId) && (key !== 'knowledge' || knowledge)), [sessionId, knowledge]);
+  // Env too (useEnvSupported).
+  const env = useEnvSupported();
+  const tabs = useMemo(
+    () => PROJECT_TABS.filter(({ key }) => (key !== 'session' || !!sessionId) && (key !== 'knowledge' || knowledge) && (key !== 'env' || env)),
+    [sessionId, knowledge, env],
+  );
   // The folders button's chips: the branch git reports, else the one the project stored (what is cached is enough here).
   const gitInfo = useGitInfo(id, false);
   const chips = useMemo(() => (project ? folderChips(project, gitInfo.data?.repositories) : []), [project, gitInfo.data?.repositories]);
@@ -86,6 +93,7 @@ export default function ProjectScreen() {
     files: <FilesTab project={project} />,
     git: <GitTab project={project} active={tab === 'git'} />,
     knowledge: <KnowledgeTab project={project} active={tab === 'knowledge'} />,
+    env: <EnvTab project={project} active={tab === 'env'} />,
     settings: <SettingsTab project={project} now={now} run={run} onSelectTab={selectTab} />,
     session: sessionId ? (
       <SessionTab
