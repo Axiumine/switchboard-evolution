@@ -1,6 +1,6 @@
 {
   "name": "switchboard-mobile",
-  "version": "1.18.1",
+  "version": "1.18.2",
   "main": "index.ts",
   "dependencies": {
     "@codemirror/legacy-modes": "^6.5.5",
