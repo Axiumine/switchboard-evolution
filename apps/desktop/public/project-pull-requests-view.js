@@ -52,6 +52,8 @@ const PR_ICONS = {
 // Pull requests whose texts one request reads, and how many requests at once.
 const PR_TEXTS_BATCH = 20;
 const PR_TEXTS_PARALLEL = 2;
+// Diffs of files GitHub gave no patch for (prReadTextDiff) read at once, the others waiting.
+const PR_TEXT_DIFFS_PARALLEL = 3;
 // With the search or People on, a page of closed and merged ones holds this many.
 const PR_NARROWED_PAGE_SIZE = 100;
 
@@ -749,16 +751,54 @@ function prMultiPromptText(kind, rows) {
 
 const PR_STATUS_LETTERS = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
 
+/**
+ * True for a file GitHub gave no patch for that may be text all the same: git,
+ * and GitHub after it, takes a file with a NUL byte for binary, whatever its
+ * .gitattributes say. Its diff is read when it opens (prReadTextDiff).
+ */
+function prNeedsTextDiff(file) {
+  return !file.patch && !file.tooLarge && !(file.status === 'renamed' && !file.insertions && !file.deletions);
+}
+
+/** A file's diff: GitHub's patch, or the one read for it (file.textDiff), or why there is none. */
 function prPatchHtml(file) {
-  if (file.patch) {
+  const patch = file.patch || file.textDiff?.patch;
+  if (patch) {
     // The code in the editors' colours, by the file's language.
-    const lines = typeof gitDiffLines === 'function' ? gitDiffLines(file.patch, { filename: file.path }) : escapeHtml(file.patch);
+    const lines = typeof gitDiffLines === 'function' ? gitDiffLines(patch, { filename: file.path }) : escapeHtml(patch);
     return `<pre class="git-diff">${lines}</pre>`;
+  }
+  const read = file.textDiff;
+  if (read?.loading && prNeedsTextDiff(file)) return '<div class="pr-file-note"><span class="git-loading-dot"></span>Reading the file from GitHub…</div>';
+  if (read?.error && prNeedsTextDiff(file)) {
+    return `<div class="pr-file-note is-error"><span>${escapeHtml(read.error)}</span><button type="button" class="ws-btn ws-btn--sm" data-act="diff-retry">Retry</button></div>`;
   }
   let text = 'A binary file, or a diff GitHub does not show.';
   if (file.tooLarge) text = 'This pull request\'s diffs are too large to show them all here.';
   else if (file.status === 'renamed' && !file.insertions && !file.deletions) text = 'Renamed, nothing else changed.';
+  else if (read?.binary) text = 'A binary file.';
+  else if (read?.tooLarge) text = 'This file is too large to show its diff here.';
+  else if (read?.ok) text = 'Its text did not change.';
   return `<div class="pr-file-note">${escapeHtml(text)}</div>`;
+}
+
+/**
+ * Read a file's diff through `read` (a call of prApi), PR_TEXT_DIFFS_PARALLEL
+ * at once: Expand all can open many files GitHub gave no patch for.
+ */
+const prTextDiffQueue = { running: 0, waiting: [] };
+function prReadTextDiff(read) {
+  return new Promise((resolve) => {
+    const start = () => {
+      prTextDiffQueue.running++;
+      Promise.resolve().then(read).then(resolve, err => resolve({ error: err?.message || String(err) })).finally(() => {
+        prTextDiffQueue.running--;
+        prTextDiffQueue.waiting.shift()?.();
+      });
+    };
+    if (prTextDiffQueue.running < PR_TEXT_DIFFS_PARALLEL) start();
+    else prTextDiffQueue.waiting.push(start);
+  });
 }
 
 /** The tools over the files: Expand all and Collapse all, then Tree and List; icons, named in their tooltips. */
@@ -1374,6 +1414,8 @@ function prPaintFiles(project, state, repoPath, item, pr, slot) {
     retry: () => { data.files.delete(key); prPaintDetail(project, state, repoPath, item, pr); },
     onView: () => prRepaint(project, state, repoPath),
     onViewed: viewed ? (file, on) => prdToggleViewed(prdContext(project, state, repoPath, item, pr), file, on, openPaths) : null,
+    loadDiff: file => prReadTextDiff(() => prApi('getPullRequestFileDiff', project.id, repoPath,
+      prRemoteOpts(data, { number: pr.number, path: file.path, oldPath: file.oldPath || null, status: file.status }))),
   });
 }
 
@@ -1382,21 +1424,55 @@ function prPaintFiles(project, state, repoPath, item, pr, slot) {
  * folder closes, Expand all and Collapse all, Tree and List (`onView`), and
  * the Viewed boxes (`onViewed`). Used by Files changed and by each commit.
  */
-function prWireFiles(slot, entry, { openPaths, closedFolders, viewed = null, search = null, repaint, retry, onView, onViewed = null }) {
+function prWireFiles(slot, entry, { openPaths, closedFolders, viewed = null, search = null, repaint, retry, onView, onViewed = null, loadDiff = null }) {
   slot.innerHTML = prFilesHtml(entry, { open: openPaths, view: prFileView(), closedFolders, viewed, search });
   slot.querySelector('[data-act="files-retry"]')?.addEventListener('click', () => retry?.());
   const files = entry.files || [];
+  // A file GitHub gave no patch for: its diff is read (`loadDiff`) when it
+  // opens, kept on the file in entry.files, and painted when it comes, in
+  // whichever slot shows the files by then. `index` is the file's in `files`.
+  const paintDiff = (index) => {
+    const file = files[index];
+    const diff = slot.querySelector(`[data-diff="${index}"]`);
+    if (!file || !diff || diff.hidden) return;
+    diff.innerHTML = prPatchHtml(file);
+    diff.querySelector('[data-act="diff-retry"]')?.addEventListener('click', () => {
+      file.textDiff = null;
+      askDiff(index);
+      paintDiff(index);
+    });
+  };
+  const askDiff = (index) => {
+    const file = files[index];
+    if (!file || !loadDiff || !prNeedsTextDiff(file)) return;
+    if (!file.textDiff) {
+      file.textDiff = { loading: true };
+      file.textDiffRead = Promise.resolve(loadDiff(file)).then((result) => {
+        file.textDiff = result?.ok ? result : { error: result?.error || 'The diff could not be read.' };
+      });
+    }
+    if (file.textDiff.loading) file.textDiffRead.then(() => { if (slot.isConnected) paintDiff(index); });
+  };
   const setOpen = (button, open) => {
-    const file = files[Number(button.dataset.file)];
+    const index = Number(button.dataset.file);
+    const file = files[index];
     if (!file) return;
     if (open) openPaths.add(file.path); else openPaths.delete(file.path);
     button.classList.toggle('open', open);
     button.setAttribute('aria-expanded', String(open));
-    const diff = slot.querySelector(`[data-diff="${button.dataset.file}"]`);
+    const diff = slot.querySelector(`[data-diff="${index}"]`);
     if (!diff) return;
     diff.hidden = !open;
-    if (open && !diff.innerHTML) diff.innerHTML = prPatchHtml(file);
+    if (!open) return;
+    askDiff(index);
+    if (!diff.innerHTML || file.textDiff) paintDiff(index);
   };
+  files.forEach((file, index) => {
+    if (!openPaths.has(file.path) || !prNeedsTextDiff(file)) return;
+    const before = file.textDiff;
+    askDiff(index);
+    if (file.textDiff !== before || file.textDiff?.error) paintDiff(index);
+  });
   slot.querySelectorAll('.pr-file').forEach((button) => {
     button.onclick = () => setOpen(button, button.getAttribute('aria-expanded') !== 'true');
   });
@@ -2058,6 +2134,6 @@ if (typeof module !== 'undefined' && module.exports) {
     prTitleEditHtml, prTitleEditOf,
     prRepoTagHtml, prShownRepos, prIsShown, prItemSelector, prItemSelectorFor, prMergeRepoViews, prMultiViewKey, prMultiFooterHtml, prMultiListHtml, prMultiSummaryText,
     prRemotesButtonHtml, prRemotesMenuItems, prMultiPromptText, prLoadMorePages, prMultiEntries, prSearchStatusFor,
-    prPatchHtml, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,
+    prPatchHtml, prNeedsTextDiff, prReadTextDiff, prWireFiles, prMergeDialogHtml, prMergeParams, prConfirmHtml, prBadgesHtml, prSummaryText, prErrorHtml, prRepoData, prEmptyPage,
   };
 }

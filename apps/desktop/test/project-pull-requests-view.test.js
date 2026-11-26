@@ -568,3 +568,123 @@ test('the search reads the texts it needs, 20 pull requests a request and two re
   ctx.prSearchEnsure(project, state, '/code/widgets', ctx.prShownView(data, state));
   assert.deepEqual(asked[2].length, 5);
 });
+
+// --- Diffs GitHub does not give ---
+
+/** Enough of a DOM for prWireFiles: the file buttons and the diff slots its HTML holds. */
+function fakeFilesSlot() {
+  const slot = { isConnected: true, buttons: [], diffs: new Map() };
+  let html = '';
+  const fakeButton = (index, expanded) => {
+    const attrs = { 'aria-expanded': expanded };
+    return { dataset: { file: index }, classList: { toggle() {} }, setAttribute: (k, v) => { attrs[k] = v; }, getAttribute: k => attrs[k], onclick: null };
+  };
+  const fakeDiff = (hidden) => {
+    const diff = { hidden, innerHTML: hidden ? '' : 'painted with the files', retry: null };
+    diff.querySelector = sel => (sel === '[data-act="diff-retry"]' && diff.innerHTML.includes('data-act="diff-retry"')
+      ? { addEventListener: (_type, fn) => { diff.retry = fn; } } : null);
+    return diff;
+  };
+  Object.defineProperty(slot, 'innerHTML', {
+    get: () => html,
+    set: (value) => {
+      html = value;
+      slot.buttons = [...value.matchAll(/class="pr-file[^"]*" data-file="(\d+)" aria-expanded="(true|false)"/g)].map(m => fakeButton(m[1], m[2]));
+      slot.diffs = new Map([...value.matchAll(/data-diff="(\d+)"( hidden)?>/g)].map(m => [m[1], fakeDiff(!!m[2])]));
+    },
+  });
+  slot.querySelector = (sel) => {
+    const m = /^\[data-diff="(\d+)"\]$/.exec(sel);
+    return m ? slot.diffs.get(m[1]) || null : null;
+  };
+  slot.querySelectorAll = sel => (sel === '.pr-file' ? slot.buttons : []);
+  return slot;
+}
+
+const NO_PATCH = () => ({ files: [
+  { path: 'prompts/system.txt', oldPath: null, status: 'modified', insertions: 0, deletions: 0, patch: null },
+  { path: 'src/app.js', oldPath: null, status: 'modified', insertions: 1, deletions: 1, patch: '@@ -1 +1 @@\n-a\n+b' },
+] });
+
+test('a file GitHub gave no patch for shows the diff read for it, or why there is none', () => {
+  const ctx = loadContext();
+  const file = textDiff => ({ path: 'p.txt', status: 'modified', insertions: 0, deletions: 0, patch: null, textDiff });
+  assert.equal(ctx.prNeedsTextDiff(FILES.files[0]), false, 'GitHub gave its patch');
+  assert.equal(ctx.prNeedsTextDiff(FILES.files[1]), false, 'only renamed');
+  assert.equal(ctx.prNeedsTextDiff(FILES.files[2]), true);
+  assert.equal(ctx.prNeedsTextDiff(FILES.files[3]), false, 'too large');
+  assert.match(ctx.prPatchHtml(file(undefined)), /A binary file, or a diff GitHub does not show/);
+  assert.match(ctx.prPatchHtml(file({ loading: true })), /git-loading-dot.*Reading the file from GitHub/);
+  assert.match(ctx.prPatchHtml(file({ ok: true, patch: '@@ -1 +1 @@\n-a␀\n+b␀' })), /<pre class="git-diff">.*␀/s);
+  assert.match(ctx.prPatchHtml(file({ ok: true, binary: true })), />A binary file\.</);
+  assert.match(ctx.prPatchHtml(file({ ok: true, tooLarge: true })), /This file is too large/);
+  assert.match(ctx.prPatchHtml(file({ ok: true, patch: '' })), /Its text did not change/);
+  assert.match(ctx.prPatchHtml(file({ error: 'HTTP <502>' })), /is-error.*HTTP &lt;502&gt;.*data-act="diff-retry"/s);
+});
+
+test('it reads that diff when the file opens, once, and paints it when it comes', async () => {
+  const ctx = loadContext();
+  const entry = NO_PATCH();
+  const asked = [];
+  let answer = null;
+  const loadDiff = (f) => { asked.push(f.path); return new Promise((resolve) => { answer = resolve; }); };
+  const openPaths = new Set();
+  const slot = fakeFilesSlot();
+  const wire = () => ctx.prWireFiles(slot, entry, { openPaths, closedFolders: new Set(), loadDiff });
+  wire();
+  assert.deepEqual(asked, [], 'nothing is read before a file opens');
+  const button = () => slot.buttons.find(b => b.dataset.file === '0');
+  button().onclick();
+  assert.deepEqual(asked, ['prompts/system.txt']);
+  assert.match(slot.diffs.get('0').innerHTML, /Reading the file from GitHub/);
+  answer({ ok: true, patch: '@@ -1 +1 @@\n-x␀\n+y␀' });
+  await tick();
+  assert.match(slot.diffs.get('0').innerHTML, /<pre class="git-diff">/);
+  // Closed and opened again, or the files painted again: it is not read again.
+  button().onclick();
+  button().onclick();
+  wire();
+  assert.match(slot.innerHTML, /data-diff="0"><pre class="git-diff">/);
+  // A file GitHub gave its patch for is never read.
+  slot.buttons.find(b => b.dataset.file === '1').onclick();
+  assert.deepEqual(asked, ['prompts/system.txt']);
+});
+
+test('Expand all reads the diffs of the files it opens; one that failed says why and reads again on Retry', async () => {
+  const ctx = loadContext();
+  const entry = NO_PATCH();
+  const answers = [{ error: 'HTTP 502' }, { ok: true, binary: true }];
+  let asked = 0;
+  const loadDiff = async () => answers[asked++];
+  const slot = fakeFilesSlot();
+  ctx.prWireFiles(slot, entry, { openPaths: new Set(['prompts/system.txt', 'src/app.js']), closedFolders: new Set(), loadDiff });
+  assert.equal(asked, 1);
+  assert.match(slot.diffs.get('0').innerHTML, /Reading the file from GitHub/);
+  await tick();
+  const diff = slot.diffs.get('0');
+  assert.match(diff.innerHTML, /HTTP 502/);
+  diff.retry();
+  await tick();
+  assert.equal(asked, 2);
+  assert.match(diff.innerHTML, />A binary file\.</);
+});
+
+test('at most three of those diffs are read at once', async () => {
+  const ctx = loadContext();
+  let running = 0;
+  let most = 0;
+  const ends = [];
+  const read = () => new Promise((resolve) => {
+    running++;
+    most = Math.max(most, running);
+    ends.push(() => { running--; resolve({ ok: true }); });
+  });
+  const all = Array.from({ length: 7 }, () => ctx.prReadTextDiff(read));
+  await tick();
+  assert.equal(ends.length, 3);
+  let done = 0;
+  while (ends.length) { ends.shift()(); done++; await tick(); }
+  assert.equal((await Promise.all(all)).length, 7);
+  assert.equal(done, 7);
+  assert.equal(most, 3);
+});

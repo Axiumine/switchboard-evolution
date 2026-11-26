@@ -25,6 +25,7 @@ const { ENV_FILE_NAME, ENV_FILE_TEMPLATE } = require('./public/env-files-model')
 const gitGraphService = require('./git-graph-service');
 const pullRequests = require('./pull-requests');
 const pullRequestDetail = require('./pull-request-detail');
+const pullRequestFileDiff = require('./pull-request-file-diff');
 const pullRequestSearch = require('./pull-request-search');
 const pullRequestEdits = require('./pull-request-edits');
 const actions = require('./actions');
@@ -2323,6 +2324,12 @@ async function projectPullRequestFiles(projectId, folderPath, opts) {
   return pullRequests.files(folder.path, opts || {});
 }
 
+/** The diff of one file GitHub gave no patch for (a pull request's or a commit's), when its text can be compared. */
+async function projectPullRequestFileDiff(projectId, folderPath, opts) {
+  const folder = requireAttachedFolder(projectId, folderPath);
+  return pullRequestFileDiff.textDiff(folder.path, opts || {});
+}
+
 /** Merge, convert to draft, mark ready or close: pull-requests.js allows only those. */
 async function runProjectPullRequestAction(projectId, folderPath, params) {
   const folder = requireAttachedFolder(projectId, folderPath);
@@ -2433,7 +2440,7 @@ module.exports = {
   exportProjectGitGraphRepoConfig, projectGitGraphUserDetails,
   projectGitGraphRemotes, projectGitGraphTagDetails, projectGitGraphAvatarUrl,
   runProjectGitGraphAction, cancelProjectGitGraphAction,
-  projectPullRequests, projectPullRequestsPage, projectPullRequestFiles, runProjectPullRequestAction,
+  projectPullRequests, projectPullRequestsPage, projectPullRequestFiles, projectPullRequestFileDiff, runProjectPullRequestAction,
   projectActionsWorkflows, projectActionsRuns, projectActionsRun, projectActionsJob, projectActionsStepLog, projectActionsJobLog,
   projectActionsWorkflowFile, projectActionsDispatchForm, projectActionsRefs,
   projectActionsCaches, projectActionsRunners, projectActionsDeployments,

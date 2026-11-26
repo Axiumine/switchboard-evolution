@@ -154,6 +154,7 @@ async function openFileExternally(filePath, projectRoot, shell) {
 }
 
 module.exports = {
+  BINARY_EXTENSIONS,
   MAX_PREVIEW_BYTES,
   MAX_MEDIA_PREVIEW_BYTES,
   isViewableFile,

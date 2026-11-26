@@ -765,6 +765,7 @@ ipcMain.handle('save-git-graph-archive', guarded(async (id, folderPath, opts = {
 ipcMain.handle('get-pull-requests', guarded((id, folderPath, opts) => projects.projectPullRequests(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('get-pull-requests-page', guarded((id, folderPath, opts) => projects.projectPullRequestsPage(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('get-pull-request-files', guarded((id, folderPath, opts) => projects.projectPullRequestFiles(id, String(folderPath || ''), opts || {})));
+ipcMain.handle('get-pull-request-file-diff', guarded((id, folderPath, opts) => projects.projectPullRequestFileDiff(id, String(folderPath || ''), opts || {})));
 ipcMain.handle('run-pull-request-action', guarded((id, folderPath, params) => projects.runProjectPullRequestAction(id, String(folderPath || ''), params || {})));
 // What an open pull request shows: its conversation, commits, checks and viewed files, and what its editors need.
 ipcMain.handle('get-pull-request-conversation', guarded((id, folderPath, opts) => projects.projectPullRequestConversation(id, String(folderPath || ''), opts || {})));
