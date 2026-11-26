@@ -667,6 +667,123 @@ test('launchContext adds the project folder and every attached folder the cwd is
   } finally { t.cleanup(); }
 });
 
+test('a new project starts with local.env.sh; a template\'s own one is kept', async () => {
+  const t = setup();
+  const tplRoot = tmpDir('switchboard-tpl-');
+  try {
+    const { project } = await projects.createProject({ name: 'Env basics' });
+    const text = fs.readFileSync(path.join(project.root, 'local.env.sh'), 'utf8');
+    assert.equal(text, '#!/bin/bash\n\n\n');
+    assert.equal(text.split('\n')[0], '#!/bin/bash', 'the shebang is the first line');
+
+    fs.mkdirSync(path.join(tplRoot, 'withenv'));
+    fs.writeFileSync(path.join(tplRoot, 'withenv', 'template.json'), JSON.stringify({ name: 'With env', tracks: [] }));
+    fs.writeFileSync(path.join(tplRoot, 'withenv', 'local.env.sh'), '#!/bin/bash\nexport FROM_TEMPLATE=1\n');
+    projects.init({ db: t.db, log: { info() {}, error() {} }, buildProjectsFromCache: () => [], notifyRendererProjectsChanged() {}, templatesDir: tplRoot });
+    const { project: fromTemplate } = await projects.createProject({ name: 'Templated', template: 'withenv' });
+    assert.equal(fs.readFileSync(path.join(fromTemplate.root, 'local.env.sh'), 'utf8'), '#!/bin/bash\nexport FROM_TEMPLATE=1\n');
+  } finally { rm(tplRoot); t.cleanup(); }
+});
+
+test('the startup pass gives an older project its local.env.sh and leaves an edited one alone', async () => {
+  const t = setup();
+  try {
+    const { project: older } = await projects.createProject({ name: 'Older' });
+    const { project: edited } = await projects.createProject({ name: 'Edited' });
+    fs.rmSync(path.join(older.root, 'local.env.sh'));
+    fs.writeFileSync(path.join(edited.root, 'local.env.sh'), '#!/bin/bash\nexport MINE=1\n');
+    t.db.rows.projects.push({ id: 'gone', name: 'Gone', slug: 'gone', root: path.join(t.root, 'not-on-disk') });
+    await projects.syncAllProjectBriefs();
+    assert.equal(fs.readFileSync(path.join(older.root, 'local.env.sh'), 'utf8'), '#!/bin/bash\n\n\n');
+    assert.equal(fs.readFileSync(path.join(edited.root, 'local.env.sh'), 'utf8'), '#!/bin/bash\nexport MINE=1\n');
+    assert.ok(!fs.existsSync(path.join(t.root, 'not-on-disk')), 'a missing project folder is not made');
+  } finally { t.cleanup(); }
+});
+
+test('envFilesFor: the project folder loads only its own file, an attached folder the project\'s and then its own', async () => {
+  const t = setup();
+  const a = tmpDir('switchboard-repo-a-');
+  const b = tmpDir('switchboard-repo-b-');
+  const c = tmpDir('switchboard-repo-c-');
+  try {
+    const { project } = await projects.createProject({ name: 'Layers', folders: [{ path: a }, { path: b }, { path: c }] });
+    const R = project.root;
+    const env = (dir) => path.join(dir, 'local.env.sh');
+    for (const dir of [a, b]) fs.writeFileSync(env(dir), '#!/bin/bash\n');
+    fs.mkdirSync(path.join(R, 'notes'));
+    fs.mkdirSync(path.join(a, 'src', 'deep'), { recursive: true });
+
+    assert.deepEqual(await projects.envFilesFor(project.id, R), [env(R)], 'the project folder: only the project, even with three folders that have one');
+    assert.deepEqual(await projects.envFilesFor(project.id, path.join(R, 'notes')), [env(R)], 'a plain folder inside the project folder');
+    assert.deepEqual(await projects.envFilesFor(project.id, null), [env(R)], 'no cwd is the project folder');
+    assert.deepEqual(await projects.envFilesFor(project.id, a), [env(R), env(a)], 'a folder: the project, then the folder');
+    assert.deepEqual(await projects.envFilesFor(project.id, path.join(a, 'src', 'deep')), [env(R), env(a)], 'inside a folder');
+    assert.deepEqual(await projects.envFilesFor(project.id, b), [env(R), env(b)]);
+    assert.deepEqual(await projects.envFilesFor(project.id, c), [env(R)], 'a folder without a file: only the project');
+
+    fs.rmSync(env(R));
+    assert.deepEqual(await projects.envFilesFor(project.id, a), [env(a)], 'only the files that exist');
+    assert.deepEqual(await projects.envFilesFor(project.id, R), []);
+    assert.deepEqual(await projects.envFilesFor('nope', R), []);
+  } finally { rm(a); rm(b); rm(c); t.cleanup(); }
+});
+
+test('envFilesFor: a worktree under repos/ is a folder of its own; one made outside the repository uses the repository\'s file', { skip: !haveGit && 'git not installed' }, async () => {
+  const t = setup();
+  const repo = makeRepo();
+  const source = makeRepo('switchboard-repo-src-');
+  const outside = path.join(tmpDir('switchboard-wt-'), 'feature');
+  try {
+    const { project } = await projects.createProject({ name: 'Trees', folders: [{ path: repo }] });
+    const { project: withWorktree } = await projects.createProject({ name: 'Checked out', folders: [{ path: source, mode: 'worktree' }] });
+    const env = (dir) => path.join(dir, 'local.env.sh');
+    fs.writeFileSync(env(repo), '#!/bin/bash\n');
+    gitIn(repo, 'worktree', 'add', '-q', '-b', 'feature', outside);
+    assert.deepEqual(await projects.envFilesFor(project.id, outside), [env(project.root), env(repo)], 'a worktree next to the repository');
+    assert.deepEqual(await projects.envFilesFor(project.id, path.join(os.tmpdir(), 'switchboard-nowhere')), [env(project.root)], 'somewhere else: only the project');
+
+    const wt = withWorktree.folders[0].path;
+    assert.ok(wt.startsWith(path.join(withWorktree.root, 'repos')), 'checked out inside the project folder');
+    fs.writeFileSync(env(wt), '#!/bin/bash\n');
+    assert.deepEqual(await projects.envFilesFor(withWorktree.id, wt), [env(withWorktree.root), env(wt)]);
+    assert.deepEqual(await projects.envFilesFor(withWorktree.id, withWorktree.root), [env(withWorktree.root)]);
+  } finally { rm(path.dirname(outside)); rm(repo); rm(source); t.cleanup(); }
+});
+
+test('the Env tab\'s list, making a file with + and keeping it out of Git in this clone', { skip: !haveGit && 'git not installed' }, async () => {
+  const t = setup();
+  const repo = makeRepo();
+  const plain = tmpDir('switchboard-plain-');
+  try {
+    const { project } = await projects.createProject({ name: 'Env tab', folders: [{ path: repo }, { path: plain }] });
+    let state = await projects.envFilesState(project.id);
+    assert.equal(state.fileName, 'local.env.sh');
+    assert.deepEqual(state.entries.map(e => [e.path, e.kind, e.exists, e.gitIgnored]), [
+      [project.root, 'project', true, null],
+      [repo, 'folder', false, false],
+      [plain, 'folder', false, null],
+    ]);
+
+    const made = projects.createEnvFile(project.id, repo);
+    assert.equal(made.ok, true);
+    assert.equal(fs.readFileSync(made.filePath, 'utf8'), '#!/bin/bash\n\n\n');
+    assert.match(projects.createEnvFile(project.id, repo).error, /already exists/);
+    assert.match(projects.createEnvFile(project.id, os.tmpdir()).error, /Not the project folder/);
+    assert.match(projects.createEnvFile('nope', repo).error, /Project not found/);
+
+    const excluded = await projects.excludeEnvFile(project.id, repo);
+    assert.equal(excluded.pattern, '/local.env.sh');
+    await projects.excludeEnvFile(project.id, repo);
+    const exclude = fs.readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf8');
+    assert.equal(exclude.split('\n').filter(line => line === '/local.env.sh').length, 1, 'never twice');
+    assert.equal(gitIn(repo, 'status', '--porcelain'), '', 'nothing to commit');
+    state = await projects.envFilesState(project.id);
+    assert.deepEqual(state.entries[1].exists, true);
+    assert.deepEqual(state.entries[1].gitIgnored, true);
+    assert.match((await projects.excludeEnvFile(project.id, '/elsewhere')).error, /Not the project folder/);
+  } finally { rm(repo); rm(plain); t.cleanup(); }
+});
+
 test('project instructions stay in the project root and leave worktree instructions and ignore rules untouched', { skip: !haveGit && 'git not installed' }, async () => {
   const t = setup();
   const repo = makeRepo();

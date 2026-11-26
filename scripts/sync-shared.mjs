@@ -37,6 +37,7 @@ const modules = {
   'action-icons.js': 'apps/desktop/public/action-icons.js',
   'pinned-order.js': 'apps/desktop/public/pinned-order.js',
   'command-catalog-model.js': 'apps/desktop/public/command-catalog-model.js',
+  'env-files-model.js': 'apps/desktop/public/env-files-model.js',
 };
 
 const header = (file) =>

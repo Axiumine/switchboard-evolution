@@ -21,6 +21,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
+const { ENV_FILE_NAME, ENV_FILE_TEMPLATE } = require('./public/env-files-model');
 const gitGraphService = require('./git-graph-service');
 const pullRequests = require('./pull-requests');
 const pullRequestDetail = require('./pull-request-detail');
@@ -256,10 +257,15 @@ function writeIfMissing(filePath, content) {
   return true;
 }
 
-/** Only the brief is written up front; plan, tracker, todos and memory are the agent's to create. */
+/**
+ * Only the brief and the environment file are written up front; plan,
+ * tracker, todos and memory are the agent's to create. A template's own
+ * local.env.sh is kept.
+ */
 function writeProjectFiles(root, name, folderPaths, header = null) {
   const brief = defaultBrief(name, root, folderPaths, header);
   for (const file of BRIEF_FILES) writeIfMissing(path.join(root, file), brief);
+  writeIfMissing(path.join(root, ENV_FILE_NAME), ENV_FILE_TEMPLATE);
 }
 
 // --- Templates ---
@@ -433,7 +439,7 @@ const RECENT_FILES_MAX_ENTRIES = 5000;
 /**
  * The newest files in the project folder, by when each was created, so a plan
  * edited every hour does not crowd out a file added today. Skips the briefs
- * every project starts with, attached repositories under repos/, hidden
+ * and the local.env.sh every project starts with, attached repositories under repos/, hidden
  * entries and dependency folders. Symlinks are not followed.
  */
 function listRecentProjectFiles(projectId, limit = 5) {
@@ -453,7 +459,7 @@ function listRecentProjectFiles(projectId, limit = 5) {
       if (entry.isDirectory()) {
         if ((!rel && entry.name === REPOS_DIR) || ENV_SKIP_DIRS.has(entry.name) || depth >= RECENT_FILES_MAX_DEPTH) continue;
         walk(childRel, depth + 1);
-      } else if (entry.isFile() && !(!rel && BRIEF_FILES.includes(entry.name))) {
+      } else if (entry.isFile() && !(!rel && (BRIEF_FILES.includes(entry.name) || entry.name === ENV_FILE_NAME))) {
         let stat;
         try { stat = fs.lstatSync(path.join(root, childRel)); } catch { continue; }
         // Filesystems that do not record creation time report 0; use mtime there.
@@ -616,7 +622,8 @@ async function syncProjectBrief(projectId) {
  * Bring every project's brief up to date at startup, so a Switchboard upgrade
  * that changes the working rules reaches projects that already exist. Each
  * file is only written when its text actually changed, so this is normally a
- * no-op.
+ * no-op. A project made before environment files existed gets its
+ * local.env.sh here; one that has it is never touched.
  */
 async function syncAllProjectBriefs() {
   let projectList = [];
@@ -628,6 +635,131 @@ async function syncAllProjectBriefs() {
     try { await syncProjectBrief(project.id); } catch (err) {
       log.error?.(`[projects] could not sync the brief for ${project.name}`, err);
     }
+    try { ensureProjectEnvFile(project); } catch (err) {
+      log.error?.(`[projects] could not create ${ENV_FILE_NAME} for ${project.name}`, err);
+    }
+  }
+}
+
+// --- Environment files ---
+//
+// Every project folder has a local.env.sh and an attached folder can have one
+// of its own (env-files-model.js). Before a session or a terminal starts, its
+// shell sources the ones envFilesFor() lists (main.js open-terminal).
+
+/** Write the project folder's local.env.sh when it is missing; never creates the folder. */
+function ensureProjectEnvFile(project) {
+  if (!project?.root || !isDirectory(project.root)) return false;
+  return writeIfMissing(path.join(project.root, ENV_FILE_NAME), ENV_FILE_TEMPLATE);
+}
+
+function isFile(p) {
+  try { return fs.statSync(p).isFile(); } catch { return false; }
+}
+
+/** The project folder, then each attached folder in its order, once each: where an environment file can be. */
+function envFileDirs(project) {
+  const dirs = [{ path: project.root, kind: 'project' }];
+  const seen = new Set([realOrResolved(project.root)]);
+  for (const folder of db.listProjectFolders(project.id)) {
+    const real = realOrResolved(folder.path);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    dirs.push({ path: folder.path, kind: folder.mode === 'worktree' ? 'worktree' : 'folder' });
+  }
+  return dirs;
+}
+
+/**
+ * The attached folder an outside worktree belongs to (one made in the
+ * Worktrees tab next to the repository): the folder of the same repository,
+ * the checkout itself before another worktree of it. Empty when there is none.
+ */
+async function worktreeOwner(realCwd, folders) {
+  let common;
+  try { common = realOrResolved(await git.gitCommonDir(realCwd)); } catch { return []; }
+  const owners = [];
+  for (const folder of folders) {
+    try {
+      if (realOrResolved(await git.gitCommonDir(folder.path)) === common) owners.push(folder);
+    } catch {}
+  }
+  owners.sort((a, b) => (a.mode === 'worktree') - (b.mode === 'worktree'));
+  return owners.slice(0, 1);
+}
+
+/**
+ * The environment files a session started in cwd sources, in order, only the
+ * ones that exist. In the project folder (or a folder inside it that is not
+ * attached): only the project's. In an attached folder: the project's, then
+ * that folder's, from the outermost when attached folders nest, so the
+ * innermost wins. A worktree made outside its repository counts as the
+ * repository's folder.
+ */
+async function envFilesFor(projectId, cwd) {
+  const project = db.getProject(projectId);
+  if (!project) return [];
+  const real = realOrResolved(cwd || project.root);
+  const folders = db.listProjectFolders(projectId);
+  let owners = folders.filter(folder => isInside(real, realOrResolved(folder.path)));
+  if (!owners.length && !isInside(real, realOrResolved(project.root))) owners = await worktreeOwner(real, folders);
+  owners.sort((a, b) => realOrResolved(a.path).length - realOrResolved(b.path).length);
+  const files = [];
+  const seen = new Set();
+  for (const dir of [project.root, ...owners.map(folder => folder.path)]) {
+    const filePath = path.join(dir, ENV_FILE_NAME);
+    const key = realOrResolved(filePath);
+    if (seen.has(key) || !isFile(filePath)) continue;
+    seen.add(key);
+    files.push(filePath);
+  }
+  return files;
+}
+
+/**
+ * The Env tab's list: the project folder and each attached folder, with its
+ * file, whether that exists, and whether Git ignores it (null outside a
+ * repository), since a file of secrets in a repository could be committed.
+ */
+async function envFilesState(projectId) {
+  const project = db.getProject(projectId);
+  if (!project) return { error: 'Project not found' };
+  const entries = await Promise.all(envFileDirs(project).map(async dir => {
+    const filePath = path.join(dir.path, ENV_FILE_NAME);
+    return { ...dir, filePath, exists: isFile(filePath), gitIgnored: await git.isIgnored(dir.path, ENV_FILE_NAME) };
+  }));
+  return { ok: true, fileName: ENV_FILE_NAME, entries };
+}
+
+function envFileDir(projectId, folderPath) {
+  const project = db.getProject(projectId);
+  if (!project) return { error: 'Project not found' };
+  const dir = typeof folderPath === 'string' ? envFileDirs(project).find(item => item.path === folderPath) : null;
+  if (!dir) return { error: 'Not the project folder or one of its folders' };
+  return { dir };
+}
+
+/** Make the local.env.sh of the project folder or of an attached folder, from the template; never over one. */
+function createEnvFile(projectId, folderPath) {
+  const { dir, error } = envFileDir(projectId, folderPath);
+  if (error) return { error };
+  const filePath = path.join(dir.path, ENV_FILE_NAME);
+  try {
+    fs.writeFileSync(filePath, ENV_FILE_TEMPLATE, { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    return { error: err.code === 'EEXIST' ? `${ENV_FILE_NAME} already exists` : `Could not create ${ENV_FILE_NAME}: ${err.message}` };
+  }
+  return { ok: true, filePath };
+}
+
+/** Keep a folder's local.env.sh out of Git in this clone only (info/exclude), when the user asks. */
+async function excludeEnvFile(projectId, folderPath) {
+  const { dir, error } = envFileDir(projectId, folderPath);
+  if (error) return { error };
+  try {
+    return { ok: true, ...(await git.excludeLocally(dir.path, ENV_FILE_NAME)) };
+  } catch (err) {
+    return { error: `Could not exclude ${ENV_FILE_NAME}: ${err.message}` };
   }
 }
 
@@ -2312,6 +2444,7 @@ module.exports = {
   editProjectPullRequest,
   syncProjectBrief, syncAllProjectBriefs, saveBrief, createProjectFile, addProjectFiles, addProjectFileBytes, listAddedFiles, listRecentProjectFiles,
   launchContext, mergeAddDirs, worktreeParentFor,
+  envFilesFor, envFilesState, createEnvFile, excludeEnvFile, ensureProjectEnvFile, ENV_FILE_NAME,
   PROJECT_FILES, ADDED_FILES_DIR,
   readProjectPlan, setPlanItem, appendPlanItem, recordPlanLink, adoptPlan,
   initPlanWatch, refreshPlanWatchers, stopPlanWatchers,

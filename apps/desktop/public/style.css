@@ -7912,6 +7912,120 @@ div.git-file-row.tree { padding: 4px 8px 4px calc(10px + var(--depth, 0) * 14px)
   min-height: 0;
 }
 
+/* ========== PROJECT PAGE: ENV TAB ========== */
+/* The Files tab's layout: the folders' local.env.sh on the left, the editor on the right. */
+.ws-env-rules {
+  margin: 8px 8px 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  color: #9a9ab0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+.ws-env-rules::-webkit-scrollbar,
+.ws-env-list::-webkit-scrollbar { width: 5px; }
+.ws-env-rules::-webkit-scrollbar-track,
+.ws-env-list::-webkit-scrollbar-track { background: transparent; }
+.ws-env-rules::-webkit-scrollbar-thumb,
+.ws-env-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+.ws-env-rules summary { cursor: pointer; color: #c8c8dc; font-size: 12px; font-weight: 600; }
+.ws-env-rules summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.ws-env-rules ul { margin: 6px 0 0; padding-left: 16px; }
+.ws-env-rules li + li { margin-top: 4px; }
+.ws-env-error {
+  margin: 4px 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(220,80,80,0.12);
+  color: #f0a8a8;
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+.ws-env-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px 8px;
+}
+.ws-env-empty { padding: 6px 8px; }
+.ws-env-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: 7px;
+}
+.ws-env-row:hover { background: rgba(255,255,255,0.04); }
+.ws-env-row.selected { background: rgb(from var(--accent) r g b / 0.14); }
+.ws-env-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: #b0b0c4;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-env-open:disabled { cursor: default; }
+.ws-env-open:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ws-env-icon { display: inline-flex; flex-shrink: 0; color: var(--accent); }
+.ws-env-row.missing .ws-env-icon { color: #6a6a80; }
+.ws-env-text { display: flex; flex-direction: column; min-width: 0; }
+.ws-env-label { color: #d0d0e8; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-env-row.missing .ws-env-label { color: #9a9ab0; }
+.ws-env-file { color: #7a7a90; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-env-create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  color: #c0c0d8;
+  cursor: pointer;
+}
+.ws-env-create:hover { color: #fff; background: rgb(from var(--accent) r g b / 0.25); border-color: rgb(from var(--accent) r g b / 0.5); }
+.ws-env-create:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.ws-env-create:disabled { opacity: 0.5; cursor: default; }
+.ws-env-warn {
+  grid-column: 1 / -1;
+  margin: 0 8px 6px 30px;
+  color: #e0b870;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.ws-env-exclude {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border: 1px solid rgba(224,184,112,0.4);
+  border-radius: 5px;
+  background: none;
+  color: #e8cc94;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ws-env-exclude:hover { background: rgba(224,184,112,0.12); }
+.ws-env-exclude:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.ws-env-area { display: flex; flex-direction: column; gap: 6px; }
+.ws-env-area > .ws-editor { flex: 1; min-height: 0; }
+.ws-env-order { padding: 0 4px; color: #8a8aa0; font-size: 11.5px; }
+
 /* ========== PROJECT PAGE: PLAN AND TODOS TABS ========== */
 /* One card per tab (the phases, or the todos), as wide as reads well. */
 .ws-plan {

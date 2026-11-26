@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import type { Rename } from '@/components/project/actions';
 import { FilesTab } from '@/components/project/tabs/FilesTab';
 import { GitTab } from '@/components/project/tabs/GitTab';
+import { EnvTab } from '@/components/project/tabs/EnvTab';
 import { KnowledgeTab } from '@/components/project/tabs/KnowledgeTab';
 import { OverviewTab } from '@/components/project/tabs/OverviewTab';
 import { PlanTab } from '@/components/project/tabs/PlanTab';
@@ -44,6 +45,7 @@ export function ProjectWindow({ projectId, tab, onTab }: { projectId: string; ta
     files: <FilesTab project={project} />,
     git: <GitTab project={project} active={tab === 'git'} />,
     knowledge: <KnowledgeTab project={project} active={tab === 'knowledge'} />,
+    env: <EnvTab project={project} active={tab === 'env'} />,
     // Another tab chosen from here shows in this window; Session stays in the main one.
     settings: <SettingsTab project={project} now={now} run={run} onSelectTab={(next) => { if (next !== 'session') onTab(next); }} />,
   };

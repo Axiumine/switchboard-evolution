@@ -37,7 +37,7 @@ describe('parseGitView', () => {
 
 describe('PROJECT_TABS', () => {
   it('lists the eight tabs in the desktop order', () => {
-    expect(PROJECT_TABS.map((t) => t.label)).toEqual(['Overview', 'Session', 'Plan', 'Todos', 'Files', 'Git', 'Node Knowledge', 'Settings']);
+    expect(PROJECT_TABS.map((t) => t.label)).toEqual(['Overview', 'Session', 'Plan', 'Todos', 'Files', 'Git', 'Node Knowledge', 'Env', 'Settings']);
   });
 
   it('puts History, Changes, Worktrees, Pull Requests and Actions under Git, History first', () => {

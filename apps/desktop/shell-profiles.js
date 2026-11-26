@@ -184,6 +184,30 @@ function quoteArgvForShell(shellPath, argv) {
   return argv.map(a => quoteArgForShell(shellPath, a)).join(' ');
 }
 
+/**
+ * The shells that source a project's local.env.sh: bash, zsh and sh, the same
+ * family shellArgs starts with -l -i. Not WSL, whose paths differ, nor fish,
+ * nu, PowerShell or cmd, which have no `.` for a POSIX file.
+ */
+function isPosixShell(shellPath) {
+  if (!shellPath || isWslShell(shellPath)) return false;
+  const base = path.basename(shellPath).toLowerCase();
+  return base.includes('bash') || base.includes('zsh') || base === 'sh';
+}
+
+/**
+ * What goes in front of a session's command so its shell sources the
+ * environment files first, in order: `set -a; . 'a'; . 'b'; set +a; `.
+ * Between set -a and set +a, a plain VAR=value line is exported too. Empty
+ * when there are none or the shell is not one of isPosixShell's. Git Bash on
+ * Windows gets the paths with forward slashes.
+ */
+function envSourcePrefix(shellPath, files, { windows = isWindows } = {}) {
+  if (!isPosixShell(shellPath) || !Array.isArray(files) || !files.length) return '';
+  const sources = files.map(file => '. ' + quoteArgForShell(shellPath, windows ? String(file).replace(/\\/g, '/') : file));
+  return `set -a; ${sources.join('; ')}; set +a; `;
+}
+
 // Returns spawn args appropriate for the resolved shell
 function shellArgs(shellPath, cmd, extraArgs) {
   const base = path.basename(shellPath).toLowerCase();
@@ -212,4 +236,4 @@ function shellArgs(shellPath, cmd, extraArgs) {
   return [];
 }
 
-module.exports = { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs, quoteArgForShell, quoteArgvForShell };
+module.exports = { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs, quoteArgForShell, quoteArgvForShell, isPosixShell, envSourcePrefix };
