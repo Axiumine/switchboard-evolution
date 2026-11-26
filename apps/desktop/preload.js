@@ -145,6 +145,7 @@ contextBridge.exposeInMainWorld('api', {
   getPullRequests: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-requests', id, folderPath, opts),
   getPullRequestsPage: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-requests-page', id, folderPath, opts),
   getPullRequestFiles: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-files', id, folderPath, opts),
+  getPullRequestFileDiff: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-file-diff', id, folderPath, opts),
   runPullRequestAction: (id, folderPath, params) => ipcRenderer.invoke('run-pull-request-action', id, folderPath, params),
   getPullRequestConversation: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-conversation', id, folderPath, opts),
   getPullRequestCommits: (id, folderPath, opts) => ipcRenderer.invoke('get-pull-request-commits', id, folderPath, opts),

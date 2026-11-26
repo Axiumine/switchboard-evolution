@@ -1231,6 +1231,8 @@ function prdPaintCommits(ctx, slot) {
         repaint: () => prdRefresh(ctx),
         retry: () => { d.commitFiles.delete(commit.oid); prdLoadCommitFiles(ctx, commit.oid); },
         onView: () => prRepaint(ctx.project, ctx.state, ctx.repoPath),
+        loadDiff: file => prReadTextDiff(() => prApi('getPullRequestFileDiff', ctx.project.id, ctx.repoPath,
+          prRemoteOpts(ctx.data, { sha: commit.oid, path: file.path, oldPath: file.oldPath || null, status: file.status }))),
       });
     }
   });
