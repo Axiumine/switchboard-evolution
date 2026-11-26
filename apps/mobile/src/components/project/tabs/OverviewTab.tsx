@@ -5,7 +5,7 @@ import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
 import { usePullRefresh } from '@/components/PullRefresh';
 import { ReorderItem, ReorderProvider } from '@/components/reorder/Reorder';
 import { SessionActions } from '@/components/SessionActions';
-import { SessionRow } from '@/components/SessionRow';
+import { ProjectSessionRow } from '@/components/projects/ListRows';
 import { Sheet } from '@/components/Sheet';
 import { pinnedSessions } from '@/projects/drawer';
 import { projectSessions, rollupState, scheduleSummary, type Project, type ProjectFolder, type Schedule, type Track } from '@/projects/model';
@@ -52,8 +52,20 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
   const status = project.status === 'done' ? 'Done' : snoozed ? `Snoozed until ${snoozeWakeDescription(project.snoozedUntil!)}` : null;
   const openInTab = useOpenSession();
   const openSession = (session: Session) => openInTab(session.sessionId);
-  const sessionRow = (session: Session, handle = false) => (
-    <SessionRow key={session.sessionId} inset session={session} state={rowState(session.sessionId, live[session.sessionId], notices)} ram={memory.get(session.sessionId)} onPress={openSession} onLongPress={setSessionActions} handle={handle} />
+  // The same rows as the project's drawer in the Projects tab, as the desktop's track cards are its drawer's.
+  // The track is said by its section, except for the pinned ones, which come from any track.
+  const sessionRow = (session: Session, { handle = false, showTrack = false } = {}) => (
+    <ProjectSessionRow
+      key={session.sessionId}
+      session={session}
+      project={project}
+      state={rowState(session.sessionId, live[session.sessionId], notices)}
+      showTrack={showTrack}
+      ram={memory.get(session.sessionId)}
+      onPress={openSession}
+      onLongPress={setSessionActions}
+      handle={handle}
+    />
   );
   // The pinned ones are listed once, above the tracks.
   const pinned = pinnedSessions(project);
@@ -73,8 +85,8 @@ export function OverviewTab({ project, now, run, onRename, onRefresh }: {
         {pinned.length ? (
           <Section title="Pinned">
             {pinned.map((session) => (canOrder
-              ? <ReorderItem key={session.sessionId} group={pinGroup} id={session.sessionId} ids={pinIds} rowKey={session.sessionId}>{sessionRow(session, true)}</ReorderItem>
-              : sessionRow(session)))}
+              ? <ReorderItem key={session.sessionId} group={pinGroup} id={session.sessionId} ids={pinIds} rowKey={session.sessionId}>{sessionRow(session, { handle: true, showTrack: true })}</ReorderItem>
+              : sessionRow(session, { showTrack: true })))}
           </Section>
         ) : null}
 

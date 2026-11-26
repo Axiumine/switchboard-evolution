@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Fragment, memo, useState, type ReactNode } from 'react';
+import { Fragment, memo, useState, type ComponentProps, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ReorderHandle } from '@/components/reorder/Reorder';
@@ -224,11 +224,13 @@ export function FolderHead({ projectPath, count, open, top, onPress, onPlus }: {
 const STATE_WORDS: Partial<Record<RowState, string>> = { attention: 'waiting for you', busy: 'working', subagent: 'a subagent is working', unread: 'unread', running: 'running' };
 
 /**
- * A session in a drawer, as the desktop's: its title and star, over one line
- * with its state dot (when it runs or waits), its track, the CLI, when it
- * last moved, how many messages, and at its right what it uses.
+ * A session of a project, as the desktop's rows of a project (drawer, track
+ * card): its title and star, over one line with its state dot (when it runs
+ * or waits), its track, the CLI, when it last moved, how many messages, and
+ * at its right what it uses. In a drawer (DrawerSessionRow) and in the
+ * project's Overview alike.
  */
-export const DrawerSessionRow = memo(function DrawerSessionRow({ session, project, here, state, showTrack, archived, ram, onPress, onLongPress, handle }: {
+export const ProjectSessionRow = memo(function ProjectSessionRow({ session, project, here, state, showTrack, archived, ram, onPress, onLongPress, handle }: {
   session: Session;
   project: Project | null;
   /** The session open on the right: highlighted, as the desktop marks the one on screen. */
@@ -249,37 +251,40 @@ export const DrawerSessionRow = memo(function DrawerSessionRow({ session, projec
   const words = [STATE_WORDS[state], showTrack && project ? (track?.name ?? 'General') : null, cliLabel(session), when, session.messageCount ? `${session.messageCount} msgs` : null];
   const lit = state !== 'idle';
   return (
-    <Card>
-      <Pressable
-        onPress={() => onPress(session)}
-        onLongPress={() => onLongPress(session)}
-        style={({ pressed }) => [styles.session, archived && styles.dim, here && styles.here, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityState={{ selected: !!here }}
-        accessibilityLabel={`${sessionTitle(session)}, ${[...words, session.starred ? 'pinned' : null].filter(Boolean).join(', ')}`}
-      >
-        <View style={styles.sessionText}>
-          <View style={styles.sessionLine}>
-            <Text style={[styles.sessionTitle, state === 'unread' && styles.unread]} numberOfLines={1}>{sessionTitle(session)}</Text>
-            <StarButton session={session} />
-          </View>
-          <View style={styles.sessionMeta}>
-            {lit ? <View style={[styles.smallDot, { backgroundColor: STATE_COLORS[state] }]} /> : null}
-            {showTrack && tint ? (
-              <Text style={[styles.tag, { color: tint.fg, backgroundColor: tint.bg }]} numberOfLines={1}>{track?.name ?? 'General'}</Text>
-            ) : null}
-            <Text style={[styles.sessionMetaText, (state === 'attention' || state === 'unread') && { color: STATE_COLORS[state] }]} numberOfLines={1}>
-              {[lit ? STATE_WORDS[state] : null, cliLabel(session), when].filter(Boolean).join(' · ')}
-              {session.messageCount ? ` · ${session.messageCount} msgs` : ''}
-            </Text>
-            <View style={styles.flex} />
-            <RamText bytes={ram} />
-          </View>
+    <Pressable
+      onPress={() => onPress(session)}
+      onLongPress={() => onLongPress(session)}
+      style={({ pressed }) => [styles.session, archived && styles.dim, here && styles.here, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!here }}
+      accessibilityLabel={`${sessionTitle(session)}, ${[...words, session.starred ? 'pinned' : null].filter(Boolean).join(', ')}`}
+    >
+      <View style={styles.sessionText}>
+        <View style={styles.sessionLine}>
+          <Text style={[styles.sessionTitle, state === 'unread' && styles.unread]} numberOfLines={1}>{sessionTitle(session)}</Text>
+          <StarButton session={session} />
         </View>
-        {handle ? <ReorderHandle label={sessionTitle(session)} /> : null}
-      </Pressable>
-    </Card>
+        <View style={styles.sessionMeta}>
+          {lit ? <View style={[styles.smallDot, { backgroundColor: STATE_COLORS[state] }]} /> : null}
+          {showTrack && tint ? (
+            <Text style={[styles.tag, { color: tint.fg, backgroundColor: tint.bg }]} numberOfLines={1}>{track?.name ?? 'General'}</Text>
+          ) : null}
+          <Text style={[styles.sessionMetaText, (state === 'attention' || state === 'unread') && { color: STATE_COLORS[state] }]} numberOfLines={1}>
+            {[lit ? STATE_WORDS[state] : null, cliLabel(session), when].filter(Boolean).join(' · ')}
+            {session.messageCount ? ` · ${session.messageCount} msgs` : ''}
+          </Text>
+          <View style={styles.flex} />
+          <RamText bytes={ram} />
+        </View>
+      </View>
+      {handle ? <ReorderHandle label={sessionTitle(session)} /> : null}
+    </Pressable>
   );
+});
+
+/** A session in a project's drawer: the project's row, in the drawer's card. */
+export const DrawerSessionRow = memo(function DrawerSessionRow(props: ComponentProps<typeof ProjectSessionRow>) {
+  return <Card><ProjectSessionRow {...props} /></Card>;
 });
 
 const styles = StyleSheet.create({
