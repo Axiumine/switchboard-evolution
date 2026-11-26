@@ -64,6 +64,8 @@ function setupTerminalKeyBindings(terminal, container, getSessionId, { onFind } 
     // Cmd/Ctrl+Shift+K → the Commands palette (command-catalog-view.js opens
     // it from the document's keydown); the terminal does not type it.
     if (typeof isCommandPaletteKey === 'function' && isCommandPaletteKey(e)) return false;
+    // Cmd/Ctrl+Shift+P → the prompt improver (prompt-improver-view.js), likewise.
+    if (typeof isPromptImproverKey === 'function' && isPromptImproverKey(e)) return false;
 
     // Cmd/Ctrl+Shift+G → toggle grid view
     if (e.key === 'g' && (isMac ? e.metaKey : e.ctrlKey) && e.shiftKey && !e.altKey) {

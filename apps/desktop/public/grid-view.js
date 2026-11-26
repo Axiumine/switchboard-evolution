@@ -63,6 +63,22 @@ function wrapInGridCard(sessionId) {
     };
     header.appendChild(commandsBtn);
   }
+  // The prompt improver (prompt-improver-view.js), for a CLI session; hidden while it is off.
+  if (typeof sessionCanImprove === 'function' && session.type !== 'terminal') {
+    const improveBtn = document.createElement('button');
+    improveBtn.className = 'grid-card-improve-btn';
+    improveBtn.title = 'Improve prompt';
+    improveBtn.setAttribute('aria-label', 'Improve prompt');
+    improveBtn.dataset.sessionId = sessionId;
+    improveBtn.innerHTML = ICONS.sparkle(12);
+    improveBtn.style.display = sessionCanImprove(session) ? '' : 'none';
+    improveBtn.onclick = (e) => {
+      e.stopPropagation();
+      focusGridCard(sessionId);
+      openPromptImprover({ anchor: improveBtn });
+    };
+    header.appendChild(improveBtn);
+  }
   header.appendChild(stopBtn);
 
   // Footer

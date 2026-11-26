@@ -38,6 +38,7 @@ const modules = {
   'pinned-order.js': 'apps/desktop/public/pinned-order.js',
   'command-catalog-model.js': 'apps/desktop/public/command-catalog-model.js',
   'env-files-model.js': 'apps/desktop/public/env-files-model.js',
+  'prompt-improver-model.js': 'apps/desktop/public/prompt-improver-model.js',
 };
 
 const header = (file) =>

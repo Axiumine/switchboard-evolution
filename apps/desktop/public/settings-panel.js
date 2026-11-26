@@ -370,6 +370,8 @@
 
       ${!isProject ? '<div class="settings-section" id="sv-knowledge"></div>' : ''}
 
+      ${!isProject ? '<div class="settings-section" id="sv-prompt-improver" hidden></div>' : ''}
+
       ${!isProject ? `<div class="settings-section">
         <div class="settings-section-title">Updates</div>
         <div class="settings-field">
@@ -571,6 +573,9 @@
     // Node Knowledge: codebase-memory-mcp's program and its own settings (project-knowledge-settings.js).
     const knowledgeSection = settingsViewerBody.querySelector('#sv-knowledge');
     if (knowledgeSection && typeof knRenderGlobalSettings === 'function') knRenderGlobalSettings(knowledgeSection);
+    // The prompt improver (prompt-improver-settings.js) applies its changes at once, like the Editor's.
+    const improverSection = settingsViewerBody.querySelector('#sv-prompt-improver');
+    if (improverSection && typeof renderPromptImproverSettings === 'function') renderPromptImproverSettings(improverSection);
 
     // The donation box of the Projects tab, always here and without its X (donate-box.js).
     const donateSlot = settingsViewerBody.querySelector('#sv-donate');

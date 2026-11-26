@@ -3,7 +3,7 @@ import { Alert, StyleSheet, View } from 'react-native';
 
 import { CHAT_COLUMN } from '@/components/ChatView';
 import { uploadHint } from '@/sessions/attachments';
-import { draftReady, sendDraft, setDraftText, useDraft } from '@/sessions/drafts';
+import { draftReady, getDraft, sendDraft, setDraftText, useDraft } from '@/sessions/drafts';
 import type { Session, SessionState } from '@/sessions/model';
 import { applyToDraft } from '@/shared/vendor/command-catalog-model';
 import { request, useCapability, useConnection } from '@/store/connection';
@@ -13,6 +13,7 @@ import { AttachmentStrip } from './AttachmentStrip';
 import { useCommandsPanel } from './CommandsButton';
 import { CommandSuggestions } from './CommandSuggestions';
 import { ComposerField } from './ComposerField';
+import { useImproveButton } from './ImproveButton';
 import { SendButton, StopButton } from './SendButton';
 import { StateStrip } from './StateStrip';
 import { useAttachments } from './useAttachments';
@@ -26,7 +27,8 @@ const ESC = '\x1b';
  * the session works and nothing is written it is Stop (Esc). The draft
  * stays with the session until it is sent. No terminal keys here; "/" beside
  * Attach lists the CLI's commands, a pick going in front of the draft, and a
- * command being typed shows the ones that complete it.
+ * command being typed shows the ones that complete it; the button after it
+ * improves the draft (ImproveButton), Undo taking it back.
  */
 export function ChatComposer({ sessionId, session, cli, state, working, onOpenTerminal }: {
   sessionId: string;
@@ -54,6 +56,13 @@ export function ChatComposer({ sessionId, session, cli, state, working, onOpenTe
     onInsert: (text) => setDraftText(sessionId, applyToDraft(draft.text, text)),
     // A command that opens a picker shows it in the terminal.
     onRan: (entry) => { if (entry.flags?.includes('opensMenu')) onOpenTerminal(); },
+  });
+  const improve = useImproveButton({
+    sessionId,
+    session,
+    text: draft.text,
+    getText: () => getDraft(sessionId).text,
+    setText: (text) => setDraftText(sessionId, text),
   });
   const shown = canAttach ? attachments.items : [];
   const empty = !draft.text.trim() && shown.length === 0;
@@ -84,6 +93,7 @@ export function ChatComposer({ sessionId, session, cli, state, working, onOpenTe
         <View style={styles.row}>
           {canAttach ? <AttachButton attachments={attachments} /> : null}
           {commands.button}
+          {improve}
           <ComposerField
             value={draft.text}
             onChangeText={(text) => setDraftText(sessionId, text)}
