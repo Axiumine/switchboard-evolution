@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.19.1 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.20.0 (November 2026).
 
 ## At a glance
 
@@ -46,13 +46,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 26 Nov | Switchboard Evolution 1.18.2 | The phone's project Overview lists its sessions with the rows of the project's drawer, as the desktop's track cards do: the title and star, then the state, the CLI, the age, the messages and what the session uses. The desktop carries gh 2.106.0. |
 | 26 Nov | Switchboard Evolution 1.19.0 | The Env tab, on the desktop and the phone: every project has a `local.env.sh` in its project folder, and each attached folder can have one. Before a session or a terminal starts, its shell sources them after the user's own startup files: in the project folder only the project's, in an attached folder the project's and then the folder's, so the folder wins. |
 | 26 Nov | Switchboard Evolution 1.19.1 | In the desktop's Pull Requests view, a text file that GitHub takes for binary (one with a NUL byte, as a prompt template that uses NULs as delimiters) shows its diff: the app reads its two versions from GitHub and compares them, each NUL shown as ␀. |
+| 26 Nov | Switchboard Evolution 1.20.0 | A prompt improver beside Commands (Cmd/Ctrl+Shift+P) and after "/" in the phone's composers: the prompt being written to a session's CLI is rewritten by that CLI, run once and out of sight on the user's own subscription with no API key, with the session's last turns and its commands, skills and MCP servers and how to call them. On the desktop it is read from the CLI's input box and put back in its place, never sent; on the phone it takes the field's place, with Undo. The rewriting instructions are editable in Settings, on the desktop and the phone. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.19.1, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.20.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
