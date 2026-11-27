@@ -146,6 +146,7 @@ const {
 } = require('./db');
 const dbModule = require('./db');
 
+const { createSettingsPatcher, keepOneHarnessOn } = require('./settings-patch');
 const { getHarness, DEFAULT_HARNESS, transcriptPath, availableHarnesses, allHarnesses, progressBusyState,
         harnessForFolder: getHarnessForFolder } = require('./harnesses');
 const claudeHarness = getHarness(DEFAULT_HARNESS);
@@ -980,14 +981,9 @@ ipcMain.handle('lsp-close', async (event, sessionId) => { await lspManager.close
 ipcMain.handle('lsp-restart', (event, sessionId) => lspManager.restart(event.sender.id, sessionId));
 ipcMain.handle('lsp-project-servers', guarded(projectId => lspProjects.summary(projectId, { detect: languageServersOn() })));
 ipcMain.handle('get-language-servers', () => languageServersOn());
-// Off: every server stops; every window hears it (its editors let their servers go, or ask again when on).
 ipcMain.handle('set-language-servers', guarded(async (on) => {
-  setSetting('global', { ...(getSetting('global') || {}), languageServers: !!on });
-  if (!on) await lspManager.stopAll();
-  for (const target of webContents.getAllWebContents()) {
-    if (!target.isDestroyed()) target.send('language-servers-changed', !!on);
-  }
-  return { ok: true, on: !!on };
+  const result = await settingsPatcher.patch('global', { languageServers: !!on });
+  return result.ok ? { ok: true, on: !!on } : result;
 }));
 ipcMain.handle('set-project-lsp-server', guarded((projectId, serverId, on) => lspProjects.setEnabled(projectId, serverId, on)));
 ipcMain.handle('lsp-detect', guarded(async (projectId) => { await lspProjects.redetect(projectId); return lspProjects.summary(projectId); }));
@@ -1717,46 +1713,66 @@ ipcMain.handle('get-setting', (_event, key) => {
   return getSetting(key);
 });
 
+// Something was switched on or off. Watchers follow the new set, and a
+// reconcile picks up whatever a newly-enabled harness did while it was
+// being ignored — incremental, because its cached rows were kept and the
+// folder mtime gate re-reads only what actually changed.
+function harnessSetChanged() {
+  stopHarnessWatchers();
+  startHarnessWatchers();
+  try { projectsWatcher?.close(); } catch {}
+  projectsWatcher = null;
+  startProjectsWatcher();
+  try { reconcileCacheFromFilesystem(); } catch (err) { log.error('[harness-toggle]', err.message); }
+  notifyRendererProjectsChanged();
+  // The status bar quota gauge only re-reads on a 5-minute timer, so
+  // without this a switched-off CLI keeps its bars until the next tick.
+  emit('harnesses-changed');
+}
+
+const launchableHarnessIds = () => allHarnesses().filter(h => h.buildLaunchArgs).map(h => h.id);
+
+// The one patch of the settings (settings-patch.js): the panel and a paired phone save through it.
+const settingsPatcher = createSettingsPatcher({
+  getSetting,
+  setSetting,
+  harnessIds: launchableHarnessIds,
+  launchableHarnessIds,
+  shellProfileIds: () => getShellProfiles().map(p => p.id),
+  onHarnessesChanged: harnessSetChanged,
+  // Off: every server stops; every window hears it (its editors let their servers go, or ask again when on).
+  onLanguageServers: async (on) => {
+    if (!on) await lspManager.stopAll();
+    for (const target of webContents.getAllWebContents()) {
+      if (!target.isDestroyed()) target.send('language-servers-changed', !!on);
+    }
+  },
+  emit,
+});
+ipcMain.handle('patch-setting', async (_event, key, patch) => {
+  try { return await settingsPatcher.patch(key, patch); } catch (err) {
+    log.error('[settings]', err);
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('set-setting', (_event, key, value) => {
   const beforeSet = key === 'global' ? disabledHarnessIds() : null;
   const before = beforeSet ? [...beforeSet].sort().join(',') : null;
 
   if (key === 'global' && Array.isArray(value?.disabledHarnesses)) {
-    // At least one CLI has to stay on, or the app has nothing to show and no
-    // way to start anything. The settings panel already prevents this; this is
-    // the guard for any other writer. The id that was just switched off is the
-    // one refused, which is what the UI does too.
-    const launchable = allHarnesses().filter(h => h.buildLaunchArgs).map(h => h.id);
-    const disabled = new Set(value.disabledHarnesses);
-    if (launchable.length && launchable.every(id => disabled.has(id))) {
-      const justAdded = launchable.filter(id => disabled.has(id) && !beforeSet.has(id));
-      const keep = justAdded[0] || launchable[0];
-      log.warn(`[harness-toggle] refusing to disable every CLI; keeping ${keep} on`);
-      value = { ...value, disabledHarnesses: value.disabledHarnesses.filter(id => id !== keep) };
+    // The settings panel already prevents switching off every CLI; this is
+    // the guard for any other writer.
+    const kept = keepOneHarnessOn(value.disabledHarnesses, beforeSet, launchableHarnessIds());
+    if (kept.length !== value.disabledHarnesses.length) {
+      log.warn(`[harness-toggle] refusing to disable every CLI; keeping ${value.disabledHarnesses.find(id => !kept.includes(id))} on`);
+      value = { ...value, disabledHarnesses: kept };
     }
   }
 
   setSetting(key, value);
 
-  if (key === 'global') {
-    const after = [...disabledHarnessIds()].sort().join(',');
-    if (before !== after) {
-      // Something was switched on or off. Watchers follow the new set, and a
-      // reconcile picks up whatever a newly-enabled harness did while it was
-      // being ignored — incremental, because its cached rows were kept and the
-      // folder mtime gate re-reads only what actually changed.
-      stopHarnessWatchers();
-      startHarnessWatchers();
-      try { projectsWatcher?.close(); } catch {}
-      projectsWatcher = null;
-      startProjectsWatcher();
-      try { reconcileCacheFromFilesystem(); } catch (err) { log.error('[harness-toggle]', err.message); }
-      notifyRendererProjectsChanged();
-      // The status bar quota gauge only re-reads on a 5-minute timer, so
-      // without this a switched-off CLI keeps its bars until the next tick.
-      emit('harnesses-changed');
-    }
-  }
+  if (key === 'global' && before !== [...disabledHarnessIds()].sort().join(',')) harnessSetChanged();
   return { ok: true };
 });
 

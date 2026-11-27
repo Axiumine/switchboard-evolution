@@ -76,6 +76,13 @@ contextBridge.exposeInMainWorld('api', {
   // Settings
   getSetting: (key) => ipcRenderer.invoke('get-setting', key),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
+  // One field saved at a time: ({ ok: true, settings } | { ok: false, error }).
+  patchSetting: (key, patch) => ipcRenderer.invoke('patch-setting', key, patch),
+  onGlobalSettingsChanged: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('global-settings-changed', handler);
+    return () => ipcRenderer.removeListener('global-settings-changed', handler);
+  },
   deleteSetting: (key) => ipcRenderer.invoke('delete-setting', key),
   getEffectiveSettings: (projectPath) => ipcRenderer.invoke('get-effective-settings', projectPath),
   getShellProfiles: () => ipcRenderer.invoke('get-shell-profiles'),
