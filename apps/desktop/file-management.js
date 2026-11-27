@@ -18,6 +18,17 @@ function resolveManagedEntry(projectPath, relativePath) {
   return { root, filePath, stat };
 }
 
+// The same file or folder, not only one at the same path. An item deleted and
+// made again gets a new inode, but ext4 hands a freed inode number straight
+// back, so the number alone cannot tell them apart: its creation time can,
+// once the clock has moved on (a few milliseconds). Where the file system
+// keeps no creation time it reads 0 on both sides and the inode decides;
+// where Node has no statx it reads the change time, so an edit made during
+// the question refuses too: the safe side.
+function sameEntry(a, b) {
+  return a.ino === b.ino && a.dev === b.dev && a.birthtimeMs === b.birthtimeMs;
+}
+
 async function manageProjectEntry(projectPath, relativePath, action, newName, { shell, confirmTrash }) {
   const { filePath, stat } = resolveManagedEntry(projectPath, relativePath);
   const result = { action, projectPath, relativePath, filePath };
@@ -48,7 +59,7 @@ async function manageProjectEntry(projectPath, relativePath, action, newName, { 
     // A native confirmation is asynchronous. Recheck before acting in case
     // the item or one of its parents was replaced while the dialog was open.
     const current = resolveManagedEntry(projectPath, relativePath);
-    if (current.filePath !== filePath || current.stat.ino !== stat.ino || current.stat.dev !== stat.dev) {
+    if (current.filePath !== filePath || !sameEntry(current.stat, stat)) {
       throw new Error('The item changed while confirming. Refresh the files and try again.');
     }
     await shell.trashItem(filePath);
@@ -83,7 +94,7 @@ async function trashProjectEntries(projectPath, relativePaths, { shell, confirm 
   for (const { rel, filePath, stat } of entries) {
     try {
       const current = resolveManagedEntry(projectPath, rel);
-      if (current.filePath !== filePath || current.stat.ino !== stat.ino || current.stat.dev !== stat.dev) {
+      if (current.filePath !== filePath || !sameEntry(current.stat, stat)) {
         throw new Error('Changed while confirming');
       }
       await shell.trashItem(filePath);

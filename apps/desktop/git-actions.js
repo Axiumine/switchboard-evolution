@@ -36,7 +36,11 @@ const path = require('path');
 const git = require('./git');
 
 const MAX_BUFFER = 4 * 1024 * 1024;
-const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' };
+// LC_ALL=C: git answers in English whatever the user's language, as git.js
+// asks for its own commands. deleteBranch and deleteRemoteBranch read those
+// answers (NOT_FULLY_MERGED_RE, REMOTE_REF_GONE_RE): an Italian git says
+// "il riferimento remoto non esiste" for "remote ref does not exist".
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
 
 /** Run one git subprocess to completion, argv-array only, no shell. */
 function execGit(args, { cwd, signal } = {}) {
@@ -254,7 +258,10 @@ defineAction('addTag', async (dir, params, ctx) => {
   if (await git.tagExists(dir, name)) throw new Error(`Tag '${name}' already exists`);
   assertSafePositionalArg(commit, 'hash');
   if (type === 'annotated' && !String(message || '').trim()) throw new Error('An annotated tag requires a message');
-  const argv = type === 'annotated' ? ['tag', '-a', name, '-m', String(message), commit] : ['tag', name, commit];
+  // --no-sign: with tag.gpgSign set, a bare `git tag <name>` makes a signed
+  // annotated tag instead and asks an editor for its message, which fails
+  // without a terminal. A lightweight tag is never signed.
+  const argv = type === 'annotated' ? ['tag', '-a', name, '-m', String(message), commit] : ['tag', '--no-sign', name, commit];
   await execGit(argv, gitCtx(dir, ctx));
   const pushedTo = [];
   for (const remote of pushToRemotes || []) {

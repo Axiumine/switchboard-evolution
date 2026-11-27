@@ -1,9 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const cp = require('node:child_process');
 
 const {
   MAX_TIMEOUT_MS, projectSnoozed, projectWokeAt, nextWakeDelayMs, resolveSnoozePresets, snoozeWakeDescription, toLocalInputValue,
 } = require('../public/snooze');
+
+// Dates and times follow the computer's regional settings ("Mon 9:00 AM" in
+// English, "lun 9:00" in Italian), so the expected text uses the same format.
+const clock = d => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const dayName = d => d.toLocaleDateString(undefined, { weekday: 'short' });
+const monthDay = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 const NOW = Date.parse('2026-09-08T12:00:00.000Z');
 const FUTURE = '2026-09-09T09:00:00.000Z';
@@ -64,7 +71,7 @@ test('presets: on a Sunday "Next week" is the Monday after tomorrow, not a copy 
   const nextWeek = new Date(byId['next-week'].snoozedUntil);
   assert.deepEqual([tomorrow.getDay(), tomorrow.getDate()], [1, 14]);
   assert.deepEqual([nextWeek.getDay(), nextWeek.getDate(), nextWeek.getHours()], [1, 21, 9]);
-  assert.match(byId['next-week'].whenLabel, /^Sep 21, 9:00/, 'the date keeps it apart from Tomorrow');
+  assert.equal(byId['next-week'].whenLabel, `${monthDay(nextWeek)}, ${clock(nextWeek)}`, 'the date keeps it apart from Tomorrow');
 });
 
 test('presets: every wake time is ahead of now', () => {
@@ -76,12 +83,26 @@ test('presets: every wake time is ahead of now', () => {
 
 test('snoozeWakeDescription reads as a person would say it', () => {
   const now = new Date(2026, 8, 9, 12, 0, 0); // Wed noon
-  const at = (d, h) => new Date(2026, 8, d, h, 0, 0).toISOString();
-  assert.match(snoozeWakeDescription(at(9, 18), now), /^6:00/);
-  assert.match(snoozeWakeDescription(at(10, 9), now), /^tomorrow 9:00/);
-  assert.match(snoozeWakeDescription(at(14, 9), now), /^Mon 9:00/);
-  assert.match(snoozeWakeDescription(at(20, 9), now), /^Sep 20, 9:00/);
+  const at = (d, h) => new Date(2026, 8, d, h, 0, 0);
+  const says = wake => snoozeWakeDescription(wake.toISOString(), now);
+  assert.equal(says(at(9, 18)), clock(at(9, 18)));
+  assert.equal(says(at(10, 9)), `tomorrow ${clock(at(10, 9))}`);
+  assert.equal(says(at(14, 9)), `${dayName(at(14, 9))} ${clock(at(14, 9))}`);
+  assert.equal(says(at(20, 9)), `${monthDay(at(20, 9))}, ${clock(at(20, 9))}`);
   assert.equal(snoozeWakeDescription('junk', now), '');
+});
+
+test('snoozeWakeDescription follows the regional settings: English or Italian', {
+  skip: new Intl.DateTimeFormat('it-IT').resolvedOptions().locale !== 'it-IT' && 'this Node has no Italian locale data',
+}, () => {
+  const script = `const { snoozeWakeDescription } = require(${JSON.stringify(require.resolve('../public/snooze'))});
+    const now = new Date(2026, 8, 9, 12, 0, 0), at = (d, h) => new Date(2026, 8, d, h, 0, 0).toISOString();
+    console.log(JSON.stringify([at(9, 18), at(10, 9), at(14, 9), at(20, 9)].map(wake => snoozeWakeDescription(wake, now))));`;
+  const inLocale = locale => JSON.parse(cp.execFileSync(process.execPath, ['-e', script], {
+    env: { ...process.env, LC_ALL: locale, LANG: locale, LANGUAGE: '' }, encoding: 'utf8',
+  })).map(text => text.replace(/\s/g, ' ')); // ICU puts a narrow no-break space before AM
+  assert.deepEqual(inLocale('en_US.UTF-8'), ['6:00 PM', 'tomorrow 9:00 AM', 'Mon 9:00 AM', 'Sep 20, 9:00 AM']);
+  assert.deepEqual(inLocale('it_IT.UTF-8'), ['18:00', 'tomorrow 9:00', 'lun 9:00', '20 set, 9:00']);
 });
 
 test('toLocalInputValue formats for a datetime-local input', () => {

@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const cp = require('node:child_process');
 
 const {
   PRESETS, dueThisMinute, nextDueAt, missedRun, describeTiming, presetFromCron, describeNextRun,
@@ -8,6 +9,12 @@ const {
 // Local-time dates, because a schedule's "9:00" is the user's 9:00.
 const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0);
 const WED_0900 = at(2026, 9, 9, 9, 0);   // Wednesday
+
+// Dates and times follow the computer's regional settings ("Mon 9:00 AM" in
+// English, "lun 9:00" in Italian), so the expected text uses the same format.
+const clock = d => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const dayName = d => d.toLocaleDateString(undefined, { weekday: 'short' });
+const monthDay = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 test('every preset the dialog offers has a description and a next run', () => {
   for (const p of PRESETS) {
@@ -107,9 +114,23 @@ test('describeNextRun: minutes soon, then today / tomorrow / weekday / date', ()
   const now = WED_0900.getTime();
   assert.equal(describeNextRun(now + 30 * 1000, now), 'in a minute');
   assert.equal(describeNextRun(now + 12 * 60 * 1000, now), 'in 12 min');
-  assert.match(describeNextRun(at(2026, 9, 9, 15, 0).getTime(), now), /^today /);
-  assert.match(describeNextRun(at(2026, 9, 10, 9, 0).getTime(), now), /^tomorrow /);
-  assert.match(describeNextRun(at(2026, 9, 14, 9, 0).getTime(), now), /^Mon /);
-  assert.match(describeNextRun(at(2026, 9, 30, 9, 0).getTime(), now), /^Sep 30, /);
+  const later = at(2026, 9, 9, 15, 0), tomorrow = at(2026, 9, 10, 9, 0), monday = at(2026, 9, 14, 9, 0), sep30 = at(2026, 9, 30, 9, 0);
+  assert.equal(describeNextRun(later.getTime(), now), `today ${clock(later)}`);
+  assert.equal(describeNextRun(tomorrow.getTime(), now), `tomorrow ${clock(tomorrow)}`);
+  assert.equal(describeNextRun(monday.getTime(), now), `${dayName(monday)} ${clock(monday)}`);
+  assert.equal(describeNextRun(sep30.getTime(), now), `${monthDay(sep30)}, ${clock(sep30)}`);
   assert.equal(describeNextRun(NaN, now), '');
+});
+
+test('describeNextRun follows the regional settings: English or Italian', {
+  skip: new Intl.DateTimeFormat('it-IT').resolvedOptions().locale !== 'it-IT' && 'this Node has no Italian locale data',
+}, () => {
+  const script = `const { describeNextRun } = require(${JSON.stringify(require.resolve('../public/schedule-time'))});
+    const at = (d, h) => new Date(2026, 8, d, h, 0, 0, 0).getTime(), now = at(9, 9);
+    console.log(JSON.stringify([at(9, 15), at(10, 9), at(14, 9), at(30, 9)].map(due => describeNextRun(due, now))));`;
+  const inLocale = locale => JSON.parse(cp.execFileSync(process.execPath, ['-e', script], {
+    env: { ...process.env, LC_ALL: locale, LANG: locale, LANGUAGE: '' }, encoding: 'utf8',
+  })).map(text => text.replace(/\s/g, ' ')); // ICU puts a narrow no-break space before AM
+  assert.deepEqual(inLocale('en_US.UTF-8'), ['today 3:00 PM', 'tomorrow 9:00 AM', 'Mon 9:00 AM', 'Sep 30, 9:00 AM']);
+  assert.deepEqual(inLocale('it_IT.UTF-8'), ['today 15:00', 'tomorrow 9:00', 'lun 9:00', '30 set, 9:00']);
 });

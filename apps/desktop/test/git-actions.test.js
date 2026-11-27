@@ -161,6 +161,20 @@ test('addTag creates an annotated and a lightweight tag, and can push both', { s
   }
 });
 
+test('addTag makes a lightweight tag for someone who signs every tag (tag.gpgSign)', { skip: !haveGit && 'git not installed' }, async () => {
+  const repo = await makeRepo();
+  try {
+    await git.run(['config', 'tag.gpgSign', 'true'], repo);
+    const head = await git.run(['rev-parse', 'HEAD'], repo);
+    // Without --no-sign git turns this into a signed annotated tag and asks
+    // an editor for its message: "no tag message?" or "Terminal is dumb".
+    await run('addTag', repo, { name: 'v1-lw', type: 'lightweight', commit: head });
+    assert.equal(await git.run(['cat-file', '-t', 'refs/tags/v1-lw'], repo), 'commit', 'a lightweight tag points at the commit itself');
+  } finally {
+    rmrf(repo);
+  }
+});
+
 test('createBranch creates at a commit, optionally checking it out, and rejects a collision', { skip: !haveGit && 'git not installed' }, async () => {
   const repo = await makeRepo();
   try {
@@ -288,7 +302,7 @@ test('deleteBranch\'s remote delete is unambiguous even when the remote also has
     await git.run(['add', 'rel.txt'], repo);
     await git.run(['commit', '-q', '-m', 'release work'], repo);
     await git.run(['push', '-q', 'origin', 'release-1.0'], repo);
-    await git.run(['tag', 'release-1.0'], repo); // same name as the branch, on purpose
+    await git.run(['tag', '--no-sign', 'release-1.0'], repo); // same name as the branch, on purpose
     await git.run(['push', '-q', 'origin', 'refs/tags/release-1.0'], repo);
     await git.run(['checkout', '-q', 'main'], repo);
 
@@ -326,6 +340,62 @@ test('deleteRemoteBranch deletes a live remote branch, and falls back to cleanin
     const stale = await run('deleteRemoteBranch', repo, { remote: 'origin', shortName: 'topic2' });
     assert.equal(stale.staleTrackingRefRemoved, true);
     await assert.rejects(git.run(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/topic2'], repo));
+  } finally {
+    rmrf(repo, bare);
+  }
+});
+
+/** Runs fn with the app in another language (LC_ALL, LANG, LANGUAGE), then puts the old ones back. */
+async function inLocale(locale, fn) {
+  const keys = ['LC_ALL', 'LANG', 'LANGUAGE'];
+  const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  Object.assign(process.env, { LC_ALL: locale, LANG: locale, LANGUAGE: locale.split('.')[0] });
+  try { return await fn(); } finally {
+    for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+}
+
+/** True when git answers in Italian on this machine: the locale is installed and git carries its translation. */
+const gitSpeaksItalian = haveGit && (() => {
+  const r = require('child_process').spawnSync('git', ['status'], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, LC_ALL: 'it_IT.UTF-8', LANG: 'it_IT.UTF-8', LANGUAGE: 'it_IT', GIT_CEILING_DIRECTORIES: os.tmpdir() } });
+  return /non è un repository/.test(String(r.stderr));
+})();
+
+test('every git the actions start answers in English, whatever the user\'s language', async () => {
+  const originalExecFile = cp.execFile;
+  const originalSpawn = cp.spawn;
+  const envs = [];
+  cp.execFile = (file, args, opts, cb) => { envs.push(opts.env); cb(null, 'abc\n', ''); };
+  cp.spawn = (file, args, opts) => {
+    envs.push(opts.env);
+    const child = new (require('events'))();
+    child.stdout = new (require('events'))(); child.stderr = new (require('events'))();
+    setImmediate(() => child.emit('close', 0));
+    return child;
+  };
+  try {
+    await inLocale('it_IT.UTF-8', async () => {
+      await run('deleteRemoteBranch', '/repo', { remote: 'origin', shortName: 'topic' }); // execFile
+      await run('fetchRemote', '/repo', { remote: 'origin' }).catch(() => {}); // spawn
+    });
+  } finally {
+    cp.execFile = originalExecFile;
+    cp.spawn = originalSpawn;
+  }
+  assert.ok(envs.length >= 2, `both ways of starting git were used (${envs.length})`);
+  for (const env of envs) assert.equal(env.LC_ALL, 'C');
+});
+
+test('deleteRemoteBranch cleans up a stale tracking ref for someone whose git speaks Italian', { skip: !gitSpeaksItalian && 'git does not speak Italian here (no it_IT locale or no translation)' }, async () => {
+  const repo = await makeRepo();
+  const bare = await addBareOrigin(repo);
+  try {
+    await git.run(['checkout', '-q', '-b', 'topic'], repo);
+    await git.run(['push', '-q', '-u', 'origin', 'topic'], repo);
+    await git.run(['branch', '-D', 'topic'], bare); // gone on the remote, still tracked here
+    const stale = await inLocale('it_IT.UTF-8', () => run('deleteRemoteBranch', repo, { remote: 'origin', shortName: 'topic' }));
+    assert.equal(stale.staleTrackingRefRemoved, true, 'git said "il riferimento remoto non esiste", which must count as "remote ref does not exist"');
+    await assert.rejects(git.run(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/topic'], repo));
   } finally {
     rmrf(repo, bare);
   }
@@ -732,7 +802,7 @@ test('pushTag defaults to origin and can target an explicit remote list', { skip
   const repo = await makeRepo();
   const bare = await addBareOrigin(repo);
   try {
-    await git.run(['tag', 'v1'], repo);
+    await git.run(['tag', '--no-sign', 'v1'], repo);
     const result = await run('pushTag', repo, { tagName: 'v1' });
     assert.deepEqual(result.pushed, ['origin']);
     assert.match(await git.run(['ls-remote', '--tags', bare], repo), /refs\/tags\/v1/);
@@ -745,7 +815,7 @@ test('deleteTag removes a tag locally and, when asked, on a remote too', { skip:
   const repo = await makeRepo();
   const bare = await addBareOrigin(repo);
   try {
-    await git.run(['tag', 'v1'], repo);
+    await git.run(['tag', '--no-sign', 'v1'], repo);
     await git.run(['push', '-q', 'origin', 'v1'], repo);
 
     await run('deleteTag', repo, { name: 'v1', deleteOnRemotes: ['origin'] });
