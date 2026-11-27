@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { TabBar } from '@/components/TabBar';
 import { CatalogTab } from '@/components/settings/CatalogTab';
 import { ComputerTab } from '@/components/settings/ComputerTab';
+import { KnowledgeSettingsTab } from '@/components/settings/KnowledgeSettingsTab';
 import { PromptImproverTab } from '@/components/settings/PromptImproverTab';
 import { settingsTabs, type PhoneSettingsTab } from '@/settings/tabs';
 import { useCapability, useConnection } from '@/store/connection';
-import { colors, spacing } from '@/theme';
+import { colors } from '@/theme';
 
 /**
  * The Settings tab, with the desktop's tabs under a fixed bar: Computer (the
@@ -43,13 +44,12 @@ function body(tab: PhoneSettingsTab) {
     case 'application':
     case 'agents':
     case 'editor': return <CatalogTab key={tab} tab={tab} />;
-    // Node Knowledge: the computer's own settings, to come.
-    default: return <Text style={styles.soon}>Coming from the computer…</Text>;
+    case 'knowledge': return <KnowledgeSettingsTab />;
+    default: return null;
   }
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   body: { flex: 1 },
-  soon: { color: colors.textFaint, fontSize: 13, padding: spacing.lg },
 });
