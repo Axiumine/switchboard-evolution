@@ -331,6 +331,62 @@ test('deleteRemoteBranch deletes a live remote branch, and falls back to cleanin
   }
 });
 
+/** Runs fn with the app in another language (LC_ALL, LANG, LANGUAGE), then puts the old ones back. */
+async function inLocale(locale, fn) {
+  const keys = ['LC_ALL', 'LANG', 'LANGUAGE'];
+  const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  Object.assign(process.env, { LC_ALL: locale, LANG: locale, LANGUAGE: locale.split('.')[0] });
+  try { return await fn(); } finally {
+    for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+}
+
+/** True when git answers in Italian on this machine: the locale is installed and git carries its translation. */
+const gitSpeaksItalian = haveGit && (() => {
+  const r = require('child_process').spawnSync('git', ['status'], { cwd: os.tmpdir(), encoding: 'utf8', env: { ...process.env, LC_ALL: 'it_IT.UTF-8', LANG: 'it_IT.UTF-8', LANGUAGE: 'it_IT', GIT_CEILING_DIRECTORIES: os.tmpdir() } });
+  return /non è un repository/.test(String(r.stderr));
+})();
+
+test('every git the actions start answers in English, whatever the user\'s language', async () => {
+  const originalExecFile = cp.execFile;
+  const originalSpawn = cp.spawn;
+  const envs = [];
+  cp.execFile = (file, args, opts, cb) => { envs.push(opts.env); cb(null, 'abc\n', ''); };
+  cp.spawn = (file, args, opts) => {
+    envs.push(opts.env);
+    const child = new (require('events'))();
+    child.stdout = new (require('events'))(); child.stderr = new (require('events'))();
+    setImmediate(() => child.emit('close', 0));
+    return child;
+  };
+  try {
+    await inLocale('it_IT.UTF-8', async () => {
+      await run('deleteRemoteBranch', '/repo', { remote: 'origin', shortName: 'topic' }); // execFile
+      await run('fetchRemote', '/repo', { remote: 'origin' }).catch(() => {}); // spawn
+    });
+  } finally {
+    cp.execFile = originalExecFile;
+    cp.spawn = originalSpawn;
+  }
+  assert.ok(envs.length >= 2, `both ways of starting git were used (${envs.length})`);
+  for (const env of envs) assert.equal(env.LC_ALL, 'C');
+});
+
+test('deleteRemoteBranch cleans up a stale tracking ref for someone whose git speaks Italian', { skip: !gitSpeaksItalian && 'git does not speak Italian here (no it_IT locale or no translation)' }, async () => {
+  const repo = await makeRepo();
+  const bare = await addBareOrigin(repo);
+  try {
+    await git.run(['checkout', '-q', '-b', 'topic'], repo);
+    await git.run(['push', '-q', '-u', 'origin', 'topic'], repo);
+    await git.run(['branch', '-D', 'topic'], bare); // gone on the remote, still tracked here
+    const stale = await inLocale('it_IT.UTF-8', () => run('deleteRemoteBranch', repo, { remote: 'origin', shortName: 'topic' }));
+    assert.equal(stale.staleTrackingRefRemoved, true, 'git said "il riferimento remoto non esiste", which must count as "remote ref does not exist"');
+    await assert.rejects(git.run(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/topic'], repo));
+  } finally {
+    rmrf(repo, bare);
+  }
+});
+
 test('cherryPick applies a commit onto the current branch, requiring -m only for a merge commit', { skip: !haveGit && 'git not installed' }, async () => {
   const repo = await makeRepo();
   try {

@@ -36,7 +36,11 @@ const path = require('path');
 const git = require('./git');
 
 const MAX_BUFFER = 4 * 1024 * 1024;
-const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' };
+// LC_ALL=C: git answers in English whatever the user's language, as git.js
+// asks for its own commands. deleteBranch and deleteRemoteBranch read those
+// answers (NOT_FULLY_MERGED_RE, REMOTE_REF_GONE_RE): an Italian git says
+// "il riferimento remoto non esiste" for "remote ref does not exist".
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
 
 /** Run one git subprocess to completion, argv-array only, no shell. */
 function execGit(args, { cwd, signal } = {}) {
