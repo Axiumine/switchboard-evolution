@@ -1751,6 +1751,7 @@ const settingsPatcher = createSettingsPatcher({
     }
   },
   emit,
+  log,
 });
 ipcMain.handle('patch-setting', async (_event, key, patch) => {
   try { return await settingsPatcher.patch(key, patch); } catch (err) {

@@ -9,6 +9,7 @@ function setup(initial = { global: { sidebarWidth: 340 } }, over = {}) {
   const store = JSON.parse(JSON.stringify(initial));
   const writes = [];
   const events = [];
+  const logged = [];
   const calls = { harnesses: 0, languageServers: [] };
   const patcher = createSettingsPatcher({
     getSetting: key => (key in store ? JSON.parse(JSON.stringify(store[key])) : null),
@@ -19,9 +20,10 @@ function setup(initial = { global: { sidebarWidth: 340 } }, over = {}) {
     onHarnessesChanged: () => { calls.harnesses++; },
     onLanguageServers: on => { calls.languageServers.push(on); },
     emit: (...args) => events.push(args),
+    log: { error: (...args) => logged.push(args) },
     ...over,
   });
-  return { patcher, store, writes, events, calls };
+  return { patcher, store, writes, events, calls, logged };
 }
 
 test('a valid global patch is merged into the stored object and announced', async () => {
@@ -71,6 +73,44 @@ test('languageServers calls the switch of the language servers', async () => {
   assert.equal(result.ok, true);
   assert.equal(store.global.languageServers, false);
   assert.deepEqual(calls.languageServers, [false]);
+});
+
+test('a side effect that fails leaves the value saved, announced and reported as saved', async () => {
+  const { patcher, store, events, logged } = setup(undefined, {
+    onHarnessesChanged: () => { throw new Error('ENOSPC: System limit for number of file watchers reached'); },
+  });
+  const result = await patcher.patch('global', { disabledHarnesses: ['codex'] });
+  assert.deepEqual(result, { ok: true, settings: { sidebarWidth: 340, disabledHarnesses: ['codex'] } });
+  assert.deepEqual(store.global.disabledHarnesses, ['codex']);
+  assert.deepEqual(events, [['global-settings-changed', { settings: { sidebarWidth: 340, disabledHarnesses: ['codex'] }, changed: ['disabledHarnesses'] }]]);
+  assert.equal(logged.length, 1);
+  assert.match(String(logged[0][1]?.message), /ENOSPC/);
+});
+
+test('a side effect that rejects does not stop the next one', async () => {
+  const { patcher, store, events, logged, calls } = setup(undefined, {
+    onHarnessesChanged: async () => { throw new Error('watch failed'); },
+    onLanguageServers: async () => { calls.languageServers.push('ran'); throw new Error('stopAll rejected'); },
+  });
+  const harnesses = await patcher.patch('global', { disabledHarnesses: ['claude'] });
+  const servers = await patcher.patch('global', { languageServers: false });
+  assert.equal(harnesses.ok, true);
+  assert.equal(servers.ok, true);
+  assert.equal(store.global.languageServers, false);
+  assert.deepEqual(calls.languageServers, ['ran']);
+  assert.equal(events.length, 2);
+  assert.equal(logged.length, 2);
+});
+
+test('the settings announced and returned are the ones stored after the side effects', async () => {
+  // Another patch saved while the language servers were stopping.
+  const ctx = setup(undefined, {
+    onLanguageServers: async () => { await null; ctx.store.global.visibleSessionCount = 7; },
+  });
+  const result = await ctx.patcher.patch('global', { languageServers: false });
+  const expected = { sidebarWidth: 340, languageServers: false, visibleSessionCount: 7 };
+  assert.deepEqual(result, { ok: true, settings: expected });
+  assert.deepEqual(ctx.events, [['global-settings-changed', { settings: expected, changed: ['languageServers'] }]]);
 });
 
 test('a patch of editorPrefs is merged into the stored ones', async () => {

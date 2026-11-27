@@ -28,13 +28,19 @@ const isObject = value => !!value && typeof value === 'object' && !Array.isArray
  * `harnessIds`, `launchableHarnessIds` and `shellProfileIds` are functions
  * (the computer's CLIs and shells are read when a patch arrives).
  * `onHarnessesChanged` runs when the set of switched-off CLIs changed,
- * `onLanguageServers(on)` when a patch carries `languageServers`.
+ * `onLanguageServers(on)` when a patch carries `languageServers`. A side
+ * effect that fails is logged (`log.error`): the value is saved by then, so it
+ * is still announced and reported as saved.
  */
-function createSettingsPatcher({ getSetting, setSetting, harnessIds, launchableHarnessIds, shellProfileIds, onHarnessesChanged, onLanguageServers, emit }) {
+function createSettingsPatcher({ getSetting, setSetting, harnessIds, launchableHarnessIds, shellProfileIds, onHarnessesChanged, onLanguageServers, emit, log = console }) {
   const stored = key => {
     const value = getSetting(key);
     return isObject(value) ? value : {};
   };
+
+  async function sideEffect(name, run) {
+    try { await run(); } catch (err) { log.error(`[settings] ${name}`, err); }
+  }
 
   async function patchGlobal(rawPatch) {
     const checked = SettingsModel.validateGlobalPatch(rawPatch, { harnessIds: harnessIds(), shellProfileIds: shellProfileIds() });
@@ -45,12 +51,14 @@ function createSettingsPatcher({ getSetting, setSetting, harnessIds, launchableH
     if (patch.disabledHarnesses) patch.disabledHarnesses = keepOneHarnessOn(patch.disabledHarnesses, before, launchableHarnessIds());
     if (patch.editorPrefs) patch.editorPrefs = { ...(isObject(current.editorPrefs) ? current.editorPrefs : {}), ...patch.editorPrefs };
 
-    const settings = { ...current, ...patch };
-    setSetting('global', settings);
+    const written = { ...current, ...patch };
+    setSetting('global', written);
 
-    const after = new Set(settings.disabledHarnesses || []);
-    if (before.size !== after.size || [...before].some(id => !after.has(id))) await onHarnessesChanged();
-    if ('languageServers' in patch) await onLanguageServers(patch.languageServers);
+    const after = new Set(written.disabledHarnesses || []);
+    if (before.size !== after.size || [...before].some(id => !after.has(id))) await sideEffect('CLIs', onHarnessesChanged);
+    if ('languageServers' in patch) await sideEffect('language servers', () => onLanguageServers(patch.languageServers));
+    // Read again: another patch may have been saved while an effect ran.
+    const settings = stored('global');
     emit('global-settings-changed', { settings, changed: Object.keys(checked.patch) });
     return { ok: true, settings };
   }
