@@ -292,7 +292,13 @@ function overviewGroupOf(by, card, ctx) {
  * has set aside (see the field list in the plan). `total` and `running` count
  * the sessions that pass the filters, before the slug and "+ N older" cuts:
  * "N results" and "Stop N running". A group's `older` holds the closed cards
- * left out of it, for its "+ N older" card.
+ * left out of it, for its "+ N older" card; a card's `placeLabel` is what the
+ * "Folder or project" sort reads.
+ *
+ * Nothing moves until a re-sort: `previousOrder` (group key to card ids) holds
+ * the cards' places and `previousGroups` (group keys, in the order of the last
+ * render, or undefined) the groups' places; `resort` ignores both. Groups by
+ * period and status have a fixed order and ignore `previousGroups`.
  */
 function buildOverview(sessions, prefs, ctx) {
   const searching = !!ctx.searchIds;
@@ -367,7 +373,23 @@ function buildOverview(sessions, prefs, ctx) {
   if (fixed) {
     const rank = group => fixed.findIndex(([key]) => key === group.key);
     groups.sort((a, b) => rank(a) - rank(b));
-  } else if (prefs.group.by === 'project') {
+  } else {
+    // Groups ordered by their first card keep the places of the last render
+    // until a re-sort, as cards do: known ones in their old order, new ones on
+    // top, the one with the newest first card first.
+    if (!ctx.resort && ctx.previousGroups) {
+      const position = new Map(ctx.previousGroups.map((key, i) => [key, i]));
+      const newest = group => group.cards[0].sortTime;
+      groups.sort((a, b) => {
+        const aPos = position.get(a.key);
+        const bPos = position.get(b.key);
+        if (aPos !== undefined && bPos !== undefined) return aPos - bPos;
+        if (aPos === undefined && bPos !== undefined) return -1;
+        if (aPos !== undefined && bPos === undefined) return 1;
+        return newest(b) - newest(a);
+      });
+    }
+    // "No project" stays last.
     groups = [...groups.filter(g => g.key !== OVERVIEW_NO_PROJECT_KEY), ...groups.filter(g => g.key === OVERVIEW_NO_PROJECT_KEY)];
   }
 

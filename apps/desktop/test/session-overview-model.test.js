@@ -280,6 +280,34 @@ test('cards keep their places until resort and new ones go on top', () => {
   assert.deepEqual(cardIds(build(later, {}, { previousOrder, resort: true }).groups[0]), ['a', 'd', 'c', 'b']);
 });
 
+test('groups keep their places until resort and new ones go on top', () => {
+  const sessions = [
+    s('a', { days: 3, projectPath: '/Users/demo/alpha' }),
+    s('b', { days: 0.1, projectPath: '/Users/demo/beta' }),
+  ];
+  const groupKeys = (list, ctx) => build(list, { group: { by: 'folder' } }, ctx).groups.map(g => g.key);
+  const alpha = '/Users/demo/alpha';
+  const beta = '/Users/demo/beta';
+  const gamma = '/Users/demo/gamma';
+  assert.deepEqual(groupKeys(sessions, {}), [beta, alpha]);
+  // The older group was first at the last render: a newer card does not move it.
+  const previousGroups = [alpha, beta];
+  assert.deepEqual(groupKeys(sessions, { previousGroups }), [alpha, beta]);
+  assert.deepEqual(groupKeys(sessions, { previousGroups, resort: true }), [beta, alpha]);
+  // A new group goes on top, even with the oldest card.
+  const withNew = [...sessions, s('c', { days: 9, projectPath: gamma })];
+  assert.deepEqual(groupKeys(withNew, { previousGroups }), [gamma, alpha, beta]);
+  // Several new groups: the newest first card first.
+  const withTwo = [...withNew, s('d', { days: 5, projectPath: '/Users/demo/delta' })];
+  assert.deepEqual(groupKeys(withTwo, { previousGroups }), ['/Users/demo/delta', gamma, alpha, beta]);
+  // No project stays last, and period keeps its fixed order.
+  const projects = [s('p', { days: 0.1 }), s('q', { days: 3, project: { id: 'p1', name: 'One' } })];
+  const projectKeys = ctx => build(projects, { group: { by: 'project' } }, ctx).groups.map(g => g.key);
+  assert.deepEqual(projectKeys({ previousGroups: ['__no-project__', 'p1'] }), ['p1', '__no-project__']);
+  const periodKeys = build(sessions, { group: { by: 'period' } }, { previousGroups: ['older', 'today'] }).groups.map(g => g.key);
+  assert.deepEqual(periodKeys, ['today', '7d']);
+});
+
 test('cards follow the chosen sort and direction on resort', () => {
   const sessions = [
     s('a', { days: 3, name: 'Beta', created: new Date(ago(10)).toISOString(), projectPath: '/Users/demo/zeta' }),
