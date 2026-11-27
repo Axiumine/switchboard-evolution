@@ -135,7 +135,7 @@ function openPromptTemplateEditor(info, onSave) {
       <div class="gg-dialog-body">
         <div class="pi-template-host"></div>
         <div class="pi-placeholders">${(info.placeholders || M.PLACEHOLDERS).map((p) => `<div><code>${piEsc(p.name)}</code> ${piEsc(p.description)}</div>`).join('')}
-          <div>After the prompt the app adds, out of sight: the session's CLI, its last turns and the commands, skills and MCP servers it has, with how to call them.</div></div>
+          <div>After the prompt the app adds, out of sight: the session's CLI, its last turns and the commands, skills and MCP servers it has, with how to call them and the instruction to use one when it clearly fits the task.</div></div>
       </div>
       <div class="gg-dialog-error" role="alert" hidden></div>
       <div class="add-project-actions">

@@ -129,6 +129,16 @@ test('input: the default template, then the context block and the prompt', () =>
   assert.equal(bare.includes('available_capabilities'), false, 'no list without entries');
 });
 
+test('input: the app, not the editable template, asks to look for a fitting command, skill or MCP server', () => {
+  const entries = [e({ kind: 'skill', command: '/tdd', name: 'tdd', description: 'Test first.' })];
+  const custom = M.buildImproverInput({ template: 'Make it better.', prompt: 'add a test', cli: 'claude', mode: 'none', entries });
+  const block = custom.slice(custom.indexOf('<available_capabilities>'), custom.indexOf('</available_capabilities>'));
+  assert.match(block, /check this list for a command, skill or MCP server that fits the task/i);
+  assert.match(block, /only when it clearly fits/);
+  assert.ok(block.indexOf('fits the task') < block.indexOf('- /tdd'), 'the instruction comes before the list');
+  assert.equal(M.DEFAULT_TEMPLATE.includes('clearly fit'), false, 'not in the editable template any more');
+});
+
 test('reply: the last improved_prompt block, an unclosed one, or the whole text', () => {
   assert.equal(M.extractImproved('Sure.\n<improved_prompt>\nFix the login.\n\nRun the tests.\n</improved_prompt>\nDone'), 'Fix the login.\n\nRun the tests.');
   assert.equal(M.extractImproved('<improved_prompt>old</improved_prompt> <IMPROVED_PROMPT>new</IMPROVED_PROMPT>'), 'new');

@@ -9,7 +9,8 @@
 // with, after it, a context block the app builds and the editor never shows:
 // the session's CLI, the last turns of the conversation, and the commands,
 // skills, custom commands and MCP servers the session has, with the exact
-// way to call each. The reply is the rewritten prompt, inside
+// way to call each and the instruction to use one only when it clearly fits
+// (CAPABILITIES_INSTRUCTION: the app's, so no improver prompt drops it). The reply is the rewritten prompt, inside
 // <improved_prompt></improved_prompt>.
 //
 // Here: the settings and their checks, the template's placeholders, the
@@ -38,7 +39,6 @@
     '- carries the context the agent cannot find in the repository: the symptom and how to reproduce a bug, constraints, what must not change, a preferred approach;',
     '- names files, symbols or commands only when the prompt or the context below gives them; never invent paths, requirements or facts;',
     '- when the task changes code, asks for a check the agent can run (tests, build, lint, a reproduction) and for its result in the final report;',
-    '- uses commands, skills and MCP servers from the context only when they clearly fit, with the exact syntax given there, and only a few;',
     '- leaves out filler, capitalised emphasis and generic advice such as "think step by step";',
     '- stays as short as the task allows: if the prompt is already clear, change little.',
     '',
@@ -195,6 +195,9 @@
     ],
   };
 
+  // At the head of the list of what the session has, whatever the improver prompt says.
+  const CAPABILITIES_INSTRUCTION = 'Before rewriting, check this list for a command, skill or MCP server that fits the task. Use one only when it clearly fits, with the exact syntax given here, and only a few; otherwise use none.';
+
   /** How commands, skills and MCP servers are called in a message to `cli`. */
   function invocationRules(cli) {
     return INVOCATION_RULES[cli] || INVOCATION_RULES.claude;
@@ -324,7 +327,8 @@
     const caps = capabilitiesBlock(entries, prompt);
     if (caps) {
       const rules = invocationRules(cli).map((r) => `- ${r}`).join('\n');
-      parts.push(`<available_capabilities>\nHow to call them in a message to ${label}:\n${rules}\n\nWhat this session has:\n${caps}\n</available_capabilities>`);
+      // The app's own instruction, not the template's: an edited improver prompt cannot drop it.
+      parts.push(`<available_capabilities>\n${CAPABILITIES_INSTRUCTION}\n\nHow to call them in a message to ${label}:\n${rules}\n\nWhat this session has:\n${caps}\n</available_capabilities>`);
     }
     const context = `<switchboard_context>\n${parts.join('\n\n')}\n</switchboard_context>`;
     const promptBlock = `${context}\n\n<user_prompt>\n${userPrompt}\n</user_prompt>`;

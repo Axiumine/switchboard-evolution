@@ -62,7 +62,7 @@ export default function PromptImproverTemplateScreen() {
         {PLACEHOLDERS.map((p) => (
           <Text key={p.name} style={styles.placeholder}><Text style={styles.code}>{p.name}</Text> {p.description}</Text>
         ))}
-        <Text style={styles.placeholder}>{'After the prompt the computer adds, out of sight, the session\'s last turns and the commands, skills and MCP servers it has.'}</Text>
+        <Text style={styles.placeholder}>{'After the prompt the computer adds, out of sight, the session\'s last turns and the commands, skills and MCP servers it has, with the instruction to use one when it clearly fits the task.'}</Text>
       </View>
     </View>
   );
