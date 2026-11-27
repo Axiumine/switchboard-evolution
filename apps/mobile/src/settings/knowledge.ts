@@ -7,9 +7,10 @@ import { useCapability, useConnection } from '@/store/connection';
 
 // Node Knowledge's settings on the computer (main.js, through
 // remote-settings.js): which codebase-memory-mcp it runs, read only, and CBM's
-// own settings, each saved as it changes. The computer has no event for a
-// change of the config, so it is read when the tab opens; a save keeps the
-// settings the computer answers with, read after it.
+// own settings, each saved as it changes. They are read when the tab opens and
+// again on the computer's knowledge-changed without a project, which follows a
+// change of the config or of the program made anywhere (store/connection,
+// knowledgeChangedKeys); a save keeps the settings the computer answers with.
 
 /** The program the computer found (knowledge.js, binaryStatus). */
 export interface KnowledgeBinary {
@@ -30,6 +31,7 @@ export interface KnowledgeConfig {
   keys: Record<string, KnowledgeKeyKind>;
 }
 
+// store/connection invalidates both by these names (knowledgeChangedKeys).
 const BINARY_KEY = ['knowledge-binary'];
 const CONFIG_KEY = ['knowledge-config'];
 

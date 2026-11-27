@@ -81,3 +81,16 @@ test('a page whose open was overtaken stops before it draws', () => {
   assert.ok(checks.length >= 2, 'checked after the settings are read and before the page is drawn');
   assert.ok(body.indexOf('if (superseded()) return;') < body.indexOf('settingsViewerBody.innerHTML ='));
 });
+
+test('Node Knowledge follows knowledge-changed only while its page is on screen', () => {
+  // A follower of its own, on the preload's onKnowledgeChanged.
+  assert.match(panel, /const knowledgeChanges = createChangeFollower\(cb => \(window\.api\.onKnowledgeChanged \? window\.api\.onKnowledgeChanged\(cb\) : \(\) => \{\}\)\);/);
+  // Close and every new open drop the listener of the page before.
+  const close = panel.slice(panel.indexOf('function closeSettingsViewer('), panel.indexOf('async function openSettingsViewer('));
+  assert.match(close, /knowledgeChanges\.stop\(\);/);
+  const open = panel.slice(panel.indexOf('async function openSettingsViewer('));
+  assert.ok(open.indexOf('knowledgeChanges.stop();') > -1 && open.indexOf('knowledgeChanges.stop();') < open.indexOf('await '), 'stopped before the first wait');
+  // The section is handed a follow that does nothing once a later page (or Close) took over.
+  assert.match(open, /knRenderGlobalSettings\(knowledgeSection, \{ follow: onChange => \{ if \(live\(\)\) knowledgeChanges\.follow\(onChange, live\); \} \}\);/);
+  assert.match(open, /const live = \(\) => !superseded\(\) && knowledgeSection\.isConnected;/);
+});

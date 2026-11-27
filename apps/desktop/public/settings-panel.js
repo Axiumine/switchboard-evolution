@@ -73,6 +73,8 @@
     return { follow, stop };
   }
   const changes = createChangeFollower(cb => (window.api.onGlobalSettingsChanged ? window.api.onGlobalSettingsChanged(cb) : () => {}));
+  // Node Knowledge follows CBM's settings the same way (knowledge-changed, project-knowledge-settings.js).
+  const knowledgeChanges = createChangeFollower(cb => (window.api.onKnowledgeChanged ? window.api.onKnowledgeChanged(cb) : () => {}));
 
   // Each open takes a number; an open overtaken by a later one (or by Close)
   // while it waits for the settings stops before it draws.
@@ -81,6 +83,7 @@
   function closeSettingsViewer() {
     openToken++;
     changes.stop();
+    knowledgeChanges.stop();
     settingsViewer.style.display = 'none';
     const terminalArea = document.getElementById('terminal-area');
     const terminalHeader = document.getElementById('terminal-header');
@@ -259,6 +262,7 @@
     const token = ++openToken;
     const superseded = () => token !== openToken;
     changes.stop();
+    knowledgeChanges.stop();
     const isProject = scope === 'project';
     const settingsKey = isProject ? 'project:' + projectPath : 'global';
     const current = (await window.api.getSetting(settingsKey)) || {};
@@ -785,7 +789,11 @@
     if (editorSection) hideTabIfEmpty('editor', editorSection);
     // Node Knowledge: codebase-memory-mcp's program and its own settings (project-knowledge-settings.js).
     const knowledgeSection = settingsViewerBody.querySelector('#sv-knowledge');
-    if (knowledgeSection && typeof knRenderGlobalSettings === 'function') knRenderGlobalSettings(knowledgeSection);
+    if (knowledgeSection && typeof knRenderGlobalSettings === 'function') {
+      // Followed while this page is on screen; a section drawn late, after a later open or Close, follows nothing.
+      const live = () => !superseded() && knowledgeSection.isConnected;
+      knRenderGlobalSettings(knowledgeSection, { follow: onChange => { if (live()) knowledgeChanges.follow(onChange, live); } });
+    }
     // The prompt improver (prompt-improver-settings.js); its tab shows once the section does.
     const improverSection = settingsViewerBody.querySelector('#sv-prompt-improver');
     if (improverSection) {

@@ -58,6 +58,20 @@ export function request<T = any>(method: string, params: unknown[] = [], options
   return client.request<T>(method, params, options);
 }
 
+/**
+ * The queries a knowledge-changed event reads again (remote-knowledge.js): an
+ * index job moved, or a project's settings or ADR changed, for its project;
+ * without a project, CBM's program or its own settings changed (a phone, the
+ * computer's Settings, the defaults the app applies, a download): every
+ * project's, and Settings › Node Knowledge's (settings/knowledge.ts, its keys
+ * here because it imports this module). Only the queries on screen are read again.
+ */
+export function knowledgeChangedKeys(payload: unknown): string[][] {
+  const projectId = payload && typeof payload === 'object' ? (payload as { projectId?: string | null }).projectId : null;
+  if (projectId) return [['knowledge', projectId], ['knowledge-data', projectId]];
+  return [['knowledge'], ['knowledge-data'], ['knowledge-config'], ['knowledge-binary']];
+}
+
 /** Whether the computer is connected and offers `method` (older desktops lack newer ones). */
 export function hasCapability(status: ConnectionStatus, method: string): boolean {
   return status.state === 'online' && status.hello.methods.includes(method);
@@ -162,11 +176,8 @@ export const useConnection = create<ConnectionStore>((set, get) => {
           return;
         }
         if (event === 'knowledge-changed') {
-          // An index job moved, settings or an ADR changed (remote-knowledge.js).
-          const projectId = args[0] && typeof args[0] === 'object' ? (args[0] as { projectId?: string | null }).projectId : null;
-          // Only the queries on screen are read again; a finished job changes their answers.
-          queryClient.invalidateQueries({ queryKey: projectId ? ['knowledge', projectId] : ['knowledge'] });
-          queryClient.invalidateQueries({ queryKey: projectId ? ['knowledge-data', projectId] : ['knowledge-data'] });
+          // A finished job, or CBM's settings changed elsewhere, changes their answers.
+          for (const queryKey of knowledgeChangedKeys(args[0])) queryClient.invalidateQueries({ queryKey });
           return;
         }
         if (event === 'process-exited' || event === 'session-detected' || event === 'session-forked') {

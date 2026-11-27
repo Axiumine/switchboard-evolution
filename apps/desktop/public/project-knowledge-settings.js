@@ -3,7 +3,8 @@
 // codebase-memory-mcp the app runs, and CBM's own settings (`config`), which
 // its every process reads, the agents' sessions too. Each one is saved as it
 // changes, in CBM. The fields and their texts are the shared catalog's
-// (settings-model.js), which the phone shows too.
+// (settings-model.js), which the phone shows too, and the section follows a
+// change made there (knowledge-changed) while it is on screen.
 
 function knConfigControl(field, value, keys) {
   const kind = keys[field.key];
@@ -19,9 +20,37 @@ function knSettingsField(label, help, control) {
   return `<div class="settings-field"><div class="settings-field-info"><span class="settings-label">${escapeHtml(label)}</span><div class="settings-description">${help}</div></div><div class="settings-field-control">${control}</div></div>`;
 }
 
-async function knRenderGlobalSettings(el) {
+/**
+ * Put CBM's settings as read (`values`) into the section's controls, all but a
+ * field being typed in (`focused`), which keeps what is typed. A switch or a
+ * choice follows even with the focus: it is not being typed in.
+ */
+function knShowConfigValues(el, values, focused) {
+  el.querySelectorAll('[data-kn-key]').forEach(input => {
+    if (input === focused && input.type === 'text') return;
+    const key = input.dataset.knKey;
+    if (input.type === 'checkbox') input.checked = values[key] === 'true';
+    else if (key === 'ui_port') input.value = values[key] || '9749';
+    else input.value = values[key] ?? '';
+  });
+}
+
+// Each drawing of a section takes a number: one overtaken by a later drawing
+// (a new program, a click) stops at its next wait.
+const knSettingsDrawings = new WeakMap();
+
+/**
+ * Draw the section into `el`. `follow(onChange)`, from the settings panel,
+ * hands `onChange` the knowledge-changed events while the page is on screen
+ * (settings-panel.js, createChangeFollower).
+ */
+async function knRenderGlobalSettings(el, options = {}) {
+  const drawing = (knSettingsDrawings.get(el) || 0) + 1;
+  knSettingsDrawings.set(el, drawing);
+  const current = () => knSettingsDrawings.get(el) === drawing;
   el.innerHTML = '<div class="settings-section-title">Node Knowledge</div><div class="settings-description">Looking for codebase-memory-mcp…</div>';
   const status = await window.api.getKnowledgeBinary();
+  if (!current()) return;
   const bin = status?.binary || {};
   const found = bin.found;
   const { KNOWLEDGE_CONFIG_FIELDS, KNOWLEDGE_SOURCE_LABELS } = window.SettingsModel;
@@ -40,6 +69,7 @@ async function knRenderGlobalSettings(el) {
   let keys = {};
   if (found?.ok) {
     const cfg = await window.api.getKnowledgeConfig();
+    if (!current()) return;
     if (!cfg?.error) { values = cfg.values; keys = cfg.keys; }
   }
   if (values) {
@@ -68,13 +98,35 @@ async function knRenderGlobalSettings(el) {
   });
   const on = (act, fn) => el.querySelectorAll(`[data-kn-act="${act}"]`).forEach(b => b.addEventListener('click', fn));
   on('agents', () => { if (typeof knInstallAgents === 'function') knInstallAgents(() => say('codebase-memory-mcp is set up for your agents. Restart them to load it.')); });
-  on('pick', async () => { const r = await window.api.knowledgePickBinary(); if (!r?.canceled) knRenderGlobalSettings(el); });
-  on('default', async () => { await window.api.setKnowledgeGlobal({ binaryPath: '' }); knRenderGlobalSettings(el); });
+  on('pick', async () => { const r = await window.api.knowledgePickBinary(); if (!r?.canceled) knRenderGlobalSettings(el, options); });
+  on('default', async () => { await window.api.setKnowledgeGlobal({ binaryPath: '' }); knRenderGlobalSettings(el, options); });
   on('download', async (e) => {
     e.currentTarget.disabled = true;
     say('Downloading…');
     const r = await window.api.knowledgeDownloadBinary();
     if (r?.error) { say(r.error, true); e.currentTarget.disabled = false; return; }
-    knRenderGlobalSettings(el);
+    knRenderGlobalSettings(el, options);
+  });
+
+  // Changed elsewhere (a phone, the defaults the app applies): CBM's settings
+  // are read again into the controls, all but a field being typed in. A new
+  // program (picked, downloaded) or a newer one out draws the section again,
+  // once no field of it is being typed in. A download's steps draw nothing:
+  // its end is a new program.
+  if (typeof options.follow !== 'function') return;
+  options.follow(async ({ reason } = {}) => {
+    if (!current()) return;
+    if (reason === 'config') {
+      if (!values) return;
+      const cfg = await window.api.getKnowledgeConfig().catch(() => null);
+      if (!current() || !cfg || cfg.error) return;
+      values = cfg.values;
+      knShowConfigValues(el, values, document.activeElement);
+    } else if (reason === 'binary' || reason === 'latest') {
+      const redraw = () => { if (current()) knRenderGlobalSettings(el, options); };
+      const typing = document.activeElement;
+      if (typing && typing.type === 'text' && el.contains(typing)) typing.addEventListener('blur', redraw, { once: true });
+      else redraw();
+    }
   });
 }
