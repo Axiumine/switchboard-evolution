@@ -89,6 +89,19 @@ window.cmEditorPrefs = {
   set: setPref,
   toggle: togglePref,
   onChange: onPrefChange,
+  // The main window's copy of the global settings: apply what differs from
+  // this window's choices (fromApp: no write back), and, the first time the
+  // settings hold no editorPrefs, save this window's choices there.
+  sync(global) {
+    const model = window.SettingsModel;
+    if (!model || !model.editorPrefsSync) return;
+    const current = {};
+    // The language servers are a setting of their own, not part of editorPrefs.
+    for (const { name } of model.EDITOR_PREFS) if (name !== 'languageServers') current[name] = readPref(name);
+    const { migrate, apply } = model.editorPrefsSync(global || {}, current);
+    for (const [name, on] of Object.entries(apply)) setPref(name, !!on, { fromApp: true });
+    if (migrate && window.api && window.api.patchSetting) window.api.patchSetting('global', { editorPrefs: migrate });
+  },
 };
 
 marked.setOptions({ breaks: true, gfm: true });

@@ -3,7 +3,8 @@
 // in localStorage, which every window of the app shares, and every open
 // editor follows a change at once: in this window by an event, in the others
 // by the 'storage' event. The status bar, the right-click menu and Settings ›
-// Editor all set the same choice.
+// Editor all set the same choice. The global settings keep the choice too
+// (editorPrefs), and the main window follows them (cmEditorPrefs.sync).
 //
 // A preference that changes what an editor has lives in a Compartment, filled
 // from the choice and from what the editor is (its context: a small query box
@@ -24,6 +25,19 @@ const editorContext = Facet.define({ combine: values => Object.assign({}, ...val
 const prefChanged = StateEffect.define();
 
 const PREFS = new Map();
+
+/**
+ * The save of a preference the global settings keep too (editorPrefs, so a
+ * phone can change it). A window without the API (a file window) only has
+ * localStorage.
+ */
+function saveToGlobalSettings(name) {
+  return (on) => {
+    if (typeof window !== 'undefined' && window.api && window.api.patchSetting) {
+      window.api.patchSetting('global', { editorPrefs: { [name]: on } });
+    }
+  };
+}
 
 /**
  * A preference: `key` in localStorage, `fallback` when nothing is stored,
@@ -128,6 +142,7 @@ function prefActive(state, name) {
 
 definePref('whitespace', {
   key: 'editorShowWhitespace',
+  onSet: saveToGlobalSettings('whitespace'),
   label: 'Show Whitespace',
   // Spaces and tabs drawn, and the ones at the end of a line marked.
   extension: on => (on ? [highlightWhitespace(), highlightTrailingWhitespace()] : []),
@@ -135,6 +150,7 @@ definePref('whitespace', {
 
 definePref('minimap', {
   key: 'editorMinimap',
+  onSet: saveToGlobalSettings('minimap'),
   fallback: true,
   label: 'Minimap',
   // Not in a small box or the original side of a two-column diff.
@@ -143,6 +159,7 @@ definePref('minimap', {
 
 definePref('stickyScroll', {
   key: 'editorStickyScroll',
+  onSet: saveToGlobalSettings('stickyScroll'),
   fallback: true,
   label: 'Sticky Scroll',
   extension: (on, context) => (on && !context.compact ? stickyScroll() : []),
@@ -166,6 +183,7 @@ definePref('vim', {
   fallback: false,
   label: 'Vim Mode',
   first: true,
+  onSet: saveToGlobalSettings('vim'),
   // The add-on loads the first time: then every editor is configured again.
   extension: on => vimExtension(on, () => {
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(PREF_EVENT, { detail: { name: 'vim', on: true } }));

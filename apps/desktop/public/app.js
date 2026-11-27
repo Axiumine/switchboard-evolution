@@ -1601,6 +1601,8 @@ setTimeout(() => {
   const global = await window.api.getSetting('global');
   // The saved accent colour wins over the copy accent.js painted with.
   window.AccentColor?.sync(global || {});
+  // The editor's choices (localStorage) meet the saved ones: the first time, they are saved.
+  window.cmEditorPrefs?.sync(global || {});
   if (global) {
     if (global.sidebarWidth) {
       document.getElementById('sidebar').style.width = global.sidebarWidth + 'px';
@@ -1617,6 +1619,18 @@ setTimeout(() => {
     }
   }
 })();
+
+// A setting changed elsewhere (Settings here, the phone): follow it. `changed` names what the patch touched.
+window.api.onGlobalSettingsChanged?.(({ settings, changed }) => {
+  const global = settings || {};
+  const touched = new Set(changed || []);
+  if (touched.has('visibleSessionCount') && global.visibleSessionCount) window._setVisibleSessionCount(global.visibleSessionCount);
+  if (touched.has('sessionMaxAgeDays') && global.sessionMaxAgeDays) window._setSessionMaxAge(global.sessionMaxAgeDays);
+  if (touched.has('terminalTheme') && TERMINAL_THEMES[global.terminalTheme]) window._applyTerminalTheme(global.terminalTheme);
+  if (touched.has('accentColor')) window.AccentColor?.sync(global);
+  if (touched.has('editorPrefs')) window.cmEditorPrefs?.sync(global);
+  if (['visibleSessionCount', 'sessionMaxAgeDays', 'disabledHarnesses'].some(k => touched.has(k))) refreshSidebar();
+});
 
 loadProjects().then(async () => {
   if (PROJECT_WINDOW) { showProjectWindow(); return; }
