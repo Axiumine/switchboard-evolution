@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.20.1 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.21.0 (November 2026).
 
 ## At a glance
 
@@ -48,13 +48,14 @@ git diff --shortstat e594fa9 HEAD:apps/desktop
 | 26 Nov | Switchboard Evolution 1.19.1 | In the desktop's Pull Requests view, a text file that GitHub takes for binary (one with a NUL byte, as a prompt template that uses NULs as delimiters) shows its diff: the app reads its two versions from GitHub and compares them, each NUL shown as ␀. |
 | 26 Nov | Switchboard Evolution 1.20.0 | A prompt improver beside Commands (Cmd/Ctrl+Shift+P) and after "/" in the phone's composers: the prompt being written to a session's CLI is rewritten by that CLI, run once and out of sight on the user's own subscription with no API key, with the session's last turns and its commands, skills and MCP servers and how to call them. On the desktop it is read from the CLI's input box and put back in its place, never sent; on the phone it takes the field's place, with Undo. The rewriting instructions are editable in Settings, on the desktop and the phone. |
 | 27 Nov | Switchboard Evolution 1.20.1 | The desktop's Improve prompt window says which session the prompt goes into and stays tied to it: Expand makes it nearly as large as the app's window, and it opens in a window of its own, from which Insert and Replace still go into that session, even after switching to another one, and the main window then shows it. |
+| 27 Nov | Switchboard Evolution 1.21.0 | Settings in tabs, alike on the desktop and the phone: Application (with Updates and Support), Agents, Editor, Node Knowledge and Prompt Improver, and every setting is saved as it changes, with no Save button. The phone's Settings opens on a Computer tab with the pairing, then has the desktop's tabs and changes the computer's settings, codebase-memory-mcp's included; a change made on one shows on the other. The improver's instruction to look for a fitting command, skill or MCP server is part of its fixed prompt, no longer of the editable one. |
 
 What "an app of its own" means:
 
 - App id `io.github.vivi7.switchboard-e`, installed as `Switchboard Evolution.app`. Phones pair through the `switchboard-e://` scheme.
 - It runs next to the official Switchboard. Both can be open at once and share `~/.switchboard` (projects, session index), while their window settings stay apart.
 - It has no auto-update feed, so an official release never replaces it.
-- Its version is its own (1.20.1, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
+- Its version is its own (1.21.0, the same for the desktop and the phone app), far from upstream's 0.0.x. Upstream's build workflow exists only on `main`, so a tag on `master` never starts it.
 - At its first start it copies OmniboardV's settings.
 
 ## What it adds, by area
