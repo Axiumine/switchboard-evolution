@@ -4,7 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 
 import { Chips, ErrorText, Field, Hint, Label, MONO, SwitchRow } from '@/components/form';
 import { Section } from '@/components/project/Section';
-import { binaryText, knowledgeControl, knowledgeFields, saveKnowledgeConfig, useKnowledgeBinary, useKnowledgeConfig, type KnowledgeKeyKind } from '@/settings/knowledge';
+import { binaryText, commitKnowledgeField, knowledgeControl, knowledgeFields, saveKnowledgeConfig, useKnowledgeBinary, useKnowledgeConfig, type KnowledgeKeyKind } from '@/settings/knowledge';
 import type { KnowledgeConfigField } from '@/shared/vendor/settings-model';
 import { useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -124,7 +124,15 @@ function useSaves() {
     return saved;
   };
 
-  return { pending, notes, change };
+  /** End the edit of a count or limit field; `saved` is the value in force. True when it was saved. */
+  const commit = async (key: string, kind: KnowledgeKeyKind | undefined, raw: string, saved: string | undefined): Promise<boolean> => {
+    const result = await commitKnowledgeField(key, kind, raw, saved, saveKnowledgeConfig);
+    if (result.error) note(key, { error: result.error });
+    else if (result.saved) note(key, { saved: true });
+    return result.saved;
+  };
+
+  return { pending, notes, change, commit };
 }
 
 function Control(props: ControlProps) {
@@ -163,9 +171,10 @@ function ChipsControl({ field, kind, value, pending, notes, change }: ControlPro
 /**
  * A count or a limit. It keeps what is typed until its editing ends, then
  * saves; it shows the saved value again when nothing was saved. Nothing is
- * ever sent empty: a limit left empty is off, as it shows, and is not saved.
+ * ever sent empty: an emptied field says why under it (a limit is turned off
+ * by typing "off").
  */
-function FieldControl({ field, kind, value, notes, change }: ControlProps) {
+function FieldControl({ field, kind, value, notes, commit }: ControlProps) {
   const shown = value ?? '';
   const [text, setText] = useState(shown);
   const editing = useRef(false);
@@ -181,22 +190,15 @@ function FieldControl({ field, kind, value, notes, change }: ControlProps) {
   const end = (raw: string) => {
     if (!editing.current) return;
     editing.current = false;
-    const next = raw.trim();
-    if (!typed.current || next === latest.current || (next === '' && kind === 'limit')) {
-      typed.current = false;
-      setText(latest.current);
-      return;
-    }
+    if (!typed.current) { setText(latest.current); return; }
     typed.current = false;
-    if (next === '') {
-      setText(latest.current);
-      return;
-    }
-    change(field.key, next, false).then((saved) => {
+    commit(field.key, kind, raw, latest.current).then((saved) => {
       if (!saved && !editing.current) setText(latest.current);
     });
   };
 
+  // A limit also takes "off", so it gets the full keyboard; a count only digits.
+  const limit = kind === 'limit';
   return (
     <>
       <Label>{field.label}</Label>
@@ -208,8 +210,10 @@ function FieldControl({ field, kind, value, notes, change }: ControlProps) {
           onFocus={() => { editing.current = true; typed.current = false; }}
           onSubmitEditing={(e) => end(e.nativeEvent.text)}
           onEndEditing={(e) => end(e.nativeEvent.text)}
-          placeholder={kind === 'limit' ? 'off' : undefined}
-          keyboardType="number-pad"
+          placeholder={limit ? 'off' : undefined}
+          keyboardType={limit ? 'default' : 'number-pad'}
+          autoCapitalize="none"
+          autoCorrect={false}
           returnKeyType="done"
           maxLength={64}
           accessibilityLabel={field.label}

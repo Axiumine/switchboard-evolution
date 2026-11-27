@@ -95,3 +95,30 @@ export function binaryText(bin: KnowledgeBinary): { summary: string; problem: st
     path: found.path,
   };
 }
+
+/**
+ * What ending the edit of a count or limit field does: nothing when it is
+ * unchanged (a limit that is not listed is off), the computer's refusal text
+ * (knowledge.js, cleanConfigValue) for an empty value, which is never sent, and
+ * otherwise the save. `error` is why it was not saved; the field then shows
+ * the saved value again.
+ */
+export async function commitKnowledgeField(
+  key: string,
+  kind: KnowledgeKeyKind | undefined,
+  raw: string,
+  saved: string | undefined,
+  save: (key: string, value: string) => Promise<void>,
+): Promise<{ saved: boolean; error: string | null }> {
+  const limit = kind === 'limit';
+  const value = raw.trim();
+  const before = (saved ?? '').trim();
+  if (value === before || (limit && (value || 'off') === (before || 'off'))) return { saved: false, error: null };
+  if (!value) return { saved: false, error: `${key} takes a whole number${limit ? ' or off' : ''}` };
+  try {
+    await save(key, value);
+    return { saved: true, error: null };
+  } catch (err) {
+    return { saved: false, error: (err instanceof Error && err.message) || 'Not saved' };
+  }
+}
