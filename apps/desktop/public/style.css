@@ -4080,7 +4080,54 @@ button.cm-status-item:disabled { cursor: default; }
   margin-top: 8px;
 }
 
-.settings-cancel-btn {
+/* Global Settings tabs (settings-panel.js): the look of the project page's tabs (.ws-tab).
+   The bar stays at the top while a long tab scrolls: flush with the page's
+   top, above #settings-viewer-body's 32px padding. */
+.settings-tabs {
+  position: sticky;
+  top: -32px;
+  z-index: 2;
+  display: flex;
+  gap: 22px;
+  margin-bottom: 24px;
+  background: #111118;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+
+.settings-tab {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 10px 2px;
+  margin-bottom: -1px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #7a7a90;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.settings-tab:hover { color: #b0b0c4; }
+.settings-tab.active { color: #d0d0e8; border-bottom-color: var(--accent); }
+.settings-tab:focus-visible { outline: 1px solid rgb(from var(--accent) r g b / 0.6); outline-offset: 2px; border-radius: 3px; }
+
+/* "Saved" beside a field's label for a moment, or why its value was refused. */
+.settings-field-note {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #3ecf5a;
+}
+.settings-field-note.error { color: #df7180; }
+.settings-field-note:empty { display: none; }
+.settings-field-info > .settings-notice { margin: 8px 0 0; }
+
+.settings-close-btn {
   background: transparent;
   border: 1px solid rgba(255,255,255,0.12);
   color: #9090a8;
@@ -4093,34 +4140,10 @@ button.cm-status-item:disabled { cursor: default; }
   transition: all 0.15s;
 }
 
-.settings-cancel-btn:hover {
+.settings-close-btn:hover {
   background: rgba(255,255,255,0.06);
   border-color: rgba(255,255,255,0.2);
   color: #c0c0d0;
-}
-
-.settings-save-btn {
-  background: rgb(from var(--accent) r g b / 0.12);
-  border: 1px solid rgb(from var(--accent) r g b / 0.3);
-  color: var(--accent);
-  font-size: 13px;
-  padding: 8px 24px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-family: inherit;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.settings-save-btn:hover {
-  background: rgb(from var(--accent) r g b / 0.2);
-  border-color: rgb(from var(--accent) r g b / 0.5);
-}
-
-.settings-save-btn.saved {
-  background: rgba(62,207,90,0.12);
-  border-color: rgba(62,207,90,0.3);
-  color: #3ecf5a;
 }
 
 .settings-notice {

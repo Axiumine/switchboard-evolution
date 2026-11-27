@@ -21,7 +21,7 @@ function load() {
     console,
   });
   vm.runInContext(`${escapeAttrSource}\n${read('project-knowledge-view.js')}\n${read('project-knowledge-lens.js')}\n${read('project-knowledge-settings.js')}
-    this.api = { knViewRenderers, knConfigControl, KN_CONFIG_FIELDS, KN_LENS_PARTITION, knLensRecolor, KN_LENS_CSS };`, context);
+    this.api = { knViewRenderers, knConfigControl, KN_LENS_PARTITION, knLensRecolor, KN_LENS_CSS };`, context);
   return context.api;
 }
 
@@ -40,7 +40,10 @@ test('CBM settings become a switch, a list or a field, with the value escaped', 
   const limit = api.knConfigControl({ key: 'index_max_files' }, undefined, keys);
   assert.match(limit, /placeholder="off"/, 'a limit CBM does not list is off');
   assert.doesNotMatch(api.knConfigControl({ key: 'ui_port' }, '"><b>', keys), /<b>/);
-  for (const field of api.KN_CONFIG_FIELDS) assert.ok(field.label && field.help, field.key);
+  // The fields and their texts are the shared catalog's.
+  for (const field of require('../public/settings-model').KNOWLEDGE_CONFIG_FIELDS) assert.ok(field.label && field.help, field.key);
+  assert.match(read('project-knowledge-settings.js'), /of KNOWLEDGE_CONFIG_FIELDS\b/);
+  assert.doesNotMatch(read('project-knowledge-settings.js'), /KN_CONFIG_FIELDS/, 'no copy of the catalog');
 });
 
 

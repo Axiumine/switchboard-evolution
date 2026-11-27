@@ -95,11 +95,11 @@ test('the box sits below the projects list, outside it, and only the Projects ta
   assert.match(app, /donateBar\.hidden = tabName !== 'projects'/);
 });
 
-test('the global Settings end with the same box, without its X', () => {
+test('the global Settings end their Application tab with the same box, without its X', () => {
   const panel = fs.readFileSync(path.join(__dirname, '../public/settings-panel.js'), 'utf8');
-  assert.match(panel, /\$\{!isProject \? `<div class="settings-section">\s*<div class="settings-section-title">Support<\/div>/);
+  assert.match(panel, /const applicationSections = isProject \? '' : `[\s\S]*<div class="settings-section">\s*<div class="settings-section-title">Support<\/div>\s*<div class="settings-donate" id="sv-donate"><\/div>\s*<\/div>`;/);
   assert.match(panel, /donateSlot\.appendChild\(window\.buildDonateBox\(\)\)/);
-  assert.ok(panel.indexOf('id="sv-donate"') < panel.indexOf('class="settings-btn-row"'), 'the last section, before Cancel and Save');
+  assert.ok(panel.indexOf('id="sv-donate"') < panel.indexOf('class="settings-btn-row"'), 'the last section, before Close');
 
   const box = fs.readFileSync(path.join(__dirname, '../public/donate-box.js'), 'utf8');
   assert.match(box, /buildDonateBox\(\{ closable: true \}\)/, 'only the sidebar box has the X');

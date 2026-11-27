@@ -2,15 +2,12 @@
 // calls renderEditorSettings): the editor's preferences, the same ones the
 // status bar and the editor's right-click menu switch (editor/prefs.mjs, on
 // window.cmEditorPrefs). Each one applies at once, to every open editor, and
-// is remembered on this computer; the panel's Save button is not needed.
+// is saved in the app's settings as it changes.
 
-const EDITOR_SETTINGS = [
-  { name: 'minimap', help: 'A small view of the whole file at the right of each editor, with the matches of a search and the changes of a diff. Not in narrow editors.' },
-  { name: 'stickyScroll', help: 'The first lines of the blocks you are scrolling through stay at the top of the editor; a click goes to one.' },
-  { name: 'whitespace', help: 'Draw spaces and tabs, and mark the ones at the end of a line.' },
-  { name: 'vim', help: 'Edit with Vim\'s keys and modes. The app\'s keys (find, save, go to line, go to symbol) stay the app\'s.' },
-  { name: 'languageServers', help: 'Hover, errors, go to definition, rename and suggestions from the language servers installed on this computer, started for the languages found in a project\'s folders (each project\'s Settings) when a file of theirs opens. Off: none starts, in any project, and the running ones stop.' },
-];
+// The preferences in the section's order, with their help: the shared
+// catalog's (settings-model.js), so the phone shows the same texts.
+const EDITOR_SETTINGS = (typeof module !== 'undefined' && module.exports ? require('./settings-model') : window.SettingsModel)
+  .EDITOR_PREFS.map(({ name, help }) => ({ name, help }));
 
 /** The section's HTML for the preferences the editor has: [{ name, label, on }]. */
 function editorSettingsHtml(prefs) {

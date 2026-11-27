@@ -1,5 +1,12 @@
 // Settings panel component
-// Manages the global and project settings viewer UI.
+// The Global Settings page, in tabs (Application, Agents, Editor, Node
+// Knowledge, Prompt Improver), and a folder's own settings, without tabs.
+// Each setting is saved as it changes, one key at a time (patch-setting): a
+// switch or a choice when it is clicked, a text or number field when you
+// leave it or press Enter. "Saved" shows beside the field for a moment; a
+// value the main process refuses shows why, and the field goes back to the
+// saved value. What a save changes in the app (theme, sidebar, accent) the
+// main window applies itself, from global-settings-changed (app.js).
 
 (function () {
   // Where the app's source, releases and issues are (Settings › Updates).
@@ -8,7 +15,50 @@
   const settingsViewerTitle = document.getElementById('settings-viewer-title');
   const settingsViewerBody = document.getElementById('settings-viewer-body');
 
+  const SAVED_NOTE_MS = 1500;
+  const NOTICE_MS = 8000;
+  // The page always opens on this tab.
+  const FIRST_TAB = 'application';
+
+  // The control of each setting the panel draws (the Editor's are
+  // editor-settings.js's). The CLI toggles are a class: one per CLI.
+  const CONTROL_IDS = {
+    disabledHarnesses: 'sv-harness-toggle',
+    permissionMode: 'sv-perm-mode',
+    worktree: 'sv-worktree',
+    worktreeName: 'sv-worktree-name',
+    chrome: 'sv-chrome',
+    addDirs: 'sv-add-dirs',
+    codexSandbox: 'sv-codex-sandbox',
+    codexApproval: 'sv-codex-approval',
+    codexModel: 'sv-codex-model',
+    preLaunchCmd: 'sv-pre-launch',
+    terminalTheme: 'sv-terminal-theme',
+    accentColor: 'sv-accent-color',
+    shellProfile: 'sv-shell-profile',
+    visibleSessionCount: 'sv-visible-count',
+    sessionMaxAgeDays: 'sv-max-age',
+    terminalEngine: 'sv-terminal-engine',
+    projectsRoot: 'sv-projects-root',
+    mcpEmulation: 'sv-mcp-emulation',
+  };
+
+  // What a field shows when neither the settings nor the app's defaults have a value.
+  const FALLBACKS = {
+    permissionMode: '', worktree: false, worktreeName: '', chrome: false, addDirs: '',
+    codexSandbox: '', codexApproval: '', codexModel: '', preLaunchCmd: '',
+    visibleSessionCount: 10, sessionMaxAgeDays: 3, terminalTheme: 'switchboard', mcpEmulation: true, shellProfile: 'auto',
+  };
+
+  // The open page's listener for settings changed elsewhere (a phone, another window).
+  let stopFollowing = null;
+  function stopFollowingChanges() {
+    if (stopFollowing) stopFollowing();
+    stopFollowing = null;
+  }
+
   function closeSettingsViewer() {
+    stopFollowingChanges();
     settingsViewer.style.display = 'none';
     const terminalArea = document.getElementById('terminal-area');
     const terminalHeader = document.getElementById('terminal-header');
@@ -26,11 +76,169 @@
     }
   }
 
+  // --- Controls: a setting's value as its control shows it, in the form it is saved ---
+
+  const harnessToggles = () => [...settingsViewerBody.querySelectorAll('.sv-harness-toggle')];
+  const controlOf = key => (key === 'disabledHarnesses' ? harnessToggles()[0] : settingsViewerBody.querySelector('#' + CONTROL_IDS[key])) || null;
+
+  function readControl(key) {
+    // The switched-off set rather than the switched-on one, so a CLI added in
+    // a later version is on by default instead of silently missing. Locked
+    // toggles count too: `disabled` only stops the user changing them.
+    if (key === 'disabledHarnesses') return harnessToggles().filter(t => !t.checked).map(t => t.dataset.harness);
+    const el = controlOf(key);
+    if (key === 'accentColor') {
+      const c = AccentColor.normalize(el.value);
+      return c === AccentColor.DEFAULT ? null : c;
+    }
+    if (el.type === 'checkbox') return el.checked;
+    // Empty is not a number: the main process refuses it, and the field goes back.
+    if (el.type === 'number') return el.value.trim() === '' ? null : Number(el.value);
+    if (key === 'permissionMode') return el.value || null;
+    return el.value;
+  }
+
+  function writeControl(key, value) {
+    if (key === 'disabledHarnesses') {
+      const off = new Set(value || []);
+      for (const t of harnessToggles()) t.checked = !off.has(t.dataset.harness);
+      syncHarnessLock();
+      return;
+    }
+    if (key === 'accentColor') { showAccent(AccentColor.apply(value)); return; }
+    const el = controlOf(key);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!value;
+    else el.value = value ?? '';
+  }
+
+  const showsValue = (key, value) => JSON.stringify(readControl(key)) === JSON.stringify(value ?? null);
+  // A field being typed in is not overwritten by a change made elsewhere.
+  const isTyping = el => !!el && el === document.activeElement && (el.type === 'text' || el.type === 'number');
+
+  // At least one CLI has to stay on, or the sidebar has nothing to show and
+  // the "+" menu nothing to offer. The last one still switched on is locked
+  // rather than hidden, so the reason is visible. Main keeps one on too, for
+  // any writer that does not come through this panel.
+  function syncHarnessLock() {
+    const toggles = harnessToggles();
+    const on = toggles.filter(t => t.checked);
+    for (const t of toggles) {
+      const lock = on.length === 1 && t.checked;
+      t.disabled = lock;
+      const desc = t.closest('.settings-field')?.querySelector('.settings-description');
+      if (desc && lock && !desc.dataset.originalText) {
+        desc.dataset.originalText = desc.innerHTML;
+        desc.textContent = 'Kept on — at least one CLI must stay enabled';
+      } else if (desc && !lock && desc.dataset.originalText) {
+        desc.innerHTML = desc.dataset.originalText;
+        delete desc.dataset.originalText;
+      }
+    }
+  }
+
+  // The accent's swatches and picker show `color` (already applied).
+  function showAccent(color) {
+    const group = settingsViewerBody.querySelector('.sv-accent');
+    if (!group) return;
+    group.querySelectorAll('.sv-accent-swatch').forEach(b => {
+      const on = b.dataset.accent === color;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    const picker = group.querySelector('#sv-accent-color');
+    if (picker.value !== color) picker.value = color;
+  }
+
+  // --- Notes beside a field: "Saved" for a moment, or why a value was refused ---
+
+  function fieldNote(control) {
+    const field = control.closest('.settings-field');
+    let note = field.querySelector('.settings-field-note');
+    if (!note) {
+      note = document.createElement('span');
+      note.className = 'settings-field-note';
+      note.setAttribute('role', 'status');
+      field.querySelector('.settings-label').after(note);
+    }
+    clearTimeout(note._hideTimer);
+    return note;
+  }
+
+  function noteSaved(control) {
+    const note = fieldNote(control);
+    note.classList.remove('error');
+    note.textContent = 'Saved';
+    note._hideTimer = setTimeout(() => { note.textContent = ''; }, SAVED_NOTE_MS);
+  }
+
+  // The error stays until the field is saved again.
+  function noteError(control, message) {
+    const note = fieldNote(control);
+    note.classList.add('error');
+    note.textContent = message;
+  }
+
+  // A longer notice under the field's description (IDE Emulation's).
+  function fieldNotice(control, text) {
+    const info = control.closest('.settings-field')?.querySelector('.settings-field-info');
+    if (!info) return;
+    info.querySelector('.settings-notice')?.remove();
+    const notice = document.createElement('div');
+    notice.className = 'settings-notice';
+    notice.textContent = text;
+    info.appendChild(notice);
+    setTimeout(() => notice.remove(), NOTICE_MS);
+  }
+
+  // --- Tabs (global settings only) ---
+
+  function tabBarHtml() {
+    return `<div class="settings-tabs" role="tablist" aria-label="Settings">${SettingsModel.DESKTOP_TABS.map(t => {
+      const on = t.key === FIRST_TAB;
+      return `<button type="button" class="settings-tab${on ? ' active' : ''}" role="tab" id="sv-tab-${t.key}" data-tab="${t.key}" aria-controls="sv-pane-${t.key}" aria-selected="${on}" tabindex="${on ? 0 : -1}">${escapeHtml(t.label)}</button>`;
+    }).join('')}</div>`;
+  }
+
+  function bindTabs() {
+    const tabs = [...settingsViewerBody.querySelectorAll('.settings-tab')];
+    const select = (tab) => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        settingsViewerBody.querySelector(`.settings-pane[data-tab="${t.dataset.tab}"]`).hidden = !on;
+      }
+      settingsViewerBody.scrollTop = 0;
+    };
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => select(tab));
+      // Arrows, Home and End move between the tabs shown.
+      tab.addEventListener('keydown', (e) => {
+        const shown = tabs.filter(t => !t.hidden);
+        const i = shown.indexOf(tab);
+        const next = { ArrowRight: shown[(i + 1) % shown.length], ArrowLeft: shown[(i - 1 + shown.length) % shown.length], Home: shown[0], End: shown[shown.length - 1] }[e.key];
+        if (!next) return;
+        e.preventDefault();
+        select(next);
+        next.focus();
+      });
+    }
+  }
+
+  // A tab whose section has nothing to show is left out.
+  function hideTabIfEmpty(key, section) {
+    const tab = settingsViewerBody.querySelector(`.settings-tab[data-tab="${key}"]`);
+    if (tab) tab.hidden = section.hidden || !section.innerHTML.trim();
+  }
+
   async function openSettingsViewer(scope, projectPath) {
+    stopFollowingChanges();
     const isProject = scope === 'project';
     const settingsKey = isProject ? 'project:' + projectPath : 'global';
     const current = (await window.api.getSetting(settingsKey)) || {};
-    const globalSettings = isProject ? ((await window.api.getSetting('global')) || {}) : {};
+    let globalSettings = isProject ? ((await window.api.getSetting('global')) || {}) : {};
     // What actually runs when nothing is stored: the app's defaults under the
     // saved global values. A fresh install shows these, not blanks.
     const appDefaults = (await window.api.getEffectiveSettings(null).catch(() => null)) || {};
@@ -54,25 +262,24 @@
     settingsViewer.dataset.scope = scope;
     settingsViewer.style.display = 'flex';
 
+    const set = v => v !== undefined && v !== null;
+    // What runs when this scope has no value of its own: the global setting, else the app's default.
+    const inheritedValue = name => (set(globalSettings[name]) ? globalSettings[name] : set(appDefaults[name]) ? appDefaults[name] : FALLBACKS[name]);
+    const usesGlobal = name => isProject && !set(current[name]);
+
     function useGlobalCheckbox(fieldName) {
       if (!isProject) return '';
-      const useGlobal = current[fieldName] === undefined || current[fieldName] === null;
-      return `<label class="settings-use-global"><input type="checkbox" data-field="${fieldName}" class="use-global-cb" ${useGlobal ? 'checked' : ''}> Use global default</label>`;
+      return `<label class="settings-use-global"><input type="checkbox" data-field="${fieldName}" class="use-global-cb" ${usesGlobal(fieldName) ? 'checked' : ''}> Use global default</label>`;
     }
 
-    function fieldValue(fieldName, fallback) {
-      const set = (v) => v !== undefined && v !== null;
-      if (isProject && !set(current[fieldName])) {
-        if (set(globalSettings[fieldName])) return globalSettings[fieldName];
-        return set(appDefaults[fieldName]) ? appDefaults[fieldName] : fallback;
-      }
+    function fieldValue(fieldName) {
+      if (usesGlobal(fieldName)) return inheritedValue(fieldName);
       if (set(current[fieldName])) return current[fieldName];
-      return set(appDefaults[fieldName]) ? appDefaults[fieldName] : fallback;
+      return set(appDefaults[fieldName]) ? appDefaults[fieldName] : FALLBACKS[fieldName];
     }
 
     function fieldDisabled(fieldName) {
-      if (!isProject) return '';
-      return (current[fieldName] === undefined || current[fieldName] === null) ? 'disabled' : '';
+      return usesGlobal(fieldName) ? 'disabled' : '';
     }
 
     // Fetched before the template so the toggles render as direct children of
@@ -90,33 +297,33 @@
           </div>
         </div>`).join('');
 
-    const permModeValue = fieldValue('permissionMode', '');
-    const codexSandboxValue = fieldValue('codexSandbox', '');
-    const codexApprovalValue = fieldValue('codexApproval', '');
-    const codexModelValue = fieldValue('codexModel', '');
-    const worktreeValue = fieldValue('worktree', false);
-    const worktreeNameValue = fieldValue('worktreeName', '');
-    const chromeValue = fieldValue('chrome', false);
-    const preLaunchValue = fieldValue('preLaunchCmd', '');
-    const addDirsValue = fieldValue('addDirs', '');
-    const visCountValue = fieldValue('visibleSessionCount', 10);
-    const maxAgeValue = fieldValue('sessionMaxAgeDays', 3);
-    const themeValue = fieldValue('terminalTheme', 'switchboard');
+    const permModeValue = fieldValue('permissionMode');
+    const codexSandboxValue = fieldValue('codexSandbox');
+    const codexApprovalValue = fieldValue('codexApproval');
+    const codexModelValue = fieldValue('codexModel');
+    const worktreeValue = fieldValue('worktree');
+    const worktreeNameValue = fieldValue('worktreeName');
+    const chromeValue = fieldValue('chrome');
+    const preLaunchValue = fieldValue('preLaunchCmd');
+    const addDirsValue = fieldValue('addDirs');
+    const visCountValue = fieldValue('visibleSessionCount');
+    const maxAgeValue = fieldValue('sessionMaxAgeDays');
+    const themeValue = fieldValue('terminalTheme');
     // Global only: the accent colour of the whole app (accent.js).
     const accentValue = window.AccentColor ? AccentColor.normalize(current.accentColor) : '#8088ff';
-    const mcpEmulationValue = fieldValue('mcpEmulation', true);
+    const mcpEmulationValue = fieldValue('mcpEmulation');
     // Global-only: where new projects get their folder (projects.js). Empty
     // means the default, ~/Switchboard.
     const projectsRootValue = (!isProject && typeof current.projectsRoot === 'string') ? current.projectsRoot : '';
     const terminalEngineValue = current.terminalEngine === 'inside' ? 'inside' : 'hc';
-    const shellProfileValue = fieldValue('shellProfile', 'auto');
+    const shellProfileValue = fieldValue('shellProfile');
 
     // Discover available shell profiles
     let shellProfiles = [];
     try { shellProfiles = await window.api.getShellProfiles(); } catch {};
 
-    settingsViewerBody.innerHTML = `
-    <div class="settings-form">
+    // The Agents tab; a folder's settings are these sections alone (no CLI Agents).
+    const agentsSections = `
       ${harnessFields ? `<div class="settings-section">
         <div class="settings-section-title">CLI Agents</div>${harnessFields}
       </div>` : ''}
@@ -257,9 +464,11 @@
             <input type="text" class="settings-input" id="sv-pre-launch" placeholder="e.g. aws-vault exec profile --" value="${escapeHtml(preLaunchValue)}" ${fieldDisabled('preLaunchCmd')}>
           </div>
         </div>
-      </div>
+      </div>`;
 
-      ${!isProject ? `<div class="settings-section">
+    // The Application tab: the app's own settings, then Updates and Support.
+    const applicationSections = isProject ? '' : `
+      <div class="settings-section">
         <div class="settings-section-title">Application</div>
 
         <div class="settings-field">
@@ -364,15 +573,9 @@
             <label class="settings-toggle"><input type="checkbox" id="sv-mcp-emulation" ${mcpEmulationValue ? 'checked' : ''}><span class="settings-toggle-slider"></span></label>
           </div>
         </div>
-      </div>` : ''}
+      </div>
 
-      ${!isProject ? '<div class="settings-section" id="sv-editor"></div>' : ''}
-
-      ${!isProject ? '<div class="settings-section" id="sv-knowledge"></div>' : ''}
-
-      ${!isProject ? '<div class="settings-section" id="sv-prompt-improver" hidden></div>' : ''}
-
-      ${!isProject ? `<div class="settings-section">
+      <div class="settings-section">
         <div class="settings-section-title">Updates</div>
         <div class="settings-field">
           <div class="settings-field-info">
@@ -392,64 +595,142 @@
             <button class="settings-check-updates-btn" id="sv-github-btn" title="${SWITCHBOARD_REPOSITORY_URL}">Open on GitHub</button>
           </div>
         </div>
-      </div>` : ''}
+      </div>
 
-      ${!isProject ? `<div class="settings-section">
+      <div class="settings-section">
         <div class="settings-section-title">Support</div>
         <div class="settings-donate" id="sv-donate"></div>
-      </div>` : ''}
+      </div>`;
+
+    settingsViewerBody.innerHTML = `
+    <div class="settings-form">
+      ${isProject ? agentsSections : `${tabBarHtml()}
+      <div class="settings-pane" data-tab="application" id="sv-pane-application" role="tabpanel" aria-labelledby="sv-tab-application">${applicationSections}</div>
+      <div class="settings-pane" data-tab="agents" id="sv-pane-agents" role="tabpanel" aria-labelledby="sv-tab-agents" hidden>${agentsSections}</div>
+      <div class="settings-pane" data-tab="editor" id="sv-pane-editor" role="tabpanel" aria-labelledby="sv-tab-editor" hidden>
+        <div class="settings-section" id="sv-editor"></div>
+      </div>
+      <div class="settings-pane" data-tab="knowledge" id="sv-pane-knowledge" role="tabpanel" aria-labelledby="sv-tab-knowledge" hidden>
+        <div class="settings-section" id="sv-knowledge"></div>
+      </div>
+      <div class="settings-pane" data-tab="improver" id="sv-pane-improver" role="tabpanel" aria-labelledby="sv-tab-improver" hidden>
+        <div class="settings-section" id="sv-prompt-improver" hidden></div>
+      </div>`}
 
       <div class="settings-btn-row">
-        <button class="settings-cancel-btn" id="sv-cancel-btn">Cancel</button>
-        <button class="settings-save-btn" id="sv-save-btn">Save Settings</button>
-        ${isProject ? '<button class="settings-remove-btn" id="sv-remove-btn">Hide Folder</button>' : ''}
+        <button type="button" class="settings-close-btn" id="sv-close-btn">Close</button>
+        ${isProject ? '<button type="button" class="settings-remove-btn" id="sv-remove-btn">Hide Folder</button>' : ''}
       </div>
     </div>
   `;
-
-    // At least one CLI has to stay on, or the sidebar has nothing to show and
-    // the "+" menu nothing to offer. The last one still switched on is locked
-    // rather than hidden, so the reason is visible. Main refuses an all-off
-    // state too, for any writer that does not come through this panel.
-    const harnessToggles = [...settingsViewerBody.querySelectorAll('.sv-harness-toggle')];
-    function syncHarnessLock() {
-      const on = harnessToggles.filter(t => t.checked);
-      for (const t of harnessToggles) {
-        const lock = on.length === 1 && t.checked;
-        t.disabled = lock;
-        const field = t.closest('.settings-field');
-        const desc = field?.querySelector('.settings-description');
-        if (desc && lock && !desc.dataset.originalText) {
-          desc.dataset.originalText = desc.innerHTML;
-          desc.textContent = 'Kept on — at least one CLI must stay enabled';
-        } else if (desc && !lock && desc.dataset.originalText) {
-          desc.innerHTML = desc.dataset.originalText;
-          delete desc.dataset.originalText;
-        }
-      }
-    }
-    harnessToggles.forEach(t => t.addEventListener('change', syncHarnessLock));
+    const form = settingsViewerBody.querySelector('.settings-form');
+    if (!isProject) bindTabs();
     syncHarnessLock();
 
-    // Use-global checkboxes toggle field disabled state
+    // --- Saving: each setting as it changes ---
+
+    const drawnKeys = Object.keys(CONTROL_IDS).filter(key => controlOf(key));
+    const useGlobalBox = key => settingsViewerBody.querySelector(`.use-global-cb[data-field="${key}"]`);
+    // What each setting is saved as, here: what a field goes back to when a
+    // save is refused. A folder's own value is null while it uses the global one.
+    const saved = {};
+    for (const key of drawnKeys) saved[key] = usesGlobal(key) ? null : readControl(key);
+
+    // One save at a time per setting, so a quick second change compares with
+    // what the first one saved.
+    const queues = {};
+    const enqueue = (key, job) => (queues[key] = (queues[key] || Promise.resolve()).then(job).catch(() => {}));
+    const saveField = (key, value, control) => enqueue(key, () => writeField(key, value, control));
+
+    async function writeField(key, value, control) {
+      const patch = SettingsModel.changedPatch(key, value, saved[key]);
+      if (!patch) return;
+      const res = await window.api.patchSetting(settingsKey, patch).catch(err => ({ ok: false, error: err.message }));
+      if (res && res.ok) {
+        // As the main process saved it: trimmed, or with the last CLI kept on.
+        saved[key] = res.settings[key] ?? null;
+        if (!showsValue(key, saved[key])) writeControl(key, saved[key]);
+        // Compared with what was sent: global-settings-changed may already have reset the toggles.
+        const keptOn = key === 'disabledHarnesses' && (saved[key] || []).length < patch[key].length;
+        if (keptOn) noteError(control, 'Kept on — at least one CLI must stay enabled');
+        else noteSaved(control);
+        if (key === 'mcpEmulation') fieldNotice(control, 'IDE Emulation setting changed. New sessions will use the updated setting — running sessions are not affected.');
+      } else {
+        writeControl(key, saved[key]);
+        noteError(control, (res && res.error) || 'Not saved');
+      }
+      if (isProject) showFolderValue(key);
+    }
+
+    // A folder without a value of its own shows the global one, and its field is locked.
+    function showFolderValue(key) {
+      const box = useGlobalBox(key);
+      if (!box) return;
+      box.checked = saved[key] === null;
+      controlOf(key).disabled = box.checked;
+      if (box.checked) writeControl(key, inheritedValue(key));
+    }
+
+    for (const key of drawnKeys) {
+      if (key === 'disabledHarnesses' || key === 'accentColor') continue;
+      const el = controlOf(key);
+      el.addEventListener('change', () => saveField(key, readControl(key), el));
+    }
+
+    for (const toggle of harnessToggles()) {
+      toggle.addEventListener('change', () => {
+        syncHarnessLock();
+        saveField('disabledHarnesses', readControl('disabledHarnesses'), toggle);
+      });
+    }
+
+    // "Use global default": ticked, the folder's value goes; unticked, the value shown becomes the folder's.
     settingsViewerBody.querySelectorAll('.use-global-cb').forEach(cb => {
       cb.addEventListener('change', () => {
-        const field = cb.dataset.field;
-        const fieldMap = {
-          permissionMode: 'sv-perm-mode',
-          worktree: 'sv-worktree',
-          worktreeName: 'sv-worktree-name',
-          chrome: 'sv-chrome',
-          preLaunchCmd: 'sv-pre-launch',
-          addDirs: 'sv-add-dirs',
-          codexSandbox: 'sv-codex-sandbox',
-          codexApproval: 'sv-codex-approval',
-          codexModel: 'sv-codex-model',
-        };
-        const input = settingsViewerBody.querySelector('#' + fieldMap[field]);
-        if (input) input.disabled = cb.checked;
+        const key = cb.dataset.field;
+        controlOf(key).disabled = cb.checked;
+        if (!cb.checked) { saveField(key, readControl(key), cb); return; }
+        writeControl(key, inheritedValue(key));
+        saveField(key, null, cb);
       });
     });
+
+    // Accent colour: shown at once in every window, saved when picked.
+    const accentGroup = settingsViewerBody.querySelector('.sv-accent');
+    if (accentGroup && window.AccentColor) {
+      const picker = accentGroup.querySelector('#sv-accent-color');
+      const choose = (color) => {
+        showAccent(AccentColor.apply(color));
+        saveField('accentColor', readControl('accentColor'), accentGroup);
+      };
+      accentGroup.querySelectorAll('.sv-accent-swatch').forEach(b => { b.onclick = () => choose(b.dataset.accent); });
+      picker.addEventListener('input', () => { AccentColor.apply(picker.value); });
+      picker.addEventListener('change', () => choose(picker.value));
+    }
+
+    // A setting changed elsewhere (a phone, another window, or this page's own
+    // save): show it, apart from a field being typed in, which shows what is
+    // saved once it is left.
+    stopFollowing = window.api.onGlobalSettingsChanged?.(({ settings, changed }) => {
+      if (!form.isConnected) { stopFollowingChanges(); return; }
+      const next = settings || {};
+      if (isProject) globalSettings = next;
+      for (const key of changed || []) {
+        if (!drawnKeys.includes(key)) continue;
+        if (isProject) {
+          if (useGlobalBox(key)?.checked) writeControl(key, inheritedValue(key));
+          continue;
+        }
+        saved[key] = next[key] ?? null;
+        const el = controlOf(key);
+        if (!isTyping(el)) writeControl(key, saved[key]);
+        else el.addEventListener('blur', () => enqueue(key, () => { if (!showsValue(key, saved[key])) writeControl(key, saved[key]); }), { once: true });
+      }
+    }) || null;
+
+    // --- Actions and the sections that draw themselves ---
+
+    settingsViewerBody.querySelector('#sv-close-btn').addEventListener('click', () => closeSettingsViewer());
 
     // Project templates folder (global only)
     const openTemplates = settingsViewerBody.querySelector('#sv-open-templates');
@@ -471,111 +752,24 @@
       }).catch(() => {});
     }
 
-    // Save button
-    settingsViewerBody.querySelector('#sv-save-btn').addEventListener('click', async () => {
-      let settings = {};
-
-      if (isProject) {
-        // Only save fields where "use global" is unchecked
-        settingsViewerBody.querySelectorAll('.use-global-cb').forEach(cb => {
-          if (!cb.checked) {
-            const field = cb.dataset.field;
-            const fieldMap = {
-              permissionMode: () => settingsViewerBody.querySelector('#sv-perm-mode').value || null,
-              worktree: () => settingsViewerBody.querySelector('#sv-worktree').checked,
-              worktreeName: () => settingsViewerBody.querySelector('#sv-worktree-name').value.trim(),
-              chrome: () => settingsViewerBody.querySelector('#sv-chrome').checked,
-              preLaunchCmd: () => settingsViewerBody.querySelector('#sv-pre-launch').value.trim(),
-              addDirs: () => settingsViewerBody.querySelector('#sv-add-dirs').value.trim(),
-              codexSandbox: () => settingsViewerBody.querySelector('#sv-codex-sandbox').value,
-              codexApproval: () => settingsViewerBody.querySelector('#sv-codex-approval').value,
-              codexModel: () => settingsViewerBody.querySelector('#sv-codex-model').value.trim(),
-            };
-            if (fieldMap[field]) settings[field] = fieldMap[field]();
-          }
-        });
-      } else {
-        settings.permissionMode = settingsViewerBody.querySelector('#sv-perm-mode').value || null;
-        settings.worktree = settingsViewerBody.querySelector('#sv-worktree').checked;
-        settings.worktreeName = settingsViewerBody.querySelector('#sv-worktree-name').value.trim();
-        settings.chrome = settingsViewerBody.querySelector('#sv-chrome').checked;
-        settings.preLaunchCmd = settingsViewerBody.querySelector('#sv-pre-launch').value.trim();
-        settings.addDirs = settingsViewerBody.querySelector('#sv-add-dirs').value.trim();
-        settings.codexSandbox = settingsViewerBody.querySelector('#sv-codex-sandbox').value;
-        settings.codexApproval = settingsViewerBody.querySelector('#sv-codex-approval').value;
-        settings.codexModel = settingsViewerBody.querySelector('#sv-codex-model').value.trim();
-        // Store the disabled set rather than the enabled one, so a CLI added in
-        // a later version is on by default instead of silently missing.
-        // Includes locked and unavailable toggles: `disabled` only stops the
-        // user changing them, their checked state is still the setting.
-        const toggles = [...settingsViewerBody.querySelectorAll('.sv-harness-toggle')];
-        if (toggles.length) {
-          settings.disabledHarnesses = toggles.filter(t => !t.checked).map(t => t.dataset.harness);
-        }
-        settings.visibleSessionCount = parseInt(settingsViewerBody.querySelector('#sv-visible-count').value) || 10;
-        settings.sessionMaxAgeDays = parseInt(settingsViewerBody.querySelector('#sv-max-age').value) || 3;
-        settings.terminalTheme = settingsViewerBody.querySelector('#sv-terminal-theme').value || 'switchboard';
-        settings.mcpEmulation = settingsViewerBody.querySelector('#sv-mcp-emulation').checked;
-        settings.shellProfile = settingsViewerBody.querySelector('#sv-shell-profile').value || 'auto';
-        settings.projectsRoot = settingsViewerBody.querySelector('#sv-projects-root').value.trim();
-        settings.terminalEngine = settingsViewerBody.querySelector('#sv-terminal-engine').value === 'inside' ? 'inside' : 'hc';
-      }
-
-      // Merge form values into existing settings to preserve keys not managed by the form
-      if (!isProject) {
-        const existing = (await window.api.getSetting('global')) || {};
-        settings = { ...existing, ...settings };
-      }
-
-      await window.api.setSetting(settingsKey, settings);
-
-      // Update visibleSessionCount, sessionMaxAgeDays, and theme
-      if (!isProject) {
-        if (settings.visibleSessionCount && typeof window._setVisibleSessionCount === 'function') {
-          window._setVisibleSessionCount(settings.visibleSessionCount);
-        }
-        if (settings.sessionMaxAgeDays && typeof window._setSessionMaxAge === 'function') {
-          window._setSessionMaxAge(settings.sessionMaxAgeDays);
-        }
-        if (settings.terminalTheme && typeof window._applyTerminalTheme === 'function') {
-          window._applyTerminalTheme(settings.terminalTheme);
-        }
-        if (typeof refreshSidebar === 'function') refreshSidebar();
-      }
-
-      // Notify if IDE Emulation changed
-      if (!isProject && settings.mcpEmulation !== mcpEmulationValue) {
-        const notice = document.createElement('div');
-        notice.className = 'settings-notice';
-        notice.textContent = 'IDE Emulation setting changed. New sessions will use the updated setting \u2014 running sessions are not affected.';
-        const saveBtn = settingsViewerBody.querySelector('#sv-save-btn');
-        saveBtn.parentElement.insertBefore(notice, saveBtn);
-        setTimeout(() => notice.remove(), 8000);
-      }
-
-      const saveBtn = settingsViewerBody.querySelector('#sv-save-btn');
-      saveBtn.textContent = '✓ Saved';
-      saveBtn.style.background = '#2ea043';
-      saveBtn.style.color = '#fff';
-      setTimeout(() => closeSettingsViewer(), 600);
-    });
-
-    // Cancel button
-    settingsViewerBody.querySelector('#sv-cancel-btn').addEventListener('click', () => {
-      closeSettingsViewer();
-    });
-
     const githubBtn = settingsViewerBody.querySelector('#sv-github-btn');
     if (githubBtn) githubBtn.addEventListener('click', () => window.api.openExternal(SWITCHBOARD_REPOSITORY_URL));
     // The editor's preferences (editor-settings.js), applied as they change.
     const editorSection = settingsViewerBody.querySelector('#sv-editor');
     if (editorSection && typeof renderEditorSettings === 'function') renderEditorSettings(editorSection);
+    if (editorSection) hideTabIfEmpty('editor', editorSection);
     // Node Knowledge: codebase-memory-mcp's program and its own settings (project-knowledge-settings.js).
     const knowledgeSection = settingsViewerBody.querySelector('#sv-knowledge');
     if (knowledgeSection && typeof knRenderGlobalSettings === 'function') knRenderGlobalSettings(knowledgeSection);
-    // The prompt improver (prompt-improver-settings.js) applies its changes at once, like the Editor's.
+    // The prompt improver (prompt-improver-settings.js); its tab shows once the section does.
     const improverSection = settingsViewerBody.querySelector('#sv-prompt-improver');
-    if (improverSection && typeof renderPromptImproverSettings === 'function') renderPromptImproverSettings(improverSection);
+    if (improverSection) {
+      hideTabIfEmpty('improver', improverSection);
+      if (typeof renderPromptImproverSettings === 'function') {
+        Promise.resolve(renderPromptImproverSettings(improverSection)).catch(() => {})
+          .then(() => hideTabIfEmpty('improver', improverSection));
+      }
+    }
 
     // The donation box of the Projects tab, always here and without its X (donate-box.js).
     const donateSlot = settingsViewerBody.querySelector('#sv-donate');
@@ -592,12 +786,12 @@
       const settingsUpdaterHandler = (type, data) => {
         if (!updateStatusEl) return;
         switch (type) {
-          case 'checking': updateStatusEl.textContent = '\u2014 checking\u2026'; break;
-          case 'update-available': updateStatusEl.textContent = `\u2014 v${data.version} available`; break;
-          case 'update-not-available': updateStatusEl.textContent = '\u2014 up to date'; break;
-          case 'download-progress': updateStatusEl.textContent = `\u2014 downloading ${Math.round(data.percent)}%`; break;
-          case 'update-downloaded': updateStatusEl.textContent = `\u2014 v${data.version} ready, restart to update`; break;
-          case 'error': updateStatusEl.textContent = '\u2014 check failed'; break;
+          case 'checking': updateStatusEl.textContent = '— checking…'; break;
+          case 'update-available': updateStatusEl.textContent = `— v${data.version} available`; break;
+          case 'update-not-available': updateStatusEl.textContent = '— up to date'; break;
+          case 'download-progress': updateStatusEl.textContent = `— downloading ${Math.round(data.percent)}%`; break;
+          case 'update-downloaded': updateStatusEl.textContent = `— v${data.version} ready, restart to update`; break;
+          case 'error': updateStatusEl.textContent = '— check failed'; break;
         }
       };
       window.api.onUpdaterEvent(settingsUpdaterHandler);
@@ -606,33 +800,13 @@
       });
     }
 
-    // Accent colour: shown at once in every window and saved right away, apart from Save.
-    const accentGroup = settingsViewerBody.querySelector('.sv-accent');
-    if (accentGroup && window.AccentColor) {
-      const picker = accentGroup.querySelector('#sv-accent-color');
-      const choose = async (color) => {
-        const c = AccentColor.apply(color);
-        accentGroup.querySelectorAll('.sv-accent-swatch').forEach(b => {
-          const on = b.dataset.accent === c;
-          b.classList.toggle('on', on);
-          b.setAttribute('aria-pressed', String(on));
-        });
-        if (picker.value !== c) picker.value = c;
-        const existing = (await window.api.getSetting('global')) || {};
-        if (existing.accentColor === c || (!existing.accentColor && c === AccentColor.DEFAULT)) return;
-        await window.api.setSetting('global', { ...existing, accentColor: c === AccentColor.DEFAULT ? null : c });
-      };
-      accentGroup.querySelectorAll('.sv-accent-swatch').forEach(b => { b.onclick = () => choose(b.dataset.accent); });
-      picker.addEventListener('input', () => { AccentColor.apply(picker.value); });
-      picker.addEventListener('change', () => choose(picker.value));
-    }
-
     // Remove project button
     const removeBtn = settingsViewerBody.querySelector('#sv-remove-btn');
     if (removeBtn) {
       removeBtn.addEventListener('click', async () => {
         if (!confirm(`Hide project "${shortName}" from Switchboard?\n\nThis hides the project from the sidebar. Your session files are not deleted.`)) return;
         await window.api.removeProject(projectPath);
+        stopFollowingChanges();
         settingsViewer.style.display = 'none';
         document.getElementById('placeholder').style.display = 'flex';
         if (typeof loadProjects === 'function') loadProjects();

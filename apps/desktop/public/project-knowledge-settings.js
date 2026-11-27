@@ -2,20 +2,8 @@
 // Settings (settings-panel.js calls knRenderGlobalSettings): which
 // codebase-memory-mcp the app runs, and CBM's own settings (`config`), which
 // its every process reads, the agents' sessions too. Each one is saved as it
-// changes, apart from the panel's Save button, since it lives in CBM.
-
-const KN_CONFIG_FIELDS = [
-  { key: 'auto_watch', label: 'Refresh the agents\' projects', help: 'Re-index the project of an agent\'s session when its git state moves.' },
-  { key: 'watch_non_git', label: 'Watch folders without git', help: 'Also re-index such folders when files change (a scan of the tree).' },
-  { key: 'ignore_worktrees', label: 'Leave git worktrees alone', help: 'Do not index linked worktrees on the automatic paths.' },
-  { key: 'auto_index', label: 'Index new projects', help: 'Index a folder when an agent first opens a session in it. On unless you turn it off.' },
-  { key: 'auto_index_limit', label: 'Up to', help: 'Files at most, for that automatic index: 2147483647, the most CBM takes, unless you change it.', number: true },
-  { key: 'doc_candidates', label: 'Docs to code', help: 'Link documentation to the code it describes (auto: on in a full index).' },
-  { key: 'index_max_files', label: 'Files per index', help: 'A limit, or off.', limit: true },
-  { key: 'index_max_source_mb', label: 'Source per index (MB)', help: 'A limit, or off.', limit: true },
-  { key: 'index_max_rss_mb', label: 'Memory while indexing (MB)', help: 'A limit, or off.', limit: true },
-  { key: 'index_max_duration_seconds', label: 'Time per index (s)', help: 'A limit, or off.', limit: true },
-];
+// changes, in CBM. The fields and their texts are the shared catalog's
+// (settings-model.js), which the phone shows too.
 
 function knConfigControl(field, value, keys) {
   const kind = keys[field.key];
@@ -36,7 +24,8 @@ async function knRenderGlobalSettings(el) {
   const status = await window.api.getKnowledgeBinary();
   const bin = status?.binary || {};
   const found = bin.found;
-  const sourceText = { override: 'from SWITCHBOARD_CBM', settings: 'chosen here', agents: 'the one your agents use', installed: 'installed on this computer' }[found?.source] || '';
+  const { KNOWLEDGE_CONFIG_FIELDS, KNOWLEDGE_SOURCE_LABELS } = window.SettingsModel;
+  const sourceText = KNOWLEDGE_SOURCE_LABELS[found?.source] || '';
   let html = '<div class="settings-section-title">Node Knowledge</div>';
   html += knSettingsField('codebase-memory-mcp',
     found
@@ -55,7 +44,7 @@ async function knRenderGlobalSettings(el) {
   }
   if (values) {
     html += '<div class="settings-description kn-settings-note">codebase-memory-mcp\'s own settings: every CBM process reads them, your agents\' sessions too. Each one saves as it changes; the watcher and Lens ones apply when CBM\'s daemon next starts.</div>';
-    for (const field of KN_CONFIG_FIELDS) {
+    for (const field of KNOWLEDGE_CONFIG_FIELDS) {
       if (!(field.key in keys)) continue;
       html += knSettingsField(field.label, escapeHtml(field.help), knConfigControl(field, values[field.key], keys));
     }
