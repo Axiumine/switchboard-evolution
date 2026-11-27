@@ -147,6 +147,7 @@ const {
 const dbModule = require('./db');
 
 const { createSettingsPatcher, keepOneHarnessOn } = require('./settings-patch');
+const SettingsModel = require('./public/settings-model');
 const { getHarness, DEFAULT_HARNESS, transcriptPath, availableHarnesses, allHarnesses, progressBusyState,
         harnessForFolder: getHarnessForFolder } = require('./harnesses');
 const claudeHarness = getHarness(DEFAULT_HARNESS);
@@ -432,6 +433,8 @@ require('./remote-worktrees');
 require('./remote-knowledge');
 // The prompt improver and its settings, for a paired phone.
 require('./remote-prompt-improver');
+// The global settings and CBM's settings, for a paired phone.
+require('./remote-settings');
 // What of the Pull Requests tab a paired phone may use.
 require('./remote-pull-requests');
 // What of the Actions view a paired phone may use (not the downloads).
@@ -1751,6 +1754,24 @@ const settingsPatcher = createSettingsPatcher({
 });
 ipcMain.handle('patch-setting', async (_event, key, patch) => {
   try { return await settingsPatcher.patch(key, patch); } catch (err) {
+    log.error('[settings]', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// The global settings as a phone shows them: the values in force, and the
+// options its fields need (only what a phone reads, no folder listings).
+ipcMain.handle('get-global-settings', () => ({
+  values: SettingsModel.effectiveGlobalValues(getSetting('global') || {}, SETTING_DEFAULTS),
+  options: {
+    harnesses: allHarnesses().filter(h => h.buildLaunchArgs).map(h => ({ id: h.id, label: h.label, enabled: !disabledHarnessIds().has(h.id) })),
+    shellProfiles: getShellProfiles().map(p => ({ id: p.id, name: p.name })),
+    terminalEngine: terminalEngineStatus,
+    templatesDir: projects.templatesRoot() || null,
+  },
+}));
+ipcMain.handle('set-global-settings', async (_event, patch) => {
+  try { return await settingsPatcher.patch('global', patch); } catch (err) {
     log.error('[settings]', err);
     return { ok: false, error: err.message };
   }

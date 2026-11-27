@@ -4,11 +4,16 @@
 // only checks the shape of each parameter. Parameters are positional, in the
 // order of the IPC handlers in main.js.
 //
-// Left out on purpose, like the app's other global settings: which program
-// the desktop runs (set-knowledge-global, the binary's download), CBM's own
-// settings (get/set-knowledge-config), its installer for the agents, the Lens
-// (a web page on the desktop, without a login) and the native dialogs (the
-// traces file, the program). A phone sends traces as data instead.
+// Exposed to a phone here: the tab's own queries and jobs. CBM's program and
+// settings (get-knowledge-binary, get/set-knowledge-config) are in
+// remote-settings.js, with the app's other global settings.
+//
+// Left out on purpose, desktop-only: which program the desktop runs
+// (set-knowledge-global, the binary's pick and download), CBM's installer for
+// the agents, the Lens (a web page on the desktop, without a login; its keys
+// ui_enabled and ui_port are refused by set-knowledge-config) and the native
+// dialogs (the traces file, the program). A phone sends traces as data
+// instead.
 
 const { allow, allowEvent } = require('./remote-api');
 

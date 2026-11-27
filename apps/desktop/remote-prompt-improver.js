@@ -4,10 +4,12 @@
 // of each parameter. Parameters are positional, in the order of the IPC
 // handlers in main.js.
 //
-// The app's global settings are left out of the phone on purpose
-// (remote-knowledge.js); the prompt improver's are the exception the user
-// asked for: the phone shows and edits them, improver prompt included,
-// through these two channels only.
+// The app's other global settings, and CBM's, are in remote-settings.js
+// (a phone may change them, Pre-launch Command, Projects Folder, permission
+// mode and sandbox included: no new power, since a paired phone already types
+// into terminals and starts sessions). The generic get-setting and
+// set-setting stay desktop-only; the prompt improver's settings, improver
+// prompt included, are edited through the two channels below.
 
 const { allow, allowEvent } = require('./remote-api');
 const { MODES, ENGINES, CLIS, MAX_PROMPT, MAX_TEMPLATE } = require('./public/prompt-improver-model');

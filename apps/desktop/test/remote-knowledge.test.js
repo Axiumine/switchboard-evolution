@@ -78,10 +78,10 @@ test('wrong parameters are refused before the handler runs', async () => {
   assert.equal(calls.length, 0);
 });
 
-test('the desktop\'s own settings, the program, the Lens and the dialogs stay off the phone', () => {
+test('the program, the Lens and the dialogs stay off the phone', () => {
   const { api } = setup();
   const capabilities = api.capabilities();
-  for (const method of ['set-knowledge-global', 'get-knowledge-global', 'knowledge-pick-binary', 'knowledge-download-binary', 'get-knowledge-config', 'set-knowledge-config', 'knowledge-install-agents', 'knowledge-lens', 'knowledge-import-traces-file', 'knowledge-restart']) {
+  for (const method of ['set-knowledge-global', 'get-knowledge-global', 'knowledge-pick-binary', 'knowledge-download-binary', 'knowledge-install-agents', 'knowledge-lens', 'knowledge-import-traces-file', 'knowledge-restart']) {
     assert.equal(capabilities.includes(method), false, method);
   }
 });
