@@ -36,6 +36,8 @@ On Arch the package is named **`switchboard-doctly`**. The app is still called S
 
 Packaged builds check GitHub Releases for updates on launch and every 4 hours, download in the background, and show a toast when an update is ready. Restart to install immediately, or dismiss and it installs on next quit. To build from source instead, see [Development](#development).
 
+In a terminal, `-h` or `--help` lists the program's options and `-v` or `--version` prints its version, for example `switchboard-e --version` on Linux. Neither opens the app.
+
 ## Supported CLIs
 
 | | Claude Code (`claude`) | Codex (`codex`) | OpenCode (`opencode`) |

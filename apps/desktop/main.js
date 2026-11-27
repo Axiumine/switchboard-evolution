@@ -1,4 +1,6 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu, webContents } = require('electron');
+// `--help` and `--version` answer and exit here, before anything below runs (cli-flags.js).
+require('./cli-flags').answerCliFlags(process.argv, app);
 // Capture every IPC handler as it is registered, so the remote-access server
 // can call the same functions. Must run before the first registration below.
 require('./ipc-registry').install(ipcMain);
