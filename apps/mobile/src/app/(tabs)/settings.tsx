@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { TabBar } from '@/components/TabBar';
+import { CatalogTab } from '@/components/settings/CatalogTab';
 import { ComputerTab } from '@/components/settings/ComputerTab';
 import { PromptImproverTab } from '@/components/settings/PromptImproverTab';
 import { settingsTabs, type PhoneSettingsTab } from '@/settings/tabs';
@@ -39,7 +40,10 @@ function body(tab: PhoneSettingsTab) {
   switch (tab) {
     case 'computer': return <ComputerTab />;
     case 'improver': return <PromptImproverTab />;
-    // Application, Agents, Editor and Node Knowledge: the computer's own settings, to come.
+    case 'application':
+    case 'agents':
+    case 'editor': return <CatalogTab key={tab} tab={tab} />;
+    // Node Knowledge: the computer's own settings, to come.
     default: return <Text style={styles.soon}>Coming from the computer…</Text>;
   }
 }
