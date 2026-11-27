@@ -7,6 +7,7 @@
 // Depends on: toggleGridView, isSessionNavKey, handleSessionNavKey, focusGridCard,
 // wrapInGridCard, showGridView (grid-view.js)
 // Depends on: shellEscape (utils.js)
+// Depends on: terminalFontSize, terminalInitialRows, createTerminalZoomAddon (terminal-zoom.js)
 
 // --- Terminal key bindings ---
 // Shift+Enter → kitty protocol (CSI 13;2u) so Claude Code treats it as newline, not submit.
@@ -452,7 +453,8 @@ function createTerminalEntry(session) {
     .catch(err => console.warn('[terminal] Could not open link:', err));
 
   const terminal = new Terminal({
-    fontSize: 12,
+    fontSize: terminalFontSize(),
+    rows: terminalInitialRows(),
     fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
     theme: TERMINAL_THEME,
     cursorBlink: false,
@@ -568,6 +570,7 @@ function createTerminalEntry(session) {
     return true;
   });
   openSessions.set(sessionId, entry);
+  terminal.loadAddon(createTerminalZoomAddon(entry, { mac: isMac, onWheel: linkHandler.leave }));
   // OSC 8 and web links retain precedence over detected filesystem paths.
   const fileLinks = TerminalFileLinks.createFileLinkProvider(terminal, {
     getSession: () => entry.session, ...linkActions,

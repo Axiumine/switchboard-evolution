@@ -62,7 +62,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 
 - **Session browser** — Every session from every supported CLI, organized by folder, searchable by content.
 - **Fork and resume** — Branch off from any point in a session's history.
-- **Built-in terminal** — Connect to running sessions or launch new ones without leaving the app.
+- **Built-in terminal** — Connect to running sessions or launch new ones without leaving the app. `Ctrl` + mouse wheel (or `Cmd` + wheel on macOS, or a touchpad pinch) makes the terminals' text larger or smaller, apart from the app's own zoom in the View menu.
 - **Status notifications** — In-app alerts when a session is waiting for permission approval or user input.
 - **Session grid** — Live terminals for all open sessions on one screen.
 - **Prompt improver** — A button next to Commands in a session's terminal (Cmd/Ctrl+Shift+P) reads the prompt you are typing to the CLI, has it rewritten with the commands, skills and MCP servers the session has, and puts the result back in its place (or inserts or copies it); nothing is sent. It runs the CLI you are signed in to (`claude -p`, `codex exec --ephemeral`, `opencode run`) once and out of sight, on your subscription, with no API key, and leaves no session behind. The window says which session the prompt goes into and stays tied to it: Expand it, or open it in a window of its own, and Insert or Replace still go there even after you switch to another session. The rewriting instructions are yours to edit in Settings › Prompt improver; the phone has the same button beside "/".
