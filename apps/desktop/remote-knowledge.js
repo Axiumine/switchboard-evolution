@@ -6,14 +6,18 @@
 //
 // Exposed to a phone here: the tab's own queries and jobs. CBM's program and
 // settings (get-knowledge-binary, get/set-knowledge-config) are in
-// remote-settings.js, with the app's other global settings.
+// remote-settings.js, with the app's other global settings. That is a change
+// for security: a paired phone can now change Pre-launch Command, Projects
+// Folder, permission mode and sandbox. It is no new power, since a paired
+// phone already types into terminals and starts sessions.
 //
 // Left out on purpose, desktop-only: which program the desktop runs
 // (set-knowledge-global, the binary's pick and download), CBM's installer for
-// the agents, the Lens (a web page on the desktop, without a login; its keys
-// ui_enabled and ui_port are refused by set-knowledge-config) and the native
-// dialogs (the traces file, the program). A phone sends traces as data
-// instead.
+// the agents, the Lens (a web page on the desktop, without a login) and the
+// native dialogs (the traces file, the program). The Lens keys ui_enabled and
+// ui_port go through the desktop's own set-knowledge-config handler, but the
+// phone's allow list in remote-settings.js refuses them. A phone sends traces
+// as data instead.
 
 const { allow, allowEvent } = require('./remote-api');
 

@@ -42,7 +42,7 @@ test('a phone reads CBM\'s settings and changes the ones the catalog lists', asy
   assert.deepEqual(await api.call('get-knowledge-binary', []), { result: { ok: true } });
   assert.deepEqual(await api.call('get-knowledge-config', []), { result: { ok: true } });
   assert.deepEqual(await api.call('set-knowledge-config', ['auto_index', 'true']), { result: { ok: true } });
-  assert.deepEqual(await api.call('set-knowledge-config', ['auto_index', '']), { result: { ok: true } }, 'an empty value clears a key');
+  assert.deepEqual(await api.call('set-knowledge-config', ['auto_index', '']), { result: { ok: true } }, 'an empty value passes the shape check; knowledge.js judges it');
   for (const field of KNOWLEDGE_CONFIG_FIELDS) {
     assert.deepEqual(await api.call('set-knowledge-config', [field.key, 'x']), { result: { ok: true } }, field.key);
   }
