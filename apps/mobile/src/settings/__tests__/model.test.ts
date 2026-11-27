@@ -106,9 +106,11 @@ describe('parseFieldInput', () => {
     expect(parseFieldInput(field('codexModel'), ' gpt-5 ', info)).toEqual({ ok: true, patch: { codexModel: 'gpt-5' } });
   });
 
-  it('a path must start with / or ~', () => {
-    expect(parseFieldInput(field('projectsRoot'), 'projects', info)).toEqual({ ok: false, error: 'Projects Folder must start with / or ~' });
+  it('a path must be a full one, a Windows one too', () => {
+    expect(parseFieldInput(field('projectsRoot'), 'projects', info)).toEqual({ ok: false, error: 'Projects Folder must be a full path, like ~/Code' });
     expect(parseFieldInput(field('projectsRoot'), '~/Code', info)).toEqual({ ok: true, patch: { projectsRoot: '~/Code' } });
+    expect(parseFieldInput(field('projectsRoot'), 'C:\\Code', info)).toEqual({ ok: true, patch: { projectsRoot: 'C:\\Code' } });
+    expect(parseFieldInput(field('projectsRoot'), '\\\\server\\share', info)).toEqual({ ok: true, patch: { projectsRoot: '\\\\server\\share' } });
   });
 
   it('an Editor preference is saved under editorPrefs', () => {
@@ -194,8 +196,8 @@ describe('commitField', () => {
   });
 
   it('a value the computer refuses comes back as the error', async () => {
-    const save = jest.fn(async (_patch: Record<string, unknown>) => { throw new Error('Projects Folder must start with / or ~'); });
-    expect(await commitField(field('projectsRoot'), '~/Code', info, save)).toEqual({ saved: false, error: 'Projects Folder must start with / or ~' });
+    const save = jest.fn(async (_patch: Record<string, unknown>) => { throw new Error('Projects Folder must be a full path, like ~/Code'); });
+    expect(await commitField(field('projectsRoot'), '~/Code', info, save)).toEqual({ saved: false, error: 'Projects Folder must be a full path, like ~/Code' });
   });
 
   it('without the settings yet, nothing is sent', async () => {

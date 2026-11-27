@@ -128,6 +128,8 @@
   const isHex = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
   const normalizeAccent = value => (isHex(value) ? value.trim().toLowerCase() : ACCENT_DEFAULT);
   const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+  // A full path wherever the app runs: from / or ~, a Windows drive (C:\ or C:/) or a share (\\server).
+  const FULL_PATH = /^(?:[/~]|[A-Za-z]:[\\/]|\\\\)/;
 
   /** One field's value, checked: { value } or { error }. `null` is not handled here. */
   function checkValue(field, value, ctx) {
@@ -145,7 +147,7 @@
         if (CONTROL.test(text)) return fail(`${field.label} contains unsafe characters`);
         if (/[\r\n]/.test(text)) return fail(`${field.label} must be a single line`);
         if (text.length > field.maxLength) return fail(`${field.label} is too long (at most ${field.maxLength} characters)`);
-        if (field.kind === 'path' && text !== '' && !/^[/~]/.test(text)) return fail(`${field.label} must start with / or ~`);
+        if (field.kind === 'path' && text !== '' && !FULL_PATH.test(text)) return fail(`${field.label} must be a full path, like ~/Code`);
         return { value: text };
       }
       case 'choice': {

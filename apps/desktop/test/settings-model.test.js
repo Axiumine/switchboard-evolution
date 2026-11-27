@@ -34,6 +34,19 @@ test('global patch: bounds, choices, unknown keys', () => {
   assert.equal(M.validateGlobalPatch({ terminalEngine: 'tmux' }, ctx).ok, false);
 });
 
+test('global patch: a Windows folder is a full path too', () => {
+  const ctx = { harnessIds: [], shellProfileIds: [] };
+  for (const ok of ['C:\\Code', 'c:/Code', 'D:\\', '\\\\server\\share\\Code', ' C:\\Code ']) {
+    assert.equal(M.validateGlobalPatch({ projectsRoot: ok }, ctx).ok, true, ok);
+  }
+  assert.deepEqual(M.validateGlobalPatch({ projectsRoot: ' C:\\Code ' }, ctx).patch, { projectsRoot: 'C:\\Code' });
+  for (const bad of ['C:Code', 'Code\\Projects', '1:\\Code', 'CC:\\Code']) {
+    const result = M.validateGlobalPatch({ projectsRoot: bad }, ctx);
+    assert.equal(result.ok, false, bad);
+    assert.equal(result.error, 'Projects Folder must be a full path, like ~/Code');
+  }
+});
+
 test('global patch: the rest of the kinds', () => {
   const ctx = { harnessIds: ['claude', 'codex'], shellProfileIds: ['zsh'] };
   assert.equal(M.validateGlobalPatch({ shellProfile: 'zsh' }, ctx).ok, true);
