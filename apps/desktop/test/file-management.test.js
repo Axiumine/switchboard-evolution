@@ -110,6 +110,42 @@ test('replacing an item during confirmation cannot trash its replacement', async
   assert.equal(fs.readFileSync(file, 'utf8'), 'replacement');
 });
 
+// A real question stays open far longer than one tick of the clock the
+// kernel stamps new files with (a few milliseconds).
+const questionStaysOpen = () => new Promise(resolve => setTimeout(resolve, 50));
+
+test('an item deleted and made again during confirmation is not trashed, even with its inode number reused', async t => {
+  const { root, calls, dependencies, run } = fixture(t);
+  const file = path.join(root, 'notes.md');
+  fs.writeFileSync(file, 'original');
+  const before = fs.lstatSync(file);
+  let reused;
+  dependencies.confirmTrash = async () => {
+    await questionStaysOpen();
+    fs.rmSync(file);
+    fs.writeFileSync(file, 'replacement');
+    reused = fs.lstatSync(file).ino === before.ino; // ext4 hands the number straight back
+    return true;
+  };
+  await assert.rejects(run('notes.md', 'trash'), /item changed/);
+  assert.deepEqual(calls, []);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'replacement');
+  t.diagnostic(`inode number reused: ${reused}`);
+});
+
+test('an item only edited during confirmation is still trashed', async t => {
+  const { root, calls, dependencies, run } = fixture(t);
+  const file = path.join(root, 'notes.md');
+  fs.writeFileSync(file, 'original');
+  dependencies.confirmTrash = async () => {
+    await questionStaysOpen();
+    fs.writeFileSync(file, 'edited in place');
+    return true;
+  };
+  await run('notes.md', 'trash');
+  assert.equal(calls.length, 1);
+});
+
 test('revealFile shows any existing absolute file and never opens it', t => {
   const { temp, calls, dependencies } = fixture(t);
   const outside = path.join(temp, 'elsewhere', 'plan.md');
@@ -270,6 +306,7 @@ test('trashProjectEntries refuses an item replaced while the question was open',
   const result = await require('../file-management').trashProjectEntries(root, ['a.md', 'b.md'], {
     shell: { trashItem: async (file) => { trashed.push(path.basename(file)); fs.renameSync(file, path.join(temp, path.basename(file))); } },
     confirm: async () => {
+      await questionStaysOpen();
       fs.rmSync(path.join(root, 'a.md'));
       fs.writeFileSync(path.join(root, 'a.md'), 'replaced');
       return true;
