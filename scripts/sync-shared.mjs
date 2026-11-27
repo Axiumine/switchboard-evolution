@@ -39,6 +39,7 @@ const modules = {
   'command-catalog-model.js': 'apps/desktop/public/command-catalog-model.js',
   'env-files-model.js': 'apps/desktop/public/env-files-model.js',
   'prompt-improver-model.js': 'apps/desktop/public/prompt-improver-model.js',
+  'settings-model.js': 'apps/desktop/public/settings-model.js',
 };
 
 const header = (file) =>
