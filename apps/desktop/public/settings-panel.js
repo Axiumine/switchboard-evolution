@@ -50,15 +50,37 @@
     visibleSessionCount: 10, sessionMaxAgeDays: 3, terminalTheme: 'switchboard', mcpEmulation: true, shellProfile: 'auto',
   };
 
-  // The open page's listener for settings changed elsewhere (a phone, another window).
-  let stopFollowing = null;
-  function stopFollowingChanges() {
-    if (stopFollowing) stopFollowing();
-    stopFollowing = null;
+  // The page on screen follows settings changed elsewhere (a phone, another
+  // window) through one listener: a new page replaces the listener of the one
+  // before, and a listener whose page is gone removes only itself, never the
+  // listener of the page that replaced it. `subscribe(cb)` returns the unsubscribe.
+  function createChangeFollower(subscribe) {
+    let current = null;
+    function stop() {
+      const off = current;
+      current = null;
+      if (off) off();
+    }
+    function follow(onChange, isLive) {
+      stop();
+      const off = subscribe((event) => {
+        if (isLive()) { onChange(event); return; }
+        off();
+        if (current === off) current = null;
+      });
+      current = off;
+    }
+    return { follow, stop };
   }
+  const changes = createChangeFollower(cb => (window.api.onGlobalSettingsChanged ? window.api.onGlobalSettingsChanged(cb) : () => {}));
+
+  // Each open takes a number; an open overtaken by a later one (or by Close)
+  // while it waits for the settings stops before it draws.
+  let openToken = 0;
 
   function closeSettingsViewer() {
-    stopFollowingChanges();
+    openToken++;
+    changes.stop();
     settingsViewer.style.display = 'none';
     const terminalArea = document.getElementById('terminal-area');
     const terminalHeader = document.getElementById('terminal-header');
@@ -234,7 +256,9 @@
   }
 
   async function openSettingsViewer(scope, projectPath) {
-    stopFollowingChanges();
+    const token = ++openToken;
+    const superseded = () => token !== openToken;
+    changes.stop();
     const isProject = scope === 'project';
     const settingsKey = isProject ? 'project:' + projectPath : 'global';
     const current = (await window.api.getSetting(settingsKey)) || {};
@@ -242,6 +266,7 @@
     // What actually runs when nothing is stored: the app's defaults under the
     // saved global values. A fresh install shows these, not blanks.
     const appDefaults = (await window.api.getEffectiveSettings(null).catch(() => null)) || {};
+    if (superseded()) return;
 
     const shortName = isProject
       ? shortProjectPath(projectPath)
@@ -321,6 +346,7 @@
     // Discover available shell profiles
     let shellProfiles = [];
     try { shellProfiles = await window.api.getShellProfiles(); } catch {};
+    if (superseded()) return;
 
     // The Agents tab; a folder's settings are these sections alone (no CLI Agents).
     const agentsSections = `
@@ -711,8 +737,7 @@
     // A setting changed elsewhere (a phone, another window, or this page's own
     // save): show it, apart from a field being typed in, which shows what is
     // saved once it is left.
-    stopFollowing = window.api.onGlobalSettingsChanged?.(({ settings, changed }) => {
-      if (!form.isConnected) { stopFollowingChanges(); return; }
+    changes.follow(({ settings, changed }) => {
       const next = settings || {};
       if (isProject) globalSettings = next;
       for (const key of changed || []) {
@@ -726,7 +751,7 @@
         if (!isTyping(el)) writeControl(key, saved[key]);
         else el.addEventListener('blur', () => enqueue(key, () => { if (!showsValue(key, saved[key])) writeControl(key, saved[key]); }), { once: true });
       }
-    }) || null;
+    }, () => !superseded() && form.isConnected);
 
     // --- Actions and the sections that draw themselves ---
 
@@ -806,7 +831,8 @@
       removeBtn.addEventListener('click', async () => {
         if (!confirm(`Hide project "${shortName}" from Switchboard?\n\nThis hides the project from the sidebar. Your session files are not deleted.`)) return;
         await window.api.removeProject(projectPath);
-        stopFollowingChanges();
+        // Not the listener of a page opened while the folder was being hidden.
+        if (!superseded()) changes.stop();
         settingsViewer.style.display = 'none';
         document.getElementById('placeholder').style.display = 'flex';
         if (typeof loadProjects === 'function') loadProjects();
