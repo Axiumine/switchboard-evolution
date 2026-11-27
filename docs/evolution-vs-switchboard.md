@@ -70,6 +70,7 @@ What "an app of its own" means:
 - IDE diffs can be answered from the phone. The first answer wins, and the window says the phone answered.
 - Internet access goes through Cloudflare or ngrok tunnels, set up from the devices dialog. Secrets are encrypted with the system keychain, and only a phone holding the access key gets in through a tunnel.
 - With remote access on, closing the window only hides it and sessions keep running. The computer stays awake while a session works.
+- The phone's Settings page has the same tabs as the desktop's Global Settings (Application, Agents, Editor, Node Knowledge, Prompt Improver), after a Computer tab with the pairing details. Each change is saved on the computer as it is made, and an open Settings page on the desktop shows it at once. That includes the Pre-launch Command, the Projects Folder, the default permission mode and the sandbox, which a paired phone could already reach by typing into a terminal or starting a session. The Lens, choosing or downloading the codebase-memory-mcp program, its installer for the agents and Check for Updates stay on the desktop.
 
 ### 2. Sessions that survive quitting
 
@@ -147,6 +148,7 @@ What "an app of its own" means:
 
 ### 7. Windows
 
+- Global Settings is a bar of tabs (Application, Agents, Editor, Node Knowledge, Prompt Improver) and every setting is saved as it changes, with a short "Saved" beside it, a refused value showing its error and going back to the saved one, and a Close button in place of Save Settings and Cancel. Folder Settings save as they change too. The editor's preferences (minimap, sticky scroll, whitespace, Vim, language servers) are the same in every window and on the phone.
 - One strip of sidebar tabs: Projects, Sessions, Plans, Files, Stats, Task Manager, Settings.
 - Stats and the Task Manager open in windows of their own, with a pin that keeps them on top.
 - Every project tab (Overview, Plan, Todos, Files, Git, Settings) can open in a window of its own, whose header has the other tabs to move it to one of them (on the phone too). Open windows come back at the next start.
