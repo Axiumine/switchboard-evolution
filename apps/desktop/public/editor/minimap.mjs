@@ -6,8 +6,9 @@
 // the left: added, changed, deleted), the errors and warnings, the selections.
 // When the file is taller than the minimap, the minimap scrolls with the
 // editor, in proportion. It sits in the scroller after the text (position:
-// sticky), so the text and its wrapping make room for it. It is not drawn in
-// an editor narrower than MIN_EDITOR_WIDTH.
+// sticky), so the text and its wrapping make room for it, and it is one of the
+// editor's scroll margins. It is not drawn in an editor narrower than
+// MIN_EDITOR_WIDTH.
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { syntaxTree, highlightingFor } from '@codemirror/language';
 import { getStyleTags } from '@lezer/highlight';
@@ -336,7 +337,14 @@ class MinimapView {
   }
 }
 
-const minimapPlugin = ViewPlugin.fromClass(MinimapView);
+// Until the sideways scroll reaches its end the minimap covers the right of the
+// text: scrolling to the cursor, a match or a dragged selection stops short of it.
+const minimapPlugin = ViewPlugin.fromClass(MinimapView, {
+  provide: plugin => EditorView.scrollMargins.of((view) => {
+    const shown = view.plugin(plugin);
+    return shown && shown.dom.style.display !== 'none' ? { right: WIDTH } : null;
+  }),
+});
 
 /** The minimap of an editor. */
 function minimap() {

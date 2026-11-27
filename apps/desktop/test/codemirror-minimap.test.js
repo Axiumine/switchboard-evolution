@@ -82,6 +82,17 @@ test('errors and warnings are marked by severity', async () => {
   ]);
 });
 
+test('a shown minimap is a scroll margin at the right, so the cursor does not go under it', async () => {
+  const { minimap, MINIMAP_WIDTH } = await editorModule('minimap');
+  const { EditorState } = await state();
+  const { EditorView } = await import('@codemirror/view');
+  const [margins] = EditorState.create({ extensions: minimap() }).facet(EditorView.scrollMargins);
+  const view = display => ({ plugin: () => ({ dom: { style: { display } } }) });
+  assert.deepEqual(margins(view('')), { right: MINIMAP_WIDTH });
+  assert.equal(margins(view('none')), null, 'not drawn in a narrow editor');
+  assert.equal(margins({ plugin: () => null }), null);
+});
+
 test('the minimap is in an editor when it is on, never in a compact one', async () => {
   const { editorExtensions } = await editorModule('core');
   const { prefActive, setPref } = await editorModule('prefs');
