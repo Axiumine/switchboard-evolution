@@ -161,6 +161,20 @@ test('addTag creates an annotated and a lightweight tag, and can push both', { s
   }
 });
 
+test('addTag makes a lightweight tag for someone who signs every tag (tag.gpgSign)', { skip: !haveGit && 'git not installed' }, async () => {
+  const repo = await makeRepo();
+  try {
+    await git.run(['config', 'tag.gpgSign', 'true'], repo);
+    const head = await git.run(['rev-parse', 'HEAD'], repo);
+    // Without --no-sign git turns this into a signed annotated tag and asks
+    // an editor for its message: "no tag message?" or "Terminal is dumb".
+    await run('addTag', repo, { name: 'v1-lw', type: 'lightweight', commit: head });
+    assert.equal(await git.run(['cat-file', '-t', 'refs/tags/v1-lw'], repo), 'commit', 'a lightweight tag points at the commit itself');
+  } finally {
+    rmrf(repo);
+  }
+});
+
 test('createBranch creates at a commit, optionally checking it out, and rejects a collision', { skip: !haveGit && 'git not installed' }, async () => {
   const repo = await makeRepo();
   try {
@@ -288,7 +302,7 @@ test('deleteBranch\'s remote delete is unambiguous even when the remote also has
     await git.run(['add', 'rel.txt'], repo);
     await git.run(['commit', '-q', '-m', 'release work'], repo);
     await git.run(['push', '-q', 'origin', 'release-1.0'], repo);
-    await git.run(['tag', 'release-1.0'], repo); // same name as the branch, on purpose
+    await git.run(['tag', '--no-sign', 'release-1.0'], repo); // same name as the branch, on purpose
     await git.run(['push', '-q', 'origin', 'refs/tags/release-1.0'], repo);
     await git.run(['checkout', '-q', 'main'], repo);
 
@@ -788,7 +802,7 @@ test('pushTag defaults to origin and can target an explicit remote list', { skip
   const repo = await makeRepo();
   const bare = await addBareOrigin(repo);
   try {
-    await git.run(['tag', 'v1'], repo);
+    await git.run(['tag', '--no-sign', 'v1'], repo);
     const result = await run('pushTag', repo, { tagName: 'v1' });
     assert.deepEqual(result.pushed, ['origin']);
     assert.match(await git.run(['ls-remote', '--tags', bare], repo), /refs\/tags\/v1/);
@@ -801,7 +815,7 @@ test('deleteTag removes a tag locally and, when asked, on a remote too', { skip:
   const repo = await makeRepo();
   const bare = await addBareOrigin(repo);
   try {
-    await git.run(['tag', 'v1'], repo);
+    await git.run(['tag', '--no-sign', 'v1'], repo);
     await git.run(['push', '-q', 'origin', 'v1'], repo);
 
     await run('deleteTag', repo, { name: 'v1', deleteOnRemotes: ['origin'] });

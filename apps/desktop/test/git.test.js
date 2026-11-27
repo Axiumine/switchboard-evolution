@@ -279,7 +279,7 @@ test('forEachRef decodes heads/remotes/tags, marks HEAD, and degrades to empty o
   try {
     await git.run(['branch', 'feature'], repo);
     await git.run(['tag', '-a', 'v1', '-m', 'release'], repo);
-    await git.run(['tag', 'v1-lightweight'], repo);
+    await git.run(['tag', '--no-sign', 'v1-lightweight'], repo);
 
     const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-git-bare-'));
     await git.run(['init', '-q', '--bare', bare], repo);
@@ -449,7 +449,7 @@ test('rootCommitHashes finds the repo\'s root and degrades to [] on an unborn HE
 test('tagExists tells an existing tag from a missing one', { skip: !haveGit && 'git not installed' }, async () => {
   const repo = await makeRepo();
   try {
-    await git.run(['tag', 'v1'], repo);
+    await git.run(['tag', '--no-sign', 'v1'], repo);
     assert.equal(await git.tagExists(repo, 'v1'), true);
     assert.equal(await git.tagExists(repo, 'nope'), false);
   } finally {
