@@ -23,13 +23,14 @@ function setup({ max = 2 } = {}) {
   const addons = [];
   const watchers = new Map();
   const timers = [];
+  const calls = [];
   const budget = createGpuBudget({
     max,
     makeAddon: () => {
       const addon = {
         disposed: 0, lossHandlers: [],
         onContextLoss(handler) { this.lossHandlers.push(handler); },
-        dispose() { this.disposed += 1; },
+        dispose() { this.disposed += 1; calls.push(`dispose ${this.owner}`); },
         loseContext() { this.lossHandlers.forEach(handler => handler()); },
       };
       addons.push(addon);
@@ -39,6 +40,11 @@ function setup({ max = 2 } = {}) {
       const watcher = { cb, watching: true };
       watchers.set(element, watcher);
       return () => { watcher.watching = false; };
+    },
+    // What the budget frees, in order: the lookup before a dispose, the freeing right after it.
+    freeContext: element => {
+      calls.push(`find ${element.id}`);
+      return () => calls.push(`free ${element.id}`);
     },
     setTimer: (fn, ms) => { const timer = { fn, ms, cleared: false }; timers.push(timer); return timer; },
     clearTimer: timer => { timer.cleared = true; },
@@ -55,12 +61,12 @@ function setup({ max = 2 } = {}) {
         if (at !== -1) listeners.splice(at, 1);
       },
     };
-    const terminal = { id, loaded: [], loadAddon(addon) { this.loaded.push(addon); } };
+    const terminal = { id, loaded: [], loadAddon(addon) { addon.owner = this.id; this.loaded.push(addon); } };
     return { id, element, terminal, listeners };
   };
   const show = (item, visible = true) => watchers.get(item.element).cb(visible);
   const pending = () => timers.filter(timer => !timer.cleared);
-  return { budget, active, addons, watchers, timers, pending, make, show };
+  return { budget, active, calls, addons, watchers, timers, pending, make, show };
 }
 
 test('the page object exists only where its browser parts do', () => {
@@ -80,7 +86,7 @@ test('visible terminals get WebGL up to the budget, most recent first', () => {
   show(a); show(b);
   assert.deepEqual(active().sort(), ['a', 'b']);
   show(c);
-  // c came to screen last: the one touched least recently, a, gives its addon back.
+  // Eviction follows the touch order: a, touched least recently, gives its addon back.
   assert.deepEqual(active().sort(), ['b', 'c']);
   assert.equal(addons.filter(addon => addon.disposed === 1).length, 1);
   assert.equal(a.terminal.loaded[0].disposed, 1);
@@ -107,6 +113,73 @@ test('a hidden terminal gives its context back', () => {
   show(a, false);
   assert.deepEqual(active(), ['c']);
   assert.equal(addons.every(addon => addon.disposed <= 1), true);
+});
+
+test('a released addon frees its WebGL context at once', () => {
+  const { budget, calls, make, show } = setup({ max: 1 });
+  const [a, b] = ['a', 'b'].map(make);
+  for (const item of [a, b]) budget.register(item.id, item.terminal, item.element);
+  show(a);
+  assert.deepEqual(calls, [], 'a new addon frees nothing');
+  // Evicted: b is touched more recently.
+  show(b);
+  assert.deepEqual(calls, ['find a', 'dispose a', 'free a']);
+  // Hidden.
+  calls.length = 0;
+  show(b, false);
+  assert.deepEqual(calls, ['find b', 'dispose b', 'free b']);
+  // Unregistered: a, still on screen, took the slot b left.
+  calls.length = 0;
+  budget.unregister('a');
+  assert.deepEqual(calls, ['find a', 'dispose a', 'free a']);
+  // Nothing to free once there is no addon.
+  calls.length = 0;
+  budget.unregister('b');
+  assert.deepEqual(calls, []);
+});
+
+test('a lost context is not freed again, and a failing free does not stop the release', () => {
+  const { createGpuBudget } = load();
+  const calls = [];
+  const warnings = [];
+  const budget = createGpuBudget({
+    max: 1,
+    makeAddon: () => ({ onContextLoss(handler) { this.lose = handler; }, dispose() { calls.push('dispose'); } }),
+    observe: (element, cb) => { element.cb = cb; return () => {}; },
+    freeContext: () => { calls.push('find'); return () => { calls.push('free'); throw new Error('boom'); }; },
+    setTimer: () => 1,
+    warn: (...args) => warnings.push(args),
+  });
+  const lost = { addEventListener() {}, removeEventListener() {} };
+  const terminal = { loadAddon(addon) { this.addon = addon; } };
+  budget.register('a', terminal, lost);
+  lost.cb(true);
+  terminal.addon.lose();
+  assert.deepEqual(calls, ['dispose'], 'the lost context is only disposed');
+
+  const other = { addEventListener() {}, removeEventListener() {} };
+  const second = { loadAddon() {} };
+  budget.register('b', second, other);
+  other.cb(true);
+  calls.length = 0;
+  budget.unregister('b');
+  assert.deepEqual(calls, ['find', 'dispose', 'free']);
+  assert.equal(warnings.length, 1, 'the failure is reported, not thrown');
+});
+
+test('an addon that fails to load is disposed', () => {
+  const { createGpuBudget } = load();
+  let disposed = 0;
+  const budget = createGpuBudget({
+    max: 1,
+    makeAddon: () => ({ onContextLoss() {}, dispose() { disposed += 1; } }),
+    observe: (element, cb) => { element.cb = cb; return () => {}; },
+    warn: () => {},
+  });
+  const element = { addEventListener() {}, removeEventListener() {} };
+  budget.register('a', { loadAddon() { throw new Error('no WebGL'); } }, element);
+  element.cb(true);
+  assert.equal(disposed, 1);
 });
 
 test('a lost context falls back and is retried when still visible', () => {
@@ -196,4 +269,25 @@ test('a WebGL addon that cannot load leaves the terminal on the DOM renderer', (
   element.cb(false);
   element.cb(true);
   assert.equal(warnings.length, 1, 'it is not tried again');
+});
+
+test('the page finds the WebGL canvas, leaves layer canvases alone and never throws', () => {
+  const { findWebglContextLoser } = load();
+  const asked = [];
+  const canvas = (className, extension) => ({
+    className,
+    getContext: type => { asked.push(`${className || 'webgl'}:${type}`); return extension === undefined ? null : { getExtension: () => extension }; },
+  });
+  const lost = [];
+  const element = canvases => ({ querySelectorAll: () => canvases });
+
+  const free = findWebglContextLoser(element([canvas('xterm-link-layer'), canvas('', { loseContext: () => lost.push(1) })]));
+  assert.deepEqual(asked, ['webgl:webgl2'], 'the layer canvas is not asked');
+  free();
+  assert.deepEqual(lost, [1]);
+
+  assert.equal(findWebglContextLoser(element([])), null, 'no canvas');
+  assert.equal(findWebglContextLoser(element([canvas('')])), null, 'a canvas without a WebGL context');
+  assert.equal(findWebglContextLoser(element([canvas('', null)])), null, 'a context without the extension');
+  assert.equal(findWebglContextLoser({ querySelectorAll() { throw new Error('detached'); } }), null);
 });
