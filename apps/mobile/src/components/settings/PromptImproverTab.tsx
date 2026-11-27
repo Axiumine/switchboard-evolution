@@ -18,12 +18,12 @@ const MODES: { key: ImproverMode; label: string }[] = [
 ];
 
 /**
- * The prompt improver's settings, as the computer keeps them (the same as
+ * Settings' Prompt Improver tab: the improver's settings, as the computer keeps them (the same as
  * its Settings): on or off, the question first, the CLI that rewrites, the
  * context, how many turns, a model per CLI, the time limit, and the
  * improver prompt (prompt-improver-template). Each change is saved at once.
  */
-export default function PromptImproverScreen() {
+export function PromptImproverTab() {
   const info = usePromptImproverInfo();
   const [saving, setSaving] = useState(false);
   const s = info.data?.settings;
