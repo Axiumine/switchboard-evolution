@@ -19,7 +19,7 @@
 // CBM runs (set-knowledge-global, knowledge-pick-binary,
 // knowledge-download-binary), its installer for the agents, the Lens
 // (ui_enabled and ui_port: a web page on the desktop, without a login), the
-// updater, open-path and list-templates (which opens the Finder).
+// updater and open-path (which opens the Finder).
 
 const { allow, allowEvent } = require('./remote-api');
 const { KNOWLEDGE_CONFIG_FIELDS } = require('./public/settings-model');
