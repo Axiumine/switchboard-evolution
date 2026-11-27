@@ -59,7 +59,9 @@ const jsonlViewerSessionId = document.getElementById('jsonl-viewer-session-id');
 const jsonlViewerBody = document.getElementById('jsonl-viewer-body');
 const gridViewer = document.getElementById('grid-viewer');
 const gridViewerCount = document.getElementById('grid-viewer-count');
-let gridViewActive = localStorage.getItem('gridViewActive') === '1';
+// The old grid gave way to the Session Overview (session-overview.js); its saved state goes.
+let gridViewActive = false;
+localStorage.removeItem('gridViewActive');
 
 // Map<sessionId, { terminal, element, fitAddon, session, closed }>
 const openSessions = new Map();
@@ -1373,6 +1375,7 @@ function restoreTerminalArea() {
 }
 
 function showStatsPage() {
+  if (typeof closeSessionOverview === 'function') closeSessionOverview('page');
   placeholder.style.display = 'none';
   terminalArea.style.display = 'none';
   planViewer.style.display = 'none';
@@ -1640,7 +1643,7 @@ loadProjects().then(async () => {
   await restoreActiveTaskView();
   await restorePersistedTerminalProcesses();
   // Restore grid view preference before opening sessions so they enter grid mode
-  if (!activeTaskView && localStorage.getItem('gridViewActive') === '1') {
+  if (!activeTaskView && gridViewActive) {
     showGridView();
   }
   // Restore the active session after a renderer reload or full app restart.
@@ -1657,6 +1660,7 @@ loadProjects().then(async () => {
     }
     else setActiveSession(null);
   }
+  if (typeof onAppRestored === 'function') onAppRestored();
 });
 
 /**

@@ -312,6 +312,7 @@ function hideGridView() {
 }
 
 function toggleGridView() {
+  if (typeof toggleSessionOverview === 'function') return toggleSessionOverview();
   if (gridViewActive) {
     const restoreId = gridFocusedSessionId || activeSessionId;
     hideGridView();

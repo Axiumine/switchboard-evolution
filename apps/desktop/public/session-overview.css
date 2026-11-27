@@ -1,0 +1,233 @@
+/* The Session Overview (session-overview.js): a page of its own over the whole
+   main area, with the open sessions as cards. The cards reuse the grid view's
+   .grid-card styles (style.css, command-catalog.css). Sizes come from
+   layoutGeometry as CSS variables on .ov-cards: --ov-cols, --ov-rows,
+   --ov-card-w and --ov-card-h. The 14px gap is OV_GAP, the 8px one under a
+   group's header OV_GROUP_GAP. */
+
+#session-overview {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #111118;
+}
+
+/* ---- Header ---- */
+.ov-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 16px;
+  box-sizing: border-box;
+  background: #18181f;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.ov-title { font-size: 13px; color: #b0b0c4; font-weight: 500; white-space: nowrap; }
+.ov-count { font-size: 11px; color: #7a7a90; white-space: nowrap; }
+.ov-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.ov-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #c8c8dc;
+  background: rgb(from var(--accent) r g b / 0.14);
+  border: 1px solid rgb(from var(--accent) r g b / 0.3);
+  white-space: nowrap;
+}
+.ov-filter-chip-clear {
+  border: none;
+  background: none;
+  color: #9a9ab0;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 8px;
+}
+.ov-filter-chip-clear:hover { color: #e6e6f4; background: rgba(255,255,255,0.08); }
+.ov-pager { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #9a9ab0; white-space: nowrap; }
+.ov-pager[hidden] { display: none; }
+.ov-pager button,
+.ov-new-btn {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: #b0b0c4;
+  border-radius: 5px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+.ov-pager button { width: 22px; height: 22px; font-size: 15px; }
+.ov-pager button:disabled { opacity: 0.35; cursor: default; }
+.ov-pager button:not(:disabled):hover,
+.ov-new-btn:hover { color: #e6e6f4; background: rgba(255,255,255,0.08); }
+.ov-new-btn { padding: 5px 10px; white-space: nowrap; }
+.ov-new-btn[hidden] { display: none; }
+
+/* ---- Body: the cards, or a maximized card over them ---- */
+.ov-body {
+  position: relative; /* a maximized card fills it */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.ov-cards {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 14px;
+  overflow: auto;
+  display: flex;
+  gap: 14px;
+}
+.ov-cards.ov-flow-down { flex-direction: column; }
+.ov-cards.ov-flow-across { flex-direction: row; }
+.ov-cards::-webkit-scrollbar { width: 8px; height: 8px; }
+.ov-cards::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+.ov-cards::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.ov-cards::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+.ov-empty { margin: auto; color: #6a6a80; font-size: 14px; }
+
+/* ---- Groups ---- */
+.ov-group { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; min-width: 0; }
+.ov-flow-across > .ov-group { min-height: 0; }
+.ov-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.05);
+  font-size: 12px;
+  font-weight: 600;
+  color: #c0c1d8;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.ov-group-header[hidden] { display: none; }
+.ov-group-header:hover { background: rgba(255,255,255,0.08); }
+.ov-group-arrow { font-size: 8px; color: #7a7a90; transition: transform 0.15s; }
+.ov-group.collapsed .ov-group-arrow { transform: rotate(-90deg); }
+.ov-group-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ov-group-count { font-size: 11px; font-weight: 400; color: #7a7a90; }
+.ov-group.collapsed .ov-group-cards { display: none; }
+.ov-group-cards { display: grid; gap: 14px; min-width: 0; min-height: 0; }
+
+/* ---- Layouts (sections, or no grouping) ---- */
+.ov-layout-grid-fit .ov-group-cards,
+.ov-layout-grid-down .ov-group-cards {
+  grid-template-columns: repeat(var(--ov-cols, 2), minmax(0, 1fr));
+  grid-auto-rows: var(--ov-card-h, 450px);
+}
+.ov-layout-rows .ov-group-cards {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: var(--ov-card-h, 450px);
+}
+.ov-layout-grid-across .ov-group-cards {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--ov-rows, 2), var(--ov-card-h, 300px));
+  grid-auto-columns: var(--ov-card-w, 560px);
+}
+.ov-layout-columns .ov-group-cards {
+  grid-auto-flow: column;
+  grid-template-rows: var(--ov-card-h, 450px);
+  grid-auto-columns: var(--ov-card-w, 560px);
+}
+
+/* ---- Carousels: Across is a row per group, Down a column per group ---- */
+.ov-carousels .ov-group-cards { display: flex; gap: 14px; }
+.ov-carousels.ov-axis-across .ov-group-cards {
+  flex-direction: row;
+  height: var(--ov-card-h, 450px);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.ov-carousels.ov-axis-across.ov-scroll .ov-card { flex: 0 0 var(--ov-card-w, 560px); }
+.ov-carousels.ov-axis-across.ov-fit .ov-card { flex: 1 1 0; min-width: 0; }
+.ov-carousels.ov-axis-down > .ov-group { width: var(--ov-card-w, 560px); }
+.ov-carousels.ov-axis-down .ov-group-cards {
+  flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.ov-carousels.ov-axis-down.ov-scroll .ov-card { flex: 0 0 var(--ov-card-h, 450px); }
+.ov-carousels.ov-axis-down.ov-fit .ov-card { flex: 1 1 0; min-height: 0; }
+
+/* ---- Cards ---- */
+.grid-card.ov-card { height: auto; min-width: 0; min-height: 0; background: #111118; }
+.ov-card-header { gap: 6px; }
+.ov-card .grid-card-name { flex: 0 1 auto; min-width: 40px; }
+.ov-card-spacer { flex: 1; }
+.ov-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 30%;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #8a8aa0;
+  background: rgba(255,255,255,0.05);
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-chip:empty,
+.ov-chip[hidden] { display: none; }
+/* The grid view's buttons sit after the spacer, not pushed by their own margin. */
+.ov-card .grid-card-commands-btn,
+.ov-card .grid-card-improve-btn,
+.ov-card .grid-card-stop-btn { margin-left: 0; }
+.ov-btn {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 3px;
+  line-height: 1;
+  color: #7a7a90;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+}
+.ov-btn[hidden] { display: none; }
+.grid-card:hover .ov-btn,
+.grid-card.focused .ov-btn,
+.ov-btn.active,
+.ov-btn:focus-visible { opacity: 1; }
+.ov-btn:hover,
+.ov-btn.active {
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  background: rgb(from var(--accent) r g b / 0.1);
+}
+
+/* The terminal fills the card between header and footer. */
+.terminal-container.ov-mode {
+  display: block;
+  position: relative;
+  inset: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Maximize: the card covers the page's body until it is put back. */
+.grid-card.ov-card.ov-maximized {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: 0;
+}

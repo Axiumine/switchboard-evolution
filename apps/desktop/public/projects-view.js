@@ -1565,6 +1565,7 @@ function selectProject(id, { tab } = {}) {
 
 /** Hide every piece of project chrome. Called by hideAllViewers and the other openers. */
 function hideProjectChrome() {
+  if (typeof closeSessionOverview === 'function') closeSessionOverview('page');
   if (projectViewer) projectViewer.style.display = 'none';
   leaveWorking();
 }
