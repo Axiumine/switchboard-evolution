@@ -10,13 +10,18 @@ import {
   choiceKey,
   choicesFor,
   commitField,
+  fieldText,
   fieldsFor,
   harnessesOff,
   lastHarnessOn,
+  noteAfterSave,
   savedValue,
   terminalEngineNow,
+  textAfterSave,
   type CatalogTabKey,
+  type CommitResult,
   type FieldInput,
+  type SaveNote,
   type SettingsField,
 } from '@/settings/model';
 import { currentGlobalSettings, saveGlobalSettings, useGlobalSettings } from '@/settings/queries';
@@ -38,9 +43,8 @@ const PLACEHOLDERS: Record<string, string> = {
 };
 const TEMPLATES_HELP = 'One folder per template, each with a template.json and the files a new project starts with. Add a folder to add a template.';
 
-type Note = { saved: true } | { error: string };
-type Commit = { saved: boolean; error: string | null };
-type Change = (field: SettingsField, raw: FieldInput, options?: { id?: string; shown?: boolean }) => Promise<Commit>;
+type Note = SaveNote;
+type Change = (field: SettingsField, raw: FieldInput, options?: { id?: string; shown?: boolean }) => Promise<CommitResult>;
 type ControlProps = { field: SettingsField; info: GlobalSettingsInfo; pending: Record<string, FieldInput>; notes: Record<string, Note>; change: Change };
 
 /**
@@ -126,15 +130,11 @@ function useSaves() {
     const id = options.id ?? key;
     const count = (counts.current[key] = (counts.current[key] || 0) + 1);
     if (options.shown) setPending((p) => ({ ...p, [key]: raw }));
-    const job = async (): Promise<Commit> => {
+    const job = async (): Promise<CommitResult> => {
       const result = await commitField(field, raw, currentGlobalSettings(), saveGlobalSettings);
-      if (result.error) note(id, { error: result.error });
-      else if (result.saved) {
-        // The computer keeps one CLI on: compared with what was sent, as the desktop does.
-        const now = currentGlobalSettings();
-        const keptOn = field.kind === 'harnesses' && !!now && now.values.disabledHarnesses.length < (raw as readonly string[]).length;
-        note(id, keptOn ? { error: KEPT_ON } : { saved: true });
-      }
+      // The computer keeps one CLI on: its answer compared with what was sent, as the desktop does.
+      const after = noteAfterSave(field, raw, result);
+      if (after) note(id, after);
       return result;
     };
     const run = (queues.current[key] || Promise.resolve()).then(job);
@@ -265,12 +265,12 @@ function HarnessControls(props: ControlProps) {
 /**
  * A text, path or number field. It keeps what is typed until its editing
  * ends, even when the value changes elsewhere meanwhile; then it saves, and
- * shows the saved value again when nothing was saved (unchanged or refused).
+ * shows the value read back: the one saved, or the one in force when nothing
+ * was saved (unchanged or refused).
  */
 function TextControl(props: ControlProps) {
   const { field, info, notes, change } = props;
-  const saved = savedValue(field, info);
-  const shown = saved === null || saved === undefined ? '' : String(saved);
+  const shown = fieldText(field, info);
   const [text, setText] = useState(shown);
   const editing = useRef(false);
   const typed = useRef(false);
@@ -289,8 +289,11 @@ function TextControl(props: ControlProps) {
     editing.current = false;
     if (!typed.current) { setText(latest.current); return; }
     typed.current = false;
-    change(field, value).then((result) => {
-      if (!result.saved && !editing.current) setText(latest.current);
+    // Then the value read back after the save (or in force), even when it is
+    // the one shown before: the computer may have saved another than typed.
+    change(field, value).then(() => {
+      const next = textAfterSave(field, currentGlobalSettings(), latest.current, editing.current);
+      if (next !== null) setText(next);
     });
   };
 

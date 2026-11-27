@@ -7,7 +7,7 @@ import {
   type FieldKind,
   type SettingField,
 } from '@/shared/vendor/settings-model';
-import type { GlobalSettingsInfo, HarnessOption, TerminalEngineStatus } from './types';
+import type { GlobalSettingsInfo, HarnessOption, SavedGlobalSettings, TerminalEngineStatus } from './types';
 
 // The computer's Application, Agents and Editor settings on the phone: which
 // fields each tab shows (the shared catalog, in the desktop panel's order), and
@@ -27,6 +27,12 @@ export type SettingsField = Omit<SettingField, 'kind'> & { kind: Exclude<FieldKi
 export type FieldInput = string | boolean | readonly string[];
 
 export type FieldResult = { ok: true; patch: Record<string, unknown> | null } | { ok: false; error: string };
+
+/** The end of a control's save: `stored` is the computer's answer (the settings as it stored them) when it saved. */
+export type CommitResult = { saved: boolean; error: string | null; stored?: Record<string, unknown> };
+
+/** The note under a control: "Saved" for a moment, or why its value was not saved. */
+export type SaveNote = { saved: true } | { error: string };
 
 /** A choice as a control lists it: `key` is its value as text (null is ''). */
 export interface ChoiceItem { key: string; label: string; value: string | null }
@@ -150,16 +156,48 @@ export async function commitField(
   field: SettingsField,
   raw: FieldInput,
   info: GlobalSettingsInfo | undefined,
-  save: (patch: Record<string, unknown>) => Promise<void>,
-): Promise<{ saved: boolean; error: string | null }> {
+  save: (patch: Record<string, unknown>) => Promise<SavedGlobalSettings | void>,
+): Promise<CommitResult> {
   if (!info) return { saved: false, error: 'The computer\'s settings are not loaded yet.' };
   const res = parseFieldInput(field, raw, info);
   if (!res.ok) return { saved: false, error: res.error };
   if (!res.patch) return { saved: false, error: null };
   try {
-    await save(res.patch);
-    return { saved: true, error: null };
+    const answer = await save(res.patch);
+    return { saved: true, error: null, stored: answer ? answer.settings : undefined };
   } catch (err) {
     return { saved: false, error: (err instanceof Error && err.message) || 'Not saved' };
   }
+}
+
+/**
+ * The note under a control once its save is done: why it was not saved,
+ * "Kept on" when the computer kept on a CLI this save switched off (from its
+ * answer, as the desktop does, not from settings read before), else "Saved";
+ * null when nothing was sent.
+ */
+export function noteAfterSave(field: SettingsField, raw: FieldInput, result: CommitResult): SaveNote | null {
+  if (result.error) return { error: result.error };
+  if (!result.saved) return null;
+  const off = result.stored?.disabledHarnesses;
+  const keptOn = field.kind === 'harnesses' && Array.isArray(raw) && Array.isArray(off) && off.length < raw.length;
+  return keptOn ? { error: KEPT_ON } : { saved: true };
+}
+
+/** The text a text, path or number field shows for the value in force ('' for none). */
+export function fieldText(field: SettingsField, info: GlobalSettingsInfo): string {
+  const saved = savedValue(field, info);
+  return saved === null || saved === undefined ? '' : String(saved);
+}
+
+/**
+ * What a text, path or number field shows once its save is done: nothing new
+ * (null) while it is being typed in again, else the value in force as last
+ * read (`now`, read again after a save), never what was typed: the computer
+ * may have saved it otherwise (007 is 7, a trimmed text), or another device
+ * the same setting. `fallback` when the settings are gone.
+ */
+export function textAfterSave(field: SettingsField, now: GlobalSettingsInfo | undefined, fallback: string, editing: boolean): string | null {
+  if (editing) return null;
+  return now ? fieldText(field, now) : fallback;
 }

@@ -4,7 +4,18 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 
 import { Chips, ErrorText, Field, Hint, Label, MONO, SwitchRow } from '@/components/form';
 import { Section } from '@/components/project/Section';
-import { binaryText, commitKnowledgeField, knowledgeControl, knowledgeFields, saveKnowledgeConfig, useKnowledgeBinary, useKnowledgeConfig, type KnowledgeKeyKind } from '@/settings/knowledge';
+import {
+  binaryText,
+  commitKnowledgeField,
+  knowledgeControl,
+  knowledgeFields,
+  knowledgeTextAfterSave,
+  saveKnowledgeConfig,
+  useKnowledgeBinary,
+  useKnowledgeConfig,
+  type KnowledgeCommit,
+  type KnowledgeKeyKind,
+} from '@/settings/knowledge';
 import type { KnowledgeConfigField } from '@/shared/vendor/settings-model';
 import { useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
@@ -124,12 +135,12 @@ function useSaves() {
     return saved;
   };
 
-  /** End the edit of a count or limit field; `saved` is the value in force. True when it was saved. */
-  const commit = async (key: string, kind: KnowledgeKeyKind | undefined, raw: string, saved: string | undefined): Promise<boolean> => {
+  /** End the edit of a count or limit field; `saved` is the value in force. */
+  const commit = async (key: string, kind: KnowledgeKeyKind | undefined, raw: string, saved: string | undefined): Promise<KnowledgeCommit> => {
     const result = await commitKnowledgeField(key, kind, raw, saved, saveKnowledgeConfig);
     if (result.error) note(key, { error: result.error });
     else if (result.saved) note(key, { saved: true });
-    return result.saved;
+    return result;
   };
 
   return { pending, notes, change, commit };
@@ -170,9 +181,9 @@ function ChipsControl({ field, kind, value, pending, notes, change }: ControlPro
 
 /**
  * A count or a limit. It keeps what is typed until its editing ends, then
- * saves; it shows the saved value again when nothing was saved. Nothing is
- * ever sent empty: an emptied field says why under it (a limit is turned off
- * by typing "off").
+ * saves; it shows the value the computer read back, or the one in force when
+ * nothing was saved. Nothing is ever sent empty: an emptied field says why
+ * under it (a limit is turned off by typing "off").
  */
 function FieldControl({ field, kind, value, notes, commit }: ControlProps) {
   const shown = value ?? '';
@@ -192,8 +203,11 @@ function FieldControl({ field, kind, value, notes, commit }: ControlProps) {
     editing.current = false;
     if (!typed.current) { setText(latest.current); return; }
     typed.current = false;
-    commit(field.key, kind, raw, latest.current).then((saved) => {
-      if (!saved && !editing.current) setText(latest.current);
+    // Then the value the computer read back after the save (or the one in
+    // force), even when it is the one shown before: 99999999999 is capped.
+    commit(field.key, kind, raw, latest.current).then((result) => {
+      const next = knowledgeTextAfterSave(field.key, result, latest.current, editing.current);
+      if (next !== null) setText(next);
     });
   };
 

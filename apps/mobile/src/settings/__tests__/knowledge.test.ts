@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { binaryText, commitKnowledgeField, knowledgeControl, knowledgeFields, type KnowledgeBinary } from '../knowledge';
+import { binaryText, commitKnowledgeField, knowledgeControl, knowledgeFields, knowledgeTextAfterSave, type KnowledgeBinary } from '../knowledge';
 
 const bin = (over: Partial<KnowledgeBinary> = {}): KnowledgeBinary => ({
   found: { version: '0.8.1', source: 'agents', path: '/Users/demo/.local/bin/codebase-memory-mcp', ok: true },
@@ -86,5 +86,27 @@ describe('commitKnowledgeField', () => {
     const save = jest.fn(async () => { throw new Error('index_max_files takes a whole number or off'); });
     const { result } = await run('limit', 'index_max_files', 'abc', '5', save);
     expect(result).toEqual({ saved: false, error: 'index_max_files takes a whole number or off' });
+  });
+});
+
+describe('a field after its save', () => {
+  it('commitKnowledgeField gives back the settings the computer read after the save', async () => {
+    const values = { auto_index_limit: '2147483647' };
+    const save = jest.fn(async (_k: string, _v: string) => values);
+    expect(await commitKnowledgeField('auto_index_limit', 'count', '99999999999', '50000', save)).toEqual({ saved: true, error: null, values });
+  });
+
+  it('shows the value saved, not the one typed', () => {
+    // Past CBM's int: capped, so the value read back is unchanged.
+    expect(knowledgeTextAfterSave('auto_index_limit', { saved: true, error: null, values: { auto_index_limit: '2147483647' } }, '2147483647', false)).toBe('2147483647');
+    // 007 is 7.
+    expect(knowledgeTextAfterSave('auto_index_limit', { saved: true, error: null, values: { auto_index_limit: '7' } }, '50000', false)).toBe('7');
+    // A limit turned off is not listed.
+    expect(knowledgeTextAfterSave('index_max_files', { saved: true, error: null, values: {} }, '5000', false)).toBe('');
+  });
+
+  it('shows the value in force when nothing was saved, and leaves a field being typed in again', () => {
+    expect(knowledgeTextAfterSave('index_max_files', { saved: false, error: 'index_max_files takes a whole number or off' }, '5000', false)).toBe('5000');
+    expect(knowledgeTextAfterSave('index_max_files', { saved: true, error: null, values: { index_max_files: '9' } }, '5000', true)).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { act } from '@/projects/queries';
 import { queryClient } from '@/remote/query';
 import { useCapability, useConnection } from '@/store/connection';
-import type { GlobalSettingsInfo } from './types';
+import type { GlobalSettingsInfo, SavedGlobalSettings } from './types';
 
 // The computer's global settings (main.js, through remote-settings.js): read
 // with the options their fields need, and saved one setting at a time. After
@@ -30,9 +30,14 @@ export function currentGlobalSettings(): GlobalSettingsInfo | undefined {
   return queryClient.getQueryData<GlobalSettingsInfo>(KEY);
 }
 
-/** Save a patch (one setting, or one Editor preference); throws the computer's reason when it refuses it. */
-export async function saveGlobalSettings(patch: Record<string, unknown>): Promise<void> {
-  const res = await act<{ ok: boolean; error?: string }>('set-global-settings', [patch]);
-  if (!res || res.ok === false) throw new Error(res?.error || 'Not saved');
+/**
+ * Save a patch (one setting, or one Editor preference); throws the computer's
+ * reason when it refuses it. Gives back the computer's answer, once the
+ * settings are read again.
+ */
+export async function saveGlobalSettings(patch: Record<string, unknown>): Promise<SavedGlobalSettings> {
+  const res = await act<SavedGlobalSettings | { ok: false; error?: string }>('set-global-settings', [patch]);
+  if (!res || res.ok === false) throw new Error((res as { error?: string } | undefined)?.error || 'Not saved');
   await queryClient.invalidateQueries({ queryKey: KEY });
+  return res;
 }

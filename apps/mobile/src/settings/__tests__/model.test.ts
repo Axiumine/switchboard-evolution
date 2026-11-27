@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 import { ACCENT_DEFAULT } from '@/shared/vendor/settings-model';
-import { TEMPLATES_AFTER, choicesFor, commitField, fieldsFor, harnessesOff, parseFieldInput, savedValue, terminalEngineNow, type SettingsField } from '../model';
+import { KEPT_ON, TEMPLATES_AFTER, choicesFor, commitField, fieldText, fieldsFor, harnessesOff, noteAfterSave, parseFieldInput, savedValue, terminalEngineNow, textAfterSave, type SettingsField } from '../model';
 import type { GlobalSettingsInfo } from '../types';
 
 const info: GlobalSettingsInfo = {
@@ -204,5 +204,45 @@ describe('commitField', () => {
     const save = jest.fn(async (_patch: Record<string, unknown>) => {});
     expect(await commitField(count, '12', undefined, save)).toEqual({ saved: false, error: 'The computer\'s settings are not loaded yet.' });
     expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe('after a save', () => {
+  const count = field('visibleSessionCount');
+  const harnesses = field('disabledHarnesses');
+  const withCount = (n: number): GlobalSettingsInfo => ({ ...info, values: { ...info.values, visibleSessionCount: n } });
+
+  it('commitField gives back what the computer answered', async () => {
+    const answer = { ok: true as const, settings: { visibleSessionCount: 12 } };
+    const save = jest.fn(async (_patch: Record<string, unknown>) => answer);
+    expect(await commitField(count, '12', info, save)).toEqual({ saved: true, error: null, stored: answer.settings });
+  });
+
+  it('a field shows the value read back, never what was typed', () => {
+    // 007 was typed; the computer saved 7, which is what the settings now say.
+    expect(textAfterSave(count, withCount(7), '5', false)).toBe('7');
+    expect(fieldText(field('projectsRoot'), info)).toBe('');
+    expect(fieldText(count, info)).toBe('5');
+  });
+
+  it('a field being typed in again keeps what is typed', () => {
+    expect(textAfterSave(count, withCount(7), '5', true)).toBeNull();
+  });
+
+  it('without the settings, a field shows the value it had', () => {
+    expect(textAfterSave(count, undefined, '5', false)).toBe('5');
+  });
+
+  it('"Kept on" comes from the computer\'s answer, not from the settings read before', () => {
+    // Every CLI switched off; the computer kept claude on.
+    const raw = ['claude', 'codex', 'opencode'];
+    expect(noteAfterSave(harnesses, raw, { saved: true, error: null, stored: { disabledHarnesses: ['codex', 'opencode'] } })).toEqual({ error: KEPT_ON });
+    expect(noteAfterSave(harnesses, ['codex', 'opencode'], { saved: true, error: null, stored: { disabledHarnesses: ['codex', 'opencode'] } })).toEqual({ saved: true });
+  });
+
+  it('a save says Saved, why not, or nothing when nothing was sent', () => {
+    expect(noteAfterSave(count, '12', { saved: true, error: null, stored: { visibleSessionCount: 12 } })).toEqual({ saved: true });
+    expect(noteAfterSave(count, '0', { saved: false, error: 'Max Visible Sessions must be a whole number from 1 to 100' })).toEqual({ error: 'Max Visible Sessions must be a whole number from 1 to 100' });
+    expect(noteAfterSave(count, '5', { saved: false, error: null })).toBeNull();
   });
 });

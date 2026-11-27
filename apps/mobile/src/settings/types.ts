@@ -56,3 +56,9 @@ export interface GlobalSettingsInfo {
     templatesDir: string | null;
   };
 }
+
+/** What set-global-settings answers a saved patch: the global settings as the computer stored them (settings-patch.js). */
+export interface SavedGlobalSettings {
+  ok: true;
+  settings: Record<string, unknown>;
+}
