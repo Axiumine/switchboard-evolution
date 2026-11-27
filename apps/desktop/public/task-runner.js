@@ -294,7 +294,8 @@ function createTaskLogView(projectPath, label) {
   container.className = 'terminal-container task-log-container';
   terminalsEl.appendChild(container);
   const terminal = new Terminal({
-    fontSize: 12,
+    fontSize: terminalFontSize(),
+    rows: terminalInitialRows(),
     fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
     theme: TERMINAL_THEME,
     cursorBlink: false,
@@ -323,6 +324,7 @@ function createTaskLogView(projectPath, label) {
     loading: false, outputMirror: '', queued: [],
   };
   taskLogViews.set(key, entry);
+  terminal.loadAddon(createTerminalZoomAddon(entry, { mac: isMac }));
   return entry;
 }
 
