@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Chips, ErrorText, Field, Hint, Label, MONO, SelectRow, SwitchRow } from '@/components/form';
 import { Section } from '@/components/project/Section';
 import {
   KEPT_ON,
+  TEMPLATES_AFTER,
   choiceKey,
   choicesFor,
   commitField,
@@ -72,10 +73,14 @@ export function CatalogTab({ tab }: { tab: CatalogTabKey }) {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
-      {sections.map(({ section, fields }, i) => (
+      {sections.map(({ section, fields }) => (
         <Section key={section} title={section}>
-          {fields.map((field) => <Control key={field.key} field={field} info={info} {...saves} />)}
-          {tab === 'application' && i === sections.length - 1 ? <Templates dir={info.options.templatesDir} /> : null}
+          {fields.map((field) => (
+            <Fragment key={field.key}>
+              <Control field={field} info={info} {...saves} />
+              {field.key === TEMPLATES_AFTER ? <Templates dir={info.options.templatesDir} /> : null}
+            </Fragment>
+          ))}
         </Section>
       ))}
     </ScrollView>

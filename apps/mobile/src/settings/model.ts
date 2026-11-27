@@ -36,6 +36,12 @@ export const KEPT_ON = 'Kept on — at least one CLI must stay enabled';
 
 const PREF_PREFIX = 'editorPrefs.';
 
+/**
+ * Application's Project Templates row (the computer's templates folder, read
+ * only) is not a setting: it comes right after this field, as on the desktop.
+ */
+export const TEMPLATES_AFTER = 'projectsRoot';
+
 /** The sections of a tab, in order, with their controls. */
 export function fieldsFor(tab: CatalogTabKey): { section: string; fields: SettingsField[] }[] {
   const sections: { section: string; fields: SettingsField[] }[] = [];

@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 import { ACCENT_DEFAULT } from '@/shared/vendor/settings-model';
-import { choicesFor, commitField, fieldsFor, harnessesOff, parseFieldInput, savedValue, terminalEngineNow, type SettingsField } from '../model';
+import { TEMPLATES_AFTER, choicesFor, commitField, fieldsFor, harnessesOff, parseFieldInput, savedValue, terminalEngineNow, type SettingsField } from '../model';
 import type { GlobalSettingsInfo } from '../types';
 
 const info: GlobalSettingsInfo = {
@@ -59,6 +59,11 @@ describe('fieldsFor', () => {
     expect(fieldsFor('application')[0].fields.map((f) => f.label)).toEqual([
       'Terminal Theme', 'Accent Color', 'Shell Profile', 'Max Visible Sessions', 'Session Max Age (days)', 'Terminal Engine', 'Projects Folder', 'IDE Emulation',
     ]);
+  });
+
+  it('Application: Project Templates between Projects Folder and IDE Emulation, as on the desktop', () => {
+    const rows = fieldsFor('application')[0].fields.flatMap((f) => (f.key === TEMPLATES_AFTER ? [f.label, 'Project Templates'] : [f.label]));
+    expect(rows.slice(-3)).toEqual(['Projects Folder', 'Project Templates', 'IDE Emulation']);
   });
 
   it('Editor: the five switches, one per preference', () => {
