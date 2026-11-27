@@ -16,6 +16,7 @@ const { sessionStates } = require('./session-states');
 const { subagentsDirFor, subagentsRunning } = require('./subagent-activity');
 const { readViewerEntriesSince } = require('./transcript-reader');
 const { createPromptImprover } = require('./prompt-improver');
+const { createPromptImproverWindows } = require('./prompt-improver-windows');
 const PromptImproverModel = require('./public/prompt-improver-model');
 const { markBusy, markIdle, applyStatusReport, takeStatusRecords } = require('./cli-state');
 const { createTerminalFanout } = require('./terminal-fanout');
@@ -2457,6 +2458,29 @@ function openCommandsWindow(info) {
 }
 
 ipcMain.handle('open-commands-window', (_event, info) => openCommandsWindow(info));
+
+// The Improve prompt window in a window of its own, for the session it was
+// opened for (prompt-improver-windows.js). Insert and Replace go to the main
+// window, which has the session's terminal, and bring it forward.
+const PROMPT_IMPROVER_WINDOW_SPEC = { title: 'Improve prompt', width: 780, height: 660, minWidth: 460, minHeight: 360, onTop: false };
+const promptImproverWindows = createPromptImproverWindows({
+  openWindow: ({ token, title }) => {
+    const win = createPageWindow('prompt-improver', { ...PROMPT_IMPROVER_WINDOW_SPEC, title: title ? `Improve prompt · ${title}` : PROMPT_IMPROVER_WINDOW_SPEC.title });
+    win.loadFile(path.join(__dirname, 'public', 'prompt-improver.html'), { query: { token } });
+    return win;
+  },
+  bringForward,
+  mainWindow: () => mainWindow,
+});
+
+ipcMain.handle('open-prompt-improver-window', (_event, state) => promptImproverWindows.open(state));
+ipcMain.handle('get-prompt-improver-window-state', (_event, token) => promptImproverWindows.take(token));
+ipcMain.handle('apply-prompt-improvement', async (_event, request) => {
+  const result = await promptImproverWindows.apply(request);
+  if (result.ok && mainWindow && !mainWindow.isDestroyed()) bringForward(mainWindow);
+  return result;
+});
+ipcMain.on('prompt-improver-applied', (_event, id, result) => { promptImproverWindows.applied(id, result); });
 
 // --- The windows of their own open again at the next start ---
 // The list in the settings follows every window that opens or closes. When

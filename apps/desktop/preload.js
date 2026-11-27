@@ -412,6 +412,14 @@ contextBridge.exposeInMainWorld('api', {
   onPromptImproverSettingsChanged: (callback) => {
     ipcRenderer.on('prompt-improver-settings-changed', (_event, settings) => callback(settings));
   },
+  // The Improve prompt window in a window of its own (prompt-improver-windows.js).
+  openPromptImproverWindow: (state) => ipcRenderer.invoke('open-prompt-improver-window', state),
+  getPromptImproverWindowState: (token) => ipcRenderer.invoke('get-prompt-improver-window-state', token),
+  applyPromptImprovement: (request) => ipcRenderer.invoke('apply-prompt-improvement', request),
+  onPromptImproverApplyRequest: (callback) => {
+    ipcRenderer.on('prompt-improver-apply-request', (_event, request) => callback(request));
+  },
+  promptImproverApplied: (id, result) => ipcRenderer.send('prompt-improver-applied', id, result),
   listProjectDirectory: (projectPath, relativePath) => ipcRenderer.invoke('list-project-directory', projectPath, relativePath),
   readProjectFile: (projectPath, relativePath) => ipcRenderer.invoke('read-project-file', projectPath, relativePath),
   searchProjectFiles: (root, options) => ipcRenderer.invoke('search-project-files', root, options),
