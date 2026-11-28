@@ -636,11 +636,28 @@ function tileFocusAfter(tree, id) {
 }
 
 /**
+ * Where the keys are: in the layout, or nowhere (the page's body). Only then
+ * may a change the user did not make in it (a pane that ended on its own) move
+ * them to a pane: typing in the file panel, a search field or a dialog goes on
+ * there.
+ */
+function tileKeysInLayout() {
+  const active = document.activeElement;
+  return !active || active === document.body || !!tileState.mount?.root?.contains(active);
+}
+
+/** A pane was shown in front, which focuses its terminal: the keys go back where they were, outside the layout. */
+function keepTileKeysAway(away) {
+  if (away && away.isConnected !== false && document.activeElement !== away) away.focus({ preventScroll: true });
+}
+
+/**
  * Takes session `id` out of its layout; the session keeps running. A layout
  * left with one session goes, and that session shows alone. `seen` is what was
- * on screen before (an exit is handled once the terminal is already gone).
+ * on screen before (an exit is handled once the terminal is already gone),
+ * and whether the keys were in the layout (`keys`, tileKeysInLayout).
  */
-function takeOutOfSplit(id, { onScreen, focused }) {
+function takeOutOfSplit(id, { onScreen, focused, keys = true }) {
   id = tileCurrentId(id);
   const store = tileStore();
   const layout = store.layoutOf(id, tileState.scope);
@@ -651,9 +668,14 @@ function takeOutOfSplit(id, { onScreen, focused }) {
   if (tileState.zoomedId === id) tileState.zoomedId = null;
   releaseTilePane(id);
   // The pane beside it takes the focus; with none live, the session itself stays in sight, alone.
-  if (onScreen && next) { showSession(next); return true; }
+  const away = keys ? null : document.activeElement;
+  if (onScreen && next) {
+    showSession(next);
+    keepTileKeysAway(away);
+    return true;
+  }
   refreshTileView();
-  if (onScreen) openSessions.get(activeSessionId)?.terminal.focus();
+  if (onScreen && keys) openSessions.get(activeSessionId)?.terminal.focus();
   return true;
 }
 
@@ -819,7 +841,8 @@ function rekeyTile(oldId, newId) {
  * started (both gone from sessionMap), leaves its pane and the pane beside it
  * takes the space. A stopped CLI keeps its pane as "Stopped · Resume"; one that
  * died keeps its terminal behind the exit banner. When the pane was the one in
- * focus on screen, the live pane beside it takes the focus.
+ * focus on screen, the live pane beside it takes the focus; the keys go to it
+ * only when they were in the layout, or nowhere (seen.keys).
  */
 function onTileProcessExited(id, seen) {
   if (!isTileId(id)) return;
@@ -834,7 +857,10 @@ function onTileProcessExited(id, seen) {
   refreshTileView();
   if (seen.onScreen && seen.focused && !openSessions.has(id)) {
     const next = tileFocusAfter(layout.tree, id);
-    if (next) showSession(next);
+    if (!next) return;
+    const away = seen.keys === false ? document.activeElement : null;
+    showSession(next);
+    keepTileKeysAway(away);
   }
 }
 
@@ -845,7 +871,7 @@ if (typeof window !== 'undefined' && window.api && !(typeof PROJECT_WINDOW !== '
   window.api.onSessionDetected((tempId, realId) => later(() => rekeyTile(tempId, realId)));
   window.api.onSessionForked((oldId, newId) => later(() => rekeyTile(oldId, newId)));
   window.api.onProcessExited(sessionId => {
-    const seen = { onScreen: tileViewOnScreen(), focused: tileState.focusedId === sessionId };
+    const seen = { onScreen: tileViewOnScreen(), focused: tileState.focusedId === sessionId, keys: tileKeysInLayout() };
     later(() => onTileProcessExited(sessionId, seen));
   });
   window.api.onCliBusyState(sessionId => {
