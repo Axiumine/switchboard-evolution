@@ -164,6 +164,8 @@ test('the session menu offers the splits, the configured one only for a CLI', ()
   assert.deepEqual(labels({ sessionId: 'S1', projectPath: APP, runtime: 'claude' }),
     ['Split', 'Split right', 'Split down', 'New split session with configuration…', '—']);
   assert.deepEqual(labels({ sessionId: 'T1', projectPath: APP, type: 'terminal' }), ['Split', 'Split right', 'Split down', '—']);
+  // Marked, so the Session Overview can put its own in their place.
+  assert.ok(context.splitMenuItems({ sessionId: 'S1', projectPath: APP, runtime: 'claude' }).every(item => item.splitItem === true));
   // Nothing for an archived session (its pane would be pruned) or no session.
   assert.deepEqual(labels({ sessionId: 'S4', projectPath: APP, archived: 1 }), []);
   assert.deepEqual(labels(null), []);

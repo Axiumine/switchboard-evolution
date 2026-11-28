@@ -27,6 +27,15 @@
 // a card's "Leave out of this search" is session-overview-panel.js's
 // (overviewLeaveOutItems, the same).
 //
+// The sessions docked beside the cards are session-overview-dock.js's, reached
+// through typeof guards: the body is its tile layout (mountOverviewDock,
+// unmountOverviewDock), each render prunes and draws it (pruneOverviewDock,
+// drawOverviewDock), focus and Maximize reach its panes (overviewDockPaneOf,
+// paintOverviewDock, toggleOverviewDockZoom, overviewDockZoomedId), and the
+// menus take its items in place of the Session tab's splits
+// (overviewDockMenuItems, overviewSplitMenuItems). A card's Split is its
+// dockInOverview.
+//
 // Depends on: buildOverview, overviewPlaces, layoutGeometry, pageSlice,
 // createOverviewLifecycle, loadOverviewPrefs, saveOverviewPrefs,
 // normalizeOverviewPrefs, OVERVIEW_* (session-overview-model.js);
@@ -248,6 +257,8 @@ function mountSessionOverview() {
   document.getElementById('main').appendChild(root);
   ovState.root = root;
   ovState.cardsEl = root.querySelector('.ov-cards');
+  // The body is a tile layout: the docked sessions, and the cards as its last leaf.
+  if (typeof mountOverviewDock === 'function') mountOverviewDock(root.querySelector('.ov-body'), ovState.cardsEl);
   root.querySelector('.ov-pager-prev').addEventListener('click', () => turnOverviewPage(-1));
   root.querySelector('.ov-pager-next').addEventListener('click', () => turnOverviewPage(1));
   const newBtn = root.querySelector('.ov-new-btn');
@@ -284,7 +295,7 @@ function mountSessionOverview() {
     renderSessionOverview();
   }
   const focusId = activeSessionId;
-  if (focusId && gridCards.get(focusId)?.isConnected) {
+  if (focusId && overviewHolderOf(focusId)?.isConnected) {
     requestAnimationFrame(() => {
       if (isSessionOverviewOpen() && activeSessionId === focusId) selectOverviewCard(focusId);
     });
@@ -304,6 +315,7 @@ function unmountSessionOverview() {
   if (typeof unmountOverviewClosedCards === 'function') unmountOverviewClosedCards();
   // Every terminal goes back where the single view and the project pages look for it.
   for (const [entry, card] of ovState.cards) releaseOverviewCard(entry, card);
+  if (typeof unmountOverviewDock === 'function') unmountOverviewDock();
   // None is in view now, so neither is the single view's header: showSession puts it back.
   terminalHeader.style.display = 'none';
   ovState.cards.clear();
@@ -383,7 +395,8 @@ function overviewSessions() {
   return sessions;
 }
 
-function overviewContext({ resort }) {
+/** `docked`: the sessions docked beside the cards, which are no cards. */
+function overviewContext({ resort, docked = [] }) {
   return {
     // A terminal still mounted is open, also behind its exit banner: the app keeps
     // a session that died (or failed to start) on screen so its error can be read.
@@ -398,7 +411,7 @@ function overviewContext({ resort }) {
     projectOf: overviewProjectOf,
     searchIds: typeof overviewSearch !== 'undefined' && overviewSearch ? overviewSearch.ids : null,
     leftOut: typeof overviewLeftOut !== 'undefined' ? overviewLeftOut : new Set(),
-    excludeIds: new Set(),
+    excludeIds: new Set(docked),
     // Sessions just launched: on top, whatever place the render before their terminal gave them.
     newIds: ovState.newIds,
     previousOrder: resort ? null : ovState.previousOrder,
@@ -419,7 +432,9 @@ function renderSessionOverview({ resort = false } = {}) {
   // Terminals made since the observer last ran; the moves below are this page's own.
   if (ovState.terminalsObserver) noteNewTerminals(ovState.terminalsObserver.takeRecords());
   const prefs = ensureOverviewPrefs();
-  const model = buildOverview(overviewSessions(), prefs, overviewContext({ resort }));
+  // The sessions no longer open leave the dock first: they come back as cards.
+  const docked = typeof pruneOverviewDock === 'function' ? pruneOverviewDock() : [];
+  const model = buildOverview(overviewSessions(), prefs, overviewContext({ resort, docked }));
   // On top now, they keep that place from here on, as every card does.
   ovState.newIds.clear();
   // Places are kept for every card the model gave, drawn or not, held back or not.
@@ -476,6 +491,8 @@ function renderSessionOverview({ resort = false } = {}) {
 
   drawOverviewHeader(model, paged);
   drawOverviewCards(shown, { grouped, carousels, prefs });
+  // After the cards: a session just docked has left its card, one just undocked has its card.
+  if (typeof drawOverviewDock === 'function') drawOverviewDock();
   ovState.layout = { shown, grouped, carousels, paged };
   layoutSessionOverview();
   // The moves above are this page's own, not news.
@@ -783,31 +800,44 @@ function buildOverviewCard(entry) {
   return card;
 }
 
-/** The menu of a card (right click on its header, and ⋯); during a search it ends with "Leave out of this search". */
+/**
+ * The menu of a card (right click on its header, and ⋯), and of a docked
+ * session's pane (with Remove from split); during a search it ends with "Leave
+ * out of this search". The Session tab's splits are not the page's: its own
+ * take their place (a card's Split docks it, session-overview-dock.js).
+ */
 function overviewCardMenuItems(session) {
   const id = session?.sessionId;
   if (!id) return [];
   return [
     { label: 'Open in project', icon: OV_ICONS.openInProject, onClick: () => openSessionNormally(id) },
     { label: 'Maximize', icon: OV_ICONS.maximize, onClick: () => toggleOverviewMaximize(id) },
+    ...(typeof overviewDockMenuItems === 'function' ? overviewDockMenuItems(session) : []),
     { sep: true },
-    ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []),
+    ...(typeof overviewSplitMenuItems === 'function' ? overviewSplitMenuItems(session) : []),
+    ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []).filter(item => !item.splitItem),
     ...(typeof overviewLeaveOutItems === 'function' ? overviewLeaveOutItems([id]) : []),
   ];
 }
 
 // ---- Focus, Maximize, pages ----
 
-/** Make a card the session in focus without leaving the page. */
+/** What holds session `id` on the page: its card, or its pane beside the cards (session-overview-dock.js). */
+function overviewHolderOf(id) {
+  return gridCards.get(id) || (typeof overviewDockPaneOf === 'function' ? overviewDockPaneOf(id) : null) || null;
+}
+
+/** Make a card, or a docked session's pane, the session in focus without leaving the page. */
 function selectOverviewCard(id, { focusTerminal = true } = {}) {
-  const card = gridCards.get(id);
+  const card = overviewHolderOf(id);
   if (!id || !card || !ovState.root?.contains(card)) return;
   setActiveSession(id);
   clearNotifications(id);
   document.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
   document.querySelector(`.session-item[data-session-id="${CSS.escape(id)}"]`)?.classList.add('active');
   for (const other of ovState.cards.values()) other.classList.toggle('focused', other === card);
-  if (!ovState.maximized) card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (typeof paintOverviewDock === 'function') paintOverviewDock();
+  if (!ovState.maximized && card.classList.contains('ov-card')) card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   if (focusTerminal) openSessions.get(id)?.terminal.focus();
 }
 
@@ -816,7 +846,7 @@ function overviewFocus(id) {
   if (!id || !isSessionOverviewOpen()) return;
   // An open session's card is its live one, even while its closed card is still drawn.
   const closedCard = () => (!openSessions.has(id) && typeof overviewClosedCardOf === 'function' ? overviewClosedCardOf(id) : null);
-  if (!ovState.root.contains(gridCards.get(id) || closedCard() || null)) {
+  if (!ovState.root.contains(overviewHolderOf(id) || closedCard() || null)) {
     renderSessionOverview();
     const page = ovState.pageOf.get(id);
     if (page !== undefined && page !== ovState.page) {
@@ -824,7 +854,7 @@ function overviewFocus(id) {
       renderSessionOverview();
     }
   }
-  if (ovState.root.contains(gridCards.get(id) || null)) {
+  if (ovState.root.contains(overviewHolderOf(id))) {
     selectOverviewCard(id);
   } else if (closedCard()) {
     // A closed session's card takes the keys; the session in focus stays the one it was.
@@ -836,8 +866,9 @@ function overviewFocus(id) {
   }
 }
 
-/** The card fills the page's body; again, or Esc, puts it back. */
+/** The card fills the page's body; again, or Esc, puts it back. A docked session's pane does the same (session-overview-dock.js). */
 function toggleOverviewMaximize(id) {
+  if (typeof toggleOverviewDockZoom === 'function' && toggleOverviewDockZoom(id)) return;
   const card = gridCards.get(id);
   const entry = openSessions.get(id);
   if (!card || !entry || !ovState.root?.contains(card)) return;
@@ -849,8 +880,16 @@ function toggleOverviewMaximize(id) {
   ovState.maximized = wasMaximized ? null : entry;
   card.classList.toggle('ov-maximized', !wasMaximized);
   card.querySelector('.ov-btn-max').classList.toggle('active', !wasMaximized);
+  // Beside docked sessions, the cards' area fills the body around it.
+  if (typeof paintOverviewDock === 'function') paintOverviewDock();
   // The card is the session in focus; the keys stay where they are, so Esc can put it back.
   selectOverviewCard(id, { focusTerminal: false });
+}
+
+/** The session that fills the page's body: a maximized card's, or a docked pane's. */
+function overviewMaximizedId() {
+  if (ovState.maximized) return ovState.maximized.session.sessionId;
+  return typeof overviewDockZoomedId === 'function' ? overviewDockZoomedId() : null;
 }
 
 function turnOverviewPage(step) {
@@ -916,15 +955,15 @@ function onOverviewKeydown(e) {
   if (!isSessionOverviewOpen()) return;
   const target = e.target;
   const inTerminal = !!target?.closest?.('.terminal-container');
+  const maximizedId = overviewMaximizedId();
   if (e.key === 'Escape') {
     // A terminal keeps its Esc: the CLIs use it to interrupt.
-    if (!ovState.maximized || inTerminal || isTextEditingTarget(target)) return;
+    if (!maximizedId || inTerminal || isTextEditingTarget(target)) return;
     if (typeof openCtxMenu !== 'undefined' && openCtxMenu) return;
     if (target !== document.body && !ovState.root.contains(target)) return;
     e.preventDefault();
     e.stopPropagation();
-    const id = ovState.maximized.session.sessionId;
-    toggleOverviewMaximize(id);
+    toggleOverviewMaximize(maximizedId);
     return;
   }
   const mod = isMac ? e.metaKey : e.ctrlKey;
@@ -935,13 +974,13 @@ function onOverviewKeydown(e) {
   if (!e.shiftKey && arrows[e.key]) {
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!ovState.maximized) navigateOverview(arrows[e.key]);
+    if (!maximizedId) navigateOverview(arrows[e.key]);
     return;
   }
   if (e.shiftKey && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!ovState.maximized) cycleOverview(e.code === 'BracketLeft' ? -1 : 1);
+    if (!maximizedId) cycleOverview(e.code === 'BracketLeft' ? -1 : 1);
   }
 }
 

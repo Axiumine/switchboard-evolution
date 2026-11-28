@@ -26,6 +26,8 @@ const tileNeighbor = (...args) => fn('tileNeighbor')(...args);
 const tileIds = (...args) => fn('tileIds')(...args);
 const pruneTiles = (...args) => fn('pruneTiles')(...args);
 const parseTileTree = (...args) => fn('parseTileTree')(...args);
+const parseTileDock = (...args) => fn('parseTileDock')(...args);
+const rekeyTileTree = (...args) => fn('rekeyTileTree')(...args);
 
 const leaf = id => ({ session: id });
 const CARDS = { cards: true };
@@ -271,6 +273,27 @@ test('a split that targets an unknown or repeated id changes nothing', () => {
   assert.deepEqual(plain(splitTile(tree, 'A', 'B', { rect: WIDE })), plain(tree));
   assert.deepEqual(plain(dockBesideCards(tree, 'C', WIDE)), plain(tree));
   assert.deepEqual(plain(dockBesideCards(split('row', leaf('A'), CARDS), 'A', WIDE)), split('row', leaf('A'), CARDS));
+});
+
+test('the overview dock reads as a tree with the cards and one session at least', () => {
+  const dock = split('row', leaf('A'), split('col', leaf('B'), CARDS));
+  assert.deepEqual(plain(parseTileDock(dock)), dock);
+  assert.notEqual(parseTileDock(dock), dock);
+  // Nothing saved, something else, or a tree the overview cannot draw: no dock.
+  const none = [null, undefined, 'row', { side: 'right' }, CARDS, split('row', leaf('A'), leaf('B')), split('row', leaf('A'), CARDS, 0.95)];
+  for (const value of none) assert.equal(parseTileDock(value), null, JSON.stringify(value));
+  // Sessions that are not open any more leave; a dock left with the cards alone is none.
+  assert.deepEqual(plain(parseTileDock(dock, id => id === 'B')), split('col', leaf('B'), CARDS));
+  assert.equal(parseTileDock(dock, () => false), null);
+  assert.deepEqual(plain(parseTileDock(dock, () => true)), dock);
+});
+
+test('a re-keyed session keeps its place, or leaves when the new id is there already', () => {
+  const tree = split('row', leaf('A'), split('col', leaf('B'), CARDS));
+  assert.deepEqual(plain(rekeyTileTree(tree, 'A', 'A2')), split('row', leaf('A2'), split('col', leaf('B'), CARDS)));
+  assert.deepEqual(plain(rekeyTileTree(tree, 'A', 'B')), split('col', leaf('B'), CARDS));
+  assert.deepEqual(plain(rekeyTileTree(tree, 'Z', 'Z2')), plain(tree));
+  assert.equal(rekeyTileTree(null, 'A', 'A2'), null);
 });
 
 // ---- The store of the Session tab's layouts (tileLayouts.v1) ----

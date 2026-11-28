@@ -154,7 +154,11 @@ async function splitSessionWithConfiguration(id, { direction = 'auto', scope = '
   });
 }
 
-/** Split, Split right, Split down and New split session with configuration…, for a session's menu. */
+/**
+ * Split, Split right, Split down and New split session with configuration…, for
+ * a session's menu. Each item (its separator too) is marked `splitItem`: the
+ * Session Overview puts its own in their place (session-overview-dock.js).
+ */
 function splitMenuItems(session) {
   if (!session?.sessionId || session.archived) return [];
   if (typeof PROJECT_WINDOW !== 'undefined' && PROJECT_WINDOW) return [];
@@ -174,5 +178,5 @@ function splitMenuItems(session) {
       onClick: run('Split with configuration', () => splitSessionWithConfiguration(id)),
     });
   }
-  return [...items, { sep: true }];
+  return [...items, { sep: true }].map(item => ({ ...item, splitItem: true }));
 }

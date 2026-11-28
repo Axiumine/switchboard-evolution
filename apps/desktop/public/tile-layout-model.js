@@ -125,6 +125,12 @@ function replaceTileId(tree, oldId, newId) {
   return { session: tree.session === oldId ? newId : tree.session };
 }
 
+// A session that changed id keeps its place; when the tree holds the new id
+// already, the old one leaves (an id is never in a tree twice).
+function rekeyTileTree(tree, oldId, newId) {
+  return tileHasSession(tree, newId) ? removeTile(tree, oldId) : replaceTileId(tree, oldId, newId);
+}
+
 // Sets the ratio of the split at `path`, held within TILE_RATIO_LIMITS. A path
 // that does not end on a split, or a ratio that is not a number, changes nothing.
 function setTileRatio(tree, path, ratio) {
@@ -248,6 +254,17 @@ function parseTileTree(value) {
   return read(value, 0);
 }
 
+// Reads the Session Overview's dock (overview.prefs.v1 `dock`): a copy of it
+// when it is a valid tree that holds the cards leaf, without the sessions
+// `keep(id)` rejects when it is given; null (no dock) for anything else, and
+// for a dock left with the cards alone.
+function parseTileDock(value, keep) {
+  const tree = parseTileTree(value);
+  if (!tree || !tileHasCards(tree)) return null;
+  const kept = keep ? pruneTiles(tree, keep) : tree;
+  return tileIds(kept).length > 0 ? kept : null;
+}
+
 // ---- The saved layouts ----
 
 // The Session tab's layouts (and, later, those of a session's own window):
@@ -322,7 +339,7 @@ function createTileStore(storage) {
     /** A session that changed id keeps its places; a layout that holds both ids keeps the new one only. */
     rekey(oldId, newId) {
       if (!isId(oldId) || !isId(newId) || oldId === newId) return;
-      each(oldId, tree => (tileHasSession(tree, newId) ? removeTile(tree, oldId) : replaceTileId(tree, oldId, newId)));
+      each(oldId, tree => rekeyTileTree(tree, oldId, newId));
     },
     /** Takes a session out of every layout. */
     forget(id) {

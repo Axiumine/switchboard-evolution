@@ -341,8 +341,8 @@ function resumeOverviewSession(id) {
 
 /**
  * The menu of a closed card (⋯ and right click): Resume, then the session's
- * own, and during a search "Leave out of this search", which leaves out the
- * earlier sessions the card stands for too.
+ * own but its splits, and during a search "Leave out of this search", which
+ * leaves out the earlier sessions the card stands for too.
  */
 function overviewClosedMenuItems(session) {
   const id = session?.sessionId;
@@ -351,7 +351,8 @@ function overviewClosedMenuItems(session) {
   return [
     { label: 'Resume', icon: PICONS.play(13), onClick: () => resumeOverviewSession(id) },
     { sep: true },
-    ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []),
+    // A closed card cannot be docked beside the cards (session-overview-dock.js).
+    ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []).filter(item => !item.splitItem),
     ...(typeof overviewLeaveOutItems === 'function' ? overviewLeaveOutItems([id, ...earlierIds]) : []),
   ];
 }

@@ -20,7 +20,8 @@
 // While the Session Overview is open its cards hold the terminals: nothing here
 // moves them then, and the next showSession takes them back into their panes.
 //
-// mountTileTree draws any tree, the overview's dock (with its cards leaf) too.
+// mountTileTree draws any tree, the overview's dock (with its cards leaf) too,
+// and createTilePane and paintTilePaneState make and paint its panes.
 //
 // Depends on: splitTile, removeTile, replaceTileId, setTileRatio, tileNeighbor,
 // tileIds, tileIsSplit, tileIsCards, pruneTiles, createTileStore
@@ -296,6 +297,29 @@ function tilePaneMenuItems(id) {
 function tilePaneFor(id) {
   const existing = tileState.panes.get(id);
   if (existing) return existing;
+  const pane = createTilePane(id, {
+    split: paneId => runTileAction('Split', () => splitSession(paneId)),
+    maximize: toggleTileZoom,
+    remove: removeFromSplit,
+    menu: tilePaneMenuItems,
+    focus: focusTilePane,
+    focused: paneId => tileState.focusedId === paneId,
+  });
+  tileState.panes.set(id, pane);
+  return pane;
+}
+
+/**
+ * A pane for session `id`: its header (dot, name, Split, Maximize, Remove from
+ * split, ⋯) over a body that takes the session's terminal container and fits
+ * it once per frame, whatever resized it. `actions` says what the header and
+ * the presses do: split, maximize and remove (id), menu (id: the items of ⋯
+ * and of the right click), focus (id, { focusTerminal }) and focused (id:
+ * whether it has the focus already). Each gets the pane's id as it is then (a
+ * re-keyed pane keeps its element). The Session tab's panes, and the Session
+ * Overview's docked ones (session-overview-dock.js).
+ */
+function createTilePane(id, actions) {
   const pane = document.createElement('div');
   pane.className = 'tile-pane';
   pane.dataset.sessionId = id;
@@ -306,10 +330,10 @@ function tilePaneFor(id) {
   header.className = 'tile-pane-header';
   header.append(
     span('tile-pane-dot grid-card-dot stopped'), span('tile-pane-name'), span('tile-pane-spacer'),
-    tileButton('tile-btn-split', 'Split', TILE_ICONS.split(12), () => runTileAction('Split', () => splitSession(paneId()))),
-    tileButton('tile-btn-max', 'Maximize', TILE_ICONS.maximize(12), () => toggleTileZoom(paneId())),
-    tileButton('tile-btn-remove', 'Remove from split', TILE_ICONS.remove(12), () => removeFromSplit(paneId())),
-    tileButton('tile-btn-more', 'More', TILE_ICONS.more(12), button => showContextMenu(tilePaneMenuItems(paneId()), { anchor: button })),
+    tileButton('tile-btn-split', 'Split', TILE_ICONS.split(12), () => actions.split(paneId())),
+    tileButton('tile-btn-max', 'Maximize', TILE_ICONS.maximize(12), () => actions.maximize(paneId())),
+    tileButton('tile-btn-remove', 'Remove from split', TILE_ICONS.remove(12), () => actions.remove(paneId())),
+    tileButton('tile-btn-more', 'More', TILE_ICONS.more(12), button => showContextMenu(actions.menu(paneId()), { anchor: button })),
   );
   const body = document.createElement('div');
   body.className = 'tile-pane-body';
@@ -320,20 +344,20 @@ function tilePaneFor(id) {
     if (e.button !== 0 || e.target.closest('button')) return;
     const onHeader = !!e.target.closest('.tile-pane-header');
     if (onHeader) e.preventDefault();
-    focusTilePane(paneId(), { focusTerminal: onHeader });
+    actions.focus(paneId(), { focusTerminal: onHeader });
   }, true);
   // Typing into a pane's terminal (Tab, a click xterm took first) makes it the one in focus.
   pane.addEventListener('focusin', e => {
-    if (e.target.classList?.contains('xterm-helper-textarea') && tileState.focusedId !== paneId()) {
-      focusTilePane(paneId(), { focusTerminal: false });
+    if (e.target.classList?.contains('xterm-helper-textarea') && !actions.focused(paneId())) {
+      actions.focus(paneId(), { focusTerminal: false });
     }
   });
   header.addEventListener('dblclick', e => {
-    if (!e.target.closest('button')) toggleTileZoom(paneId());
+    if (!e.target.closest('button')) actions.maximize(paneId());
   });
   header.addEventListener('contextmenu', e => {
     e.preventDefault();
-    showContextMenu(tilePaneMenuItems(paneId()), { x: e.clientX, y: e.clientY });
+    showContextMenu(actions.menu(paneId()), { x: e.clientX, y: e.clientY });
   });
 
   // One fit per frame for the pane's terminal, whatever resized it.
@@ -353,7 +377,6 @@ function tilePaneFor(id) {
     });
   });
   pane.tileResize.observe(body);
-  tileState.panes.set(id, pane);
   return pane;
 }
 
@@ -393,16 +416,19 @@ function fillTilePane(id) {
   return moved;
 }
 
-/** The dot (busy, running, stopped), the stopped text and Maximize's state. */
 function paintTilePane(id) {
   const pane = tileState.panes.get(id);
-  if (!pane) return;
+  if (pane) paintTilePaneState(pane, id, tileState.zoomedId === id);
+}
+
+/** A pane's dot (busy, running, stopped), its stopped text and its Maximize's state (`zoomed`). */
+function paintTilePaneState(pane, id, zoomed) {
   const running = typeof activePtyIds !== 'undefined' && activePtyIds.has(id);
   const busy = running && typeof sessionBusyState !== 'undefined' && sessionBusyState.get(id) === true;
   pane.querySelector('.tile-pane-dot').className = `tile-pane-dot grid-card-dot ${busy ? 'busy' : running ? 'running' : 'stopped'}`;
   const state = pane.querySelector('.tile-pane-state');
   if (state) state.textContent = running ? 'Running' : 'Stopped';
-  pane.querySelector('.tile-btn-max').classList.toggle('active', tileState.zoomedId === id);
+  pane.querySelector('.tile-btn-max').classList.toggle('active', zoomed);
 }
 
 function paintTilePanes() {
@@ -628,7 +654,11 @@ function newTileLayoutId() {
 
 /** The rect a split of `id` halves: its pane's, or its terminal's when it is shown alone. */
 function tileTargetRect(id) {
-  const el = tileState.panes.get(id) || openSessions.get(id)?.element;
+  return tileRectOf(tileState.panes.get(id) || openSessions.get(id)?.element);
+}
+
+/** An element's rect on screen, as the model takes it; undefined while it is not laid out. */
+function tileRectOf(el) {
   const box = el?.isConnected ? el.getBoundingClientRect() : null;
   return box && box.width > 0 && box.height > 0 ? { x: box.left, y: box.top, width: box.width, height: box.height } : undefined;
 }

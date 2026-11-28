@@ -3,7 +3,9 @@
    .grid-card styles (style.css, command-catalog.css). Sizes come from
    layoutGeometry as CSS variables on .ov-cards: --ov-cols, --ov-rows,
    --ov-card-w and --ov-card-h. The 14px gap is OV_GAP, the 8px one under a
-   group's header OV_GROUP_GAP. */
+   group's header OV_GROUP_GAP. The body is a tile layout (tiles.css,
+   session-overview-dock.js): the sessions docked beside the cards are panes,
+   and the cards area is its last leaf. */
 
 #session-overview {
   position: absolute;
@@ -73,13 +75,17 @@
 .ov-new-btn { padding: 5px 10px; white-space: nowrap; }
 .ov-new-btn[hidden] { display: none; }
 
-/* ---- Body: the cards, or a maximized card over them ---- */
+/* ---- Body: the docked panes and the cards, or a maximized card over them ---- */
 .ov-body {
-  position: relative; /* a maximized card fills it */
+  position: relative; /* its tile layout fills it */
   flex: 1;
   min-height: 0;
   display: flex;
 }
+/* The cards area's leaf: a maximized card fills it, and it fills the body then. */
+.ov-cards-leaf { display: flex; }
+/* A docked session's pane (tiles.css .tile-pane), kept off the page's edges. */
+.ov-dock-pane { margin: 14px; }
 .ov-cards {
   flex: 1;
   min-width: 0;
@@ -248,7 +254,7 @@
   min-height: 0;
 }
 
-/* Maximize: the card covers the page's body until it is put back. */
+/* Maximize: the card covers the cards' area, and so the page's body, until it is put back. */
 .grid-card.ov-card.ov-maximized {
   position: absolute;
   inset: 0;
