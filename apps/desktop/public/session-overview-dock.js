@@ -25,16 +25,16 @@
 //
 // Depends on: parseTileDock, dockBesideCards, splitTile, removeTile,
 // rekeyTileTree, setTileRatio, tileIds, tileNeighbor, TILE_CARDS
-// (tile-layout-model.js); mountTileTree, createTilePane, paintTilePaneState,
-// tileRectOf, tileSessionOf, tileSessionName, runTileAction, isTileFocusKey,
+// (tile-layout-model.js); mountTileTree, createTilePane, paintTilePaneHeader,
+// disposeTilePane, tileRectOf, tileSessionOf, runTileAction, isTileFocusKey,
 // TILE_KEY_DIRECTIONS, TILE_ICONS, TILE_DOTS_MS (tile-view.js); splitSession,
 // splitSessionWithConfiguration (session-split.js); ovState,
 // ensureOverviewPrefs, isSessionOverviewOpen, sessionOverviewUnavailable,
 // refreshSessionOverview, scheduleOverviewRefresh, selectOverviewCard,
 // overviewFocus, toggleOverviewMaximize, overviewCardMenuItems
 // (session-overview.js); saveOverviewPrefs (session-overview-model.js);
-// openSessions, activeSessionId, terminalsEl (app.js); fitAndScroll
-// (terminal-manager.js); ICONS (icons.js). All are looked up when called.
+// openSessions, activeSessionId (app.js); fitAndScroll (terminal-manager.js);
+// ICONS (icons.js). All are looked up when called.
 
 const ovDock = {
   mount: null, // mountTileTree's handle over .ov-body, while the page is open
@@ -214,11 +214,7 @@ function paintOverviewDock() {
 }
 
 function paintOverviewDockPanes() {
-  for (const [id, pane] of ovDock.panes) {
-    const session = tileSessionOf(id);
-    pane.querySelector('.tile-pane-name').textContent = session ? tileSessionName(session) : id;
-    paintTilePaneState(pane, id, ovDock.zoomedId === id);
-  }
+  for (const [id, pane] of ovDock.panes) paintTilePaneHeader(pane, id, ovDock.zoomedId === id);
 }
 
 /** mountTileTree's renderLeaf: the cards area, or a docked session's pane (made once). */
@@ -254,18 +250,12 @@ function fillOverviewDockPane(id) {
   fitAndScroll(entry);
 }
 
-/** A pane leaves: its terminal, if still in it, goes back to #terminals, out of view. */
+/** A pane leaves: its terminal, if still in it, goes back to #terminals. */
 function releaseOverviewDockPane(id) {
   const pane = ovDock.panes.get(id);
   if (!pane) return;
   ovDock.panes.delete(id);
-  pane.tileResize?.disconnect();
-  const container = pane.querySelector('.tile-pane-body > .terminal-container');
-  if (container) {
-    container.classList.remove('tile-mode', 'visible');
-    terminalsEl.appendChild(container);
-  }
-  pane.remove();
+  disposeTilePane(pane);
 }
 
 function saveOverviewDockRatio(path, ratio) {

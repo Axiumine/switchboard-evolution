@@ -434,7 +434,8 @@ function renderSessionOverview({ resort = false } = {}) {
   const prefs = ensureOverviewPrefs();
   // The sessions no longer open leave the dock first: they come back as cards.
   const docked = typeof pruneOverviewDock === 'function' ? pruneOverviewDock() : [];
-  const model = buildOverview(overviewSessions(), prefs, overviewContext({ resort, docked }));
+  const ctx = overviewContext({ resort, docked });
+  const model = buildOverview(overviewSessions(), prefs, ctx);
   // On top now, they keep that place from here on, as every card does.
   ovState.newIds.clear();
   // Places are kept for every card the model gave, drawn or not, held back or not.
@@ -489,7 +490,10 @@ function renderSessionOverview({ resort = false } = {}) {
     if (cards.length) shown.push({ group, cards, collapsed: false });
   }
 
-  drawOverviewHeader(model, paged);
+  // The header counts every session on the page, the docked ones too; they are
+  // no search results, so the results bar (ovState.results) leaves them out.
+  const dockedRunning = docked.filter(id => ctx.isRunning(id)).length;
+  drawOverviewHeader({ total: model.total + docked.length, running: model.running + dockedRunning }, paged);
   drawOverviewCards(shown, { grouped, carousels, prefs });
   // After the cards: a session just docked has left its card, one just undocked has its card.
   if (typeof drawOverviewDock === 'function') drawOverviewDock();
@@ -501,10 +505,11 @@ function renderSessionOverview({ resort = false } = {}) {
   updateRunningIndicators();
 }
 
-function drawOverviewHeader(model, paged) {
+/** `counts`: the sessions on the page (`total`) and those running (`running`). */
+function drawOverviewHeader(counts, paged) {
   const root = ovState.root;
   root.querySelector('.ov-count').textContent =
-    `${model.total} session${model.total === 1 ? '' : 's'} · ${model.running} running`;
+    `${counts.total} session${counts.total === 1 ? '' : 's'} · ${counts.running} running`;
   const chips = root.querySelector('.ov-chips');
   chips.replaceChildren(...overviewFilterChips().map(({ label, clear }) => {
     const chip = document.createElement('span');
@@ -802,21 +807,24 @@ function buildOverviewCard(entry) {
 
 /**
  * The menu of a card (right click on its header, and ⋯), and of a docked
- * session's pane (with Remove from split); during a search it ends with "Leave
- * out of this search". The Session tab's splits are not the page's: its own
- * take their place (a card's Split docks it, session-overview-dock.js).
+ * session's pane (with Remove from split); during a search a card's ends with
+ * "Leave out of this search" (a docked session is no result). The Session
+ * tab's splits are not the page's: its own take their place (a card's Split
+ * docks it, session-overview-dock.js).
  */
 function overviewCardMenuItems(session) {
   const id = session?.sessionId;
   if (!id) return [];
+  const dockItems = typeof overviewDockMenuItems === 'function' ? overviewDockMenuItems(session) : [];
+  const docked = dockItems.length > 0;
   return [
     { label: 'Open in project', icon: OV_ICONS.openInProject, onClick: () => openSessionNormally(id) },
     { label: 'Maximize', icon: OV_ICONS.maximize, onClick: () => toggleOverviewMaximize(id) },
-    ...(typeof overviewDockMenuItems === 'function' ? overviewDockMenuItems(session) : []),
+    ...dockItems,
     { sep: true },
     ...(typeof overviewSplitMenuItems === 'function' ? overviewSplitMenuItems(session) : []),
     ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []).filter(item => !item.splitItem),
-    ...(typeof overviewLeaveOutItems === 'function' ? overviewLeaveOutItems([id]) : []),
+    ...(!docked && typeof overviewLeaveOutItems === 'function' ? overviewLeaveOutItems([id]) : []),
   ];
 }
 

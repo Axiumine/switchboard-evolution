@@ -191,6 +191,15 @@ test('the results bar counts what the page counts, also when closed sessions sha
   assert.equal(parts['.ovp-stop'].hidden, false);
   assert.equal(parts['.ovp-stop'].textContent, 'Stop 1 running');
   assert.equal(run('JSON.stringify(overviewLastResults().runningIds)'), '["live"]');
+  // Docked beside the cards, "live" is still on the page and the header counts it;
+  // it is no result of the search, so the results bar does not.
+  context.pruneOverviewDock = () => ['live'];
+  run('renderSessionOverview()');
+  assert.deepEqual(drawn, { total: 3, running: 1 });
+  assert.equal(run('overviewLastResults().total'), 2);
+  assert.equal(run('JSON.stringify(overviewLastResults().runningIds)'), '[]');
+  delete context.pruneOverviewDock;
+  run('renderSessionOverview()');
   // The panel never builds the model itself.
   assert.ok(!panelSource.includes('buildOverview('));
 

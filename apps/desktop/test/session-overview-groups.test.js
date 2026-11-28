@@ -170,6 +170,13 @@ test("a card's menu ends with Leave out of this search only during a search", ()
   run('overviewCardMenuItems({ sessionId: "a" }).at(-1).onClick()');
   assert.deepEqual([...run('overviewLeftOut')], ['a']);
   assert.deepEqual(refreshed, ['page'], 'the page is drawn again, and the panel with it');
+
+  // The Session tab's splits are not the page's; a docked session's pane has
+  // Remove from split, and nothing to leave out (it is no result of the search).
+  context.sessionMenuItems = () => [{ label: 'Split', splitItem: true }, { sep: true, splitItem: true }, { label: 'Rename…' }];
+  context.overviewDockMenuItems = session => (session.sessionId === 'd' ? [{ label: 'Remove from split' }] : []);
+  assert.deepEqual(labels(run('overviewCardMenuItems({ sessionId: "d" })')), ['Open in project', 'Maximize', 'Remove from split', '—', 'Rename…']);
+  assert.deepEqual(menu(), ['Open in project', 'Maximize', '—', 'Rename…', '—', 'Leave out of this search']);
 });
 
 test("a closed card's Leave out takes the earlier sessions it stands for too", () => {

@@ -21,7 +21,8 @@
 // moves them then, and the next showSession takes them back into their panes.
 //
 // mountTileTree draws any tree, the overview's dock (with its cards leaf) too,
-// and createTilePane and paintTilePaneState make and paint its panes.
+// and createTilePane, paintTilePaneHeader and disposeTilePane make, paint and
+// end its panes.
 //
 // Depends on: splitTile, removeTile, replaceTileId, setTileRatio, tileNeighbor,
 // tileIds, tileIsSplit, tileIsCards, pruneTiles, createTileStore
@@ -380,6 +381,23 @@ function createTilePane(id, actions) {
   return pane;
 }
 
+/**
+ * The end of a pane createTilePane made: its observer stops, its terminal (if
+ * still in it) goes back to #terminals as it is (still running, still .visible
+ * and fitted again if it was), and the pane leaves the page.
+ */
+function disposeTilePane(pane) {
+  pane.tileResize?.disconnect();
+  const container = pane.querySelector('.tile-pane-body > .terminal-container');
+  if (container) {
+    container.classList.remove('tile-mode');
+    terminalsEl.appendChild(container);
+    const entry = openSessions.get(pane.dataset.sessionId);
+    if (entry && entry.element === container && container.classList.contains('visible')) fitAndScroll(entry);
+  }
+  pane.remove();
+}
+
 /** A pane takes its session's terminal (back), or says it is stopped with Resume. */
 function fillTilePane(id) {
   const pane = tileState.panes.get(id);
@@ -432,11 +450,14 @@ function paintTilePaneState(pane, id, zoomed) {
 }
 
 function paintTilePanes() {
-  for (const [id, pane] of tileState.panes) {
-    const session = tileSessionOf(id);
-    if (session) pane.querySelector('.tile-pane-name').textContent = tileSessionName(session);
-    paintTilePane(id);
-  }
+  for (const [id, pane] of tileState.panes) paintTilePaneHeader(pane, id, tileState.zoomedId === id);
+}
+
+/** A pane's header as its session is now: its name (once the session is known), then paintTilePaneState. */
+function paintTilePaneHeader(pane, id, zoomed) {
+  const session = tileSessionOf(id);
+  if (session) pane.querySelector('.tile-pane-name').textContent = tileSessionName(session);
+  paintTilePaneState(pane, id, zoomed);
 }
 
 function resumeTilePane(id, button) {
@@ -450,20 +471,12 @@ function resumeTilePane(id, button) {
     .finally(() => { if (button) button.disabled = false; });
 }
 
-/** A pane leaves: its terminal goes back to #terminals as it is (still running, still .visible if it was). */
+/** A pane of the Session tab leaves; its terminal keeps running (disposeTilePane). */
 function releaseTilePane(id) {
   const pane = tileState.panes.get(id);
   if (!pane) return;
   tileState.panes.delete(id);
-  pane.tileResize?.disconnect();
-  const container = pane.querySelector('.tile-pane-body > .terminal-container');
-  if (container) {
-    container.classList.remove('tile-mode');
-    terminalsEl.appendChild(container);
-    const entry = openSessions.get(id);
-    if (entry && entry.element === container && container.classList.contains('visible')) fitAndScroll(entry);
-  }
-  pane.remove();
+  disposeTilePane(pane);
 }
 
 function unmountTileView() {
