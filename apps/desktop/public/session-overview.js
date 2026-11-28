@@ -16,10 +16,17 @@
 // Never in a project window or a session window: there the page does not open,
 // showSession stays as it is and onAppRestored does nothing.
 //
-// Depends on: buildOverview, layoutGeometry, pageSlice, createOverviewLifecycle,
-// loadOverviewPrefs, saveOverviewPrefs, normalizeOverviewPrefs, OVERVIEW_*
-// (session-overview-model.js); SESSION_STATUS_FILTERS, SESSION_PIN_FILTERS,
-// sessionFolderLabel (session-list.js); openSessions, sessionMap,
+// The cards of closed sessions (with "Include closed", or during a search) and
+// each group's "+ N older" card are session-overview-closed.js's, reached
+// through typeof guards: drawOverviewClosedCard and pruneOverviewClosedCards
+// while drawing, overviewClosedCardOf and focusOverviewClosedCard for the keys,
+// unmountOverviewClosedCards on close, and overviewExpanded for the model.
+//
+// Depends on: buildOverview, overviewPlaces, layoutGeometry, pageSlice,
+// createOverviewLifecycle, loadOverviewPrefs, saveOverviewPrefs,
+// normalizeOverviewPrefs, OVERVIEW_* (session-overview-model.js);
+// SESSION_STATUS_FILTERS, SESSION_PIN_FILTERS, sessionFolderLabel
+// (session-list.js); openSessions, sessionMap,
 // cachedAllProjects, cachedProjectTreeAll, activePtyIds, attentionSessions,
 // responseReadySessions, sessionBusyState, sessionEventTime, activeSessionId,
 // activeTab, visibleSessionCount, sessionMaxAgeDays, pendingSessions,
@@ -178,13 +185,19 @@ function overviewLastResults() {
   return ovState.results;
 }
 
-/** Change some choices: they are normalized, saved and drawn. A new sort or grouping puts the cards in its order. */
+/**
+ * Change some choices: they are normalized, saved and drawn. A new sort or
+ * grouping puts the cards in its order, and so do closed or archived sessions
+ * switched on: they take their places by the sort, not all on top as new cards.
+ */
 function setOverviewPrefs(patch) {
   const before = ensureOverviewPrefs();
   overviewPrefs = normalizeOverviewPrefs(mergeOverviewPrefs(overviewPrefs, patch));
   saveOverviewPrefs(localStorage, overviewPrefs);
   if (overviewPrefs.layout.mode !== before.layout.mode) ovState.page = 0;
-  const resort = !!patch && ('sort' in patch || overviewPrefs.group.by !== before.group.by);
+  const switchedOn = key => !!overviewPrefs[key] && !before[key];
+  const resort = !!patch && ('sort' in patch || overviewPrefs.group.by !== before.group.by
+    || switchedOn('includeClosed') || switchedOn('showArchived'));
   refreshSessionOverview({ resort });
   // The Sessions tab's controls show the choice, wherever it was made (a filter chip's ×).
   if (typeof refreshOverviewPanel === 'function') refreshOverviewPanel();
@@ -281,6 +294,7 @@ function unmountSessionOverview() {
   ovState.cardsObserver?.disconnect();
   ovState.resizeObserver?.disconnect();
   ovState.terminalsObserver = ovState.cardsObserver = ovState.resizeObserver = null;
+  if (typeof unmountOverviewClosedCards === 'function') unmountOverviewClosedCards();
   // Every terminal goes back where the single view and the project pages look for it.
   for (const [entry, card] of ovState.cards) releaseOverviewCard(entry, card);
   // None is in view now, so neither is the single view's header: showSession puts it back.
@@ -369,7 +383,8 @@ function overviewContext({ resort }) {
     previousOrder: resort ? null : ovState.previousOrder,
     previousGroups: resort ? undefined : ovState.previousGroups,
     resort,
-    expanded: new Set(),
+    // Groups showing every closed card ("+ N older", session-overview-closed.js).
+    expanded: typeof overviewExpanded !== 'undefined' ? overviewExpanded : new Set(),
     visibleCount: visibleSessionCount,
     maxAgeDays: sessionMaxAgeDays,
     now: Date.now(),
@@ -384,8 +399,8 @@ function renderSessionOverview({ resort = false } = {}) {
   if (ovState.terminalsObserver) noteNewTerminals(ovState.terminalsObserver.takeRecords());
   const prefs = ensureOverviewPrefs();
   const model = buildOverview(overviewSessions(), prefs, overviewContext({ resort }));
-  // Places are kept for every card the model gave, drawn or not.
-  ovState.previousOrder = new Map(model.groups.map(group => [group.key, group.cards.map(card => card.id)]));
+  // Places are kept for every card the model gave, drawn or not, held back or not.
+  ovState.previousOrder = overviewPlaces(model.groups);
   ovState.previousGroups = model.groups.map(group => group.key);
   ovState.results = {
     total: model.total,
@@ -396,9 +411,17 @@ function renderSessionOverview({ resort = false } = {}) {
   const carousels = grouped && prefs.group.display === 'carousels';
   const paged = prefs.layout.mode === 'grid-fit' && !carousels;
   const collapsed = new Set(grouped ? prefs.group.collapsed : []);
-  // Only live cards here: the cards of closed sessions are drawn by task 6.
+  // Live cards need their terminal. Closed cards, and a last "+ N older" card in
+  // each group that holds some back, are drawn by session-overview-closed.js.
+  const closedCards = typeof drawOverviewClosedCard === 'function';
   const groups = model.groups
-    .map(group => ({ ...group, cards: group.cards.filter(card => card.live && openSessions.has(card.id)) }))
+    .map(group => ({
+      ...group,
+      cards: [
+        ...group.cards.filter(card => (card.live ? openSessions.has(card.id) : closedCards)),
+        ...(closedCards && group.older.length ? [{ kind: 'older', groupKey: group.key, count: group.older.length }] : []),
+      ],
+    }))
     .filter(group => group.cards.length > 0);
 
   // Pages: the cards of open groups, in order, perPage at a time. A collapsed
@@ -411,8 +434,9 @@ function renderSessionOverview({ resort = false } = {}) {
   ovState.pages = paged ? layoutGeometry(prefs.layout, { width: 1, height: 1, count: flat.length }).pages : 1;
   ovState.page = Math.min(Math.max(0, ovState.page), ovState.pages - 1);
   const onPage = new Set(paged ? pageSlice(flat, ovState.page, perPage) : flat);
-  ovState.pageOf = new Map(flat.map((card, i) => [card.id, paged ? Math.floor(i / perPage) : 0]));
-  ovState.order = flat.map(card => card.id);
+  // A "+ N older" card takes a place on its page, but the keys never land on it.
+  ovState.pageOf = new Map(flat.flatMap((card, i) => (card.id ? [[card.id, paged ? Math.floor(i / perPage) : 0]] : [])));
+  ovState.order = flat.filter(card => card.id).map(card => card.id);
 
   const shown = [];
   let index = 0;
@@ -502,12 +526,14 @@ function drawOverviewCards(shown, { grouped, carousels, prefs }) {
     const groupEl = ensureOverviewGroup(group, { grouped, collapsed });
     groupEls.push(groupEl);
     const list = groupEl.querySelector('.ov-group-cards');
-    cards.forEach((card, i) => {
-      const cardEl = ensureOverviewCard(card, prefs);
+    const els = cards.map(card => (card.live ? ensureOverviewCard(card, prefs) : drawOverviewClosedCard(card, prefs)));
+    // The cards that left go first, so the ones that stay are not moved past
+    // them: a resumed session's live card takes its closed card's place.
+    for (const child of [...list.children]) if (!els.includes(child)) child.remove();
+    els.forEach((cardEl, i) => {
       used.add(cardEl);
       if (list.children[i] !== cardEl) list.insertBefore(cardEl, list.children[i] || null);
     });
-    while (list.children.length > cards.length) list.lastElementChild.remove();
     ovState.cardsObserver?.observe(list, { childList: true });
   }
   // Groups in order, and the ones gone off the page removed.
@@ -519,7 +545,12 @@ function drawOverviewCards(shown, { grouped, carousels, prefs }) {
   if (shown.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'ov-empty';
-    empty.textContent = overviewFiltersActive(prefs) ? 'No open session matches the filters.' : 'No open sessions.';
+    // A search shows closed sessions too.
+    const searching = typeof overviewSearch !== 'undefined' && !!overviewSearch;
+    const closedToo = prefs.includeClosed || searching;
+    if (searching) empty.textContent = 'No session matches the search.';
+    else if (overviewFiltersActive(prefs)) empty.textContent = `No ${closedToo ? '' : 'open '}session matches the filters.`;
+    else empty.textContent = closedToo ? 'No sessions.' : 'No open sessions.';
     cardsEl.appendChild(empty);
   }
 
@@ -529,9 +560,17 @@ function drawOverviewCards(shown, { grouped, carousels, prefs }) {
     releaseOverviewCard(entry, card);
     ovState.cards.delete(entry);
   }
+  if (typeof pruneOverviewClosedCards === 'function') pruneOverviewClosedCards(used);
   if (ovState.maximized && !ovState.cards.has(ovState.maximized)) ovState.maximized = null;
-  const focused = gridCards.get(activeSessionId);
+  const focused = overviewCurrentCard();
   for (const card of ovState.cards.values()) card.classList.toggle('focused', card === focused);
+}
+
+/** The card the keys move from: the one holding the keyboard focus (a closed card can), else the session in focus's. */
+function overviewCurrentCard() {
+  const held = document.activeElement?.closest?.('.ov-card');
+  if (held && ovState.root?.contains(held)) return held;
+  return gridCards.get(activeSessionId);
 }
 
 function ensureOverviewGroup(group, { grouped, collapsed }) {
@@ -553,7 +592,9 @@ function ensureOverviewGroup(group, { grouped, collapsed }) {
   header.hidden = !grouped;
   header.title = group.path || group.label;
   groupEl.querySelector('.ov-group-name').textContent = group.label;
-  groupEl.querySelector('.ov-group-count').textContent = String(group.cards.length);
+  // Every session of the group, the ones behind "+ N older" too.
+  const count = group.cards.reduce((n, card) => n + (card.kind === 'older' ? card.count : 1), 0);
+  groupEl.querySelector('.ov-group-count').textContent = String(count);
   groupEl.classList.toggle('collapsed', collapsed);
   return groupEl;
 }
@@ -592,6 +633,13 @@ function ensureOverviewCard(card, prefs) {
   }
 
   const session = card.session;
+  fillOverviewCardHeader(cardEl, session, prefs);
+  cardEl.querySelector('.grid-card-footer').children[1].textContent = formatDate(new Date(card.sortTime || session.modified));
+  return cardEl;
+}
+
+/** A card's name and chips: its folder, and its project unless the groups are projects or it reads as the folder. Closed cards too. */
+function fillOverviewCardHeader(cardEl, session, prefs) {
   cardEl.querySelector('.grid-card-name').textContent = sessionTitle(session);
   const folder = cardEl.querySelector('.ov-chip-folder');
   folder.textContent = overviewFolderOf(session).label;
@@ -600,8 +648,6 @@ function ensureOverviewCard(card, prefs) {
   const projectChip = cardEl.querySelector('.ov-chip-project');
   projectChip.textContent = project?.name || '';
   projectChip.hidden = !project || prefs.group.by === 'project' || project.name === folder.textContent;
-  cardEl.querySelector('.grid-card-footer').children[1].textContent = formatDate(new Date(card.sortTime || session.modified));
-  return cardEl;
 }
 
 /** Back to #terminals, out of view: no ov-mode, no visible. */
@@ -742,7 +788,9 @@ function selectOverviewCard(id, { focusTerminal = true } = {}) {
 /** Focus a session's card, turning to its page; a session just started gets its card first. */
 function overviewFocus(id) {
   if (!id || !isSessionOverviewOpen()) return;
-  if (!ovState.root.contains(gridCards.get(id) || null)) {
+  // An open session's card is its live one, even while its closed card is still drawn.
+  const closedCard = () => (!openSessions.has(id) && typeof overviewClosedCardOf === 'function' ? overviewClosedCardOf(id) : null);
+  if (!ovState.root.contains(gridCards.get(id) || closedCard() || null)) {
     renderSessionOverview();
     const page = ovState.pageOf.get(id);
     if (page !== undefined && page !== ovState.page) {
@@ -752,6 +800,9 @@ function overviewFocus(id) {
   }
   if (ovState.root.contains(gridCards.get(id) || null)) {
     selectOverviewCard(id);
+  } else if (closedCard()) {
+    // A closed session's card takes the keys; the session in focus stays the one it was.
+    focusOverviewClosedCard(id);
   } else {
     // Not on the page (filtered out): it is still the session in focus.
     setActiveSession(id);
@@ -873,7 +924,7 @@ function navigateOverview(direction) {
   const cards = [...ovState.root.querySelectorAll('.ov-card')];
   if (cards.length === 0) return;
   const idOfCard = card => card.dataset.sessionId;
-  const current = gridCards.get(activeSessionId);
+  const current = overviewCurrentCard();
   if (!current || !cards.includes(current)) { overviewFocus(idOfCard(cards[0])); return; }
   const cur = current.getBoundingClientRect();
   const curX = cur.left + cur.width / 2;
@@ -902,7 +953,7 @@ function navigateOverview(direction) {
 function cycleOverview(step) {
   const ids = ovState.order;
   if (ids.length === 0) return;
-  const index = ids.indexOf(activeSessionId);
+  const index = ids.indexOf(overviewCurrentCard()?.dataset.sessionId || activeSessionId);
   overviewFocus(index === -1 ? ids[0] : ids[(index + step + ids.length) % ids.length]);
 }
 

@@ -1,0 +1,104 @@
+/* The Session Overview's closed cards and "+ N older" cards
+   (session-overview-closed.js). A closed card is a .grid-card.ov-card like a
+   live one, so it takes the same place and size in every layout
+   (session-overview.css); its body is the last message instead of a terminal. */
+
+.grid-card.ov-card.closed { background: #14141b; outline: none; }
+.grid-card.ov-card.closed:focus-within { border-color: rgb(from var(--accent) r g b / 0.5); }
+.grid-card.ov-card.closed:focus-within .ov-btn { opacity: 1; }
+.ov-card.closed .grid-card-name { color: #9a9ab0; }
+/* Archived (Show archived): dimmed, as in the sessions lists. */
+.ov-card.closed.archived .grid-card-name,
+.ov-card.closed.archived .ov-chip,
+.ov-card.closed.archived .ov-preview { opacity: 0.55; }
+
+.ov-resume-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid rgb(from var(--accent) r g b / 0.35);
+  background: rgb(from var(--accent) r g b / 0.12);
+  color: color-mix(in srgb, var(--accent) 75%, white);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ov-resume-btn:hover:not(:disabled) { background: rgb(from var(--accent) r g b / 0.22); color: #f0f0fa; }
+.ov-resume-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* The last message, then how many messages, when, and "+n earlier". */
+.ov-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.ov-preview-text {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #a4a4ba;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+.ov-preview-text[hidden] { display: none; }
+.ov-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  font-size: 10px;
+  color: #777790;
+  white-space: nowrap;
+}
+.ov-preview-count:empty { display: none; }
+.ov-earlier-btn {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.03);
+  color: #9a9ab0;
+  font: inherit;
+  cursor: pointer;
+}
+.ov-earlier-btn[hidden] { display: none; }
+.ov-earlier-btn:hover { color: #e6e6f4; background: rgba(255,255,255,0.08); }
+
+/* "+ N older": the last place of a group, a card's size. */
+.ov-older-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 8px;
+  background: transparent;
+  color: #8a8aa0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ov-older-card:hover,
+.ov-older-card:focus-visible {
+  color: #e6e6f4;
+  border-color: rgb(from var(--accent) r g b / 0.4);
+  background: rgba(255,255,255,0.03);
+  outline: none;
+}
+.ov-carousels.ov-axis-across.ov-scroll .ov-older-card { flex: 0 0 var(--ov-card-w, 560px); }
+.ov-carousels.ov-axis-across.ov-fit .ov-older-card { flex: 1 1 0; min-width: 0; }
+.ov-carousels.ov-axis-down.ov-scroll .ov-older-card { flex: 0 0 var(--ov-card-h, 450px); }
+.ov-carousels.ov-axis-down.ov-fit .ov-older-card { flex: 1 1 0; min-height: 0; }

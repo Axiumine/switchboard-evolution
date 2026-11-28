@@ -293,12 +293,14 @@ function overviewGroupOf(by, card, ctx) {
  * the sessions that pass the filters, before the slug and "+ N older" cuts:
  * "N results" and "Stop N running". A group's `older` holds the closed cards
  * left out of it, for its "+ N older" card; a card's `placeLabel` is what the
- * "Folder or project" sort reads.
+ * "Folder or project" sort reads, and its `earlier` and `earlierIds` count and
+ * list (newest first) the closed sessions of its slug it stands for.
  *
- * Nothing moves until a re-sort: `previousOrder` (group key to card ids) holds
- * the cards' places and `previousGroups` (group keys, in the order of the last
- * render, or undefined) the groups' places; `resort` ignores both. Groups by
- * period and status have a fixed order and ignore `previousGroups`.
+ * Nothing moves until a re-sort: `previousOrder` (group key to card ids, as
+ * overviewPlaces gives them) holds the cards' places and `previousGroups`
+ * (group keys, in the order of the last render, or undefined) the groups'
+ * places; `resort` ignores both. Groups by period and status have a fixed
+ * order and ignore `previousGroups`.
  */
 function buildOverview(sessions, prefs, ctx) {
   const searching = !!ctx.searchIds;
@@ -337,6 +339,7 @@ function buildOverview(sessions, prefs, ctx) {
       pinned: !!session.starred,
       running: !!ctx.isRunning(id),
       earlier: 0,
+      earlierIds: [],
       // What the "Folder or project" sort reads.
       placeLabel: ctx.projectOf(session)?.name || folder.label,
     };
@@ -353,12 +356,18 @@ function buildOverview(sessions, prefs, ctx) {
     if (!latest || card.sortTime > latest.sortTime) latestBySlug.set(slug, card);
   }
   const shown = [];
+  const earlierOf = new Map();
   for (const card of cards) {
     const slug = card.session.slug;
     if (card.live || !slug) { shown.push(card); continue; }
     const latest = latestBySlug.get(slug);
-    if (card === latest) shown.push(card);
-    else latest.earlier++;
+    if (card === latest) { shown.push(card); continue; }
+    latest.earlier++;
+    if (!earlierOf.has(latest)) earlierOf.set(latest, []);
+    earlierOf.get(latest).push(card);
+  }
+  for (const [latest, earlier] of earlierOf) {
+    latest.earlierIds = earlier.sort((a, b) => b.sortTime - a.sortTime).map(card => card.id);
   }
 
   // Groups, in the order of their first card (by the sort) unless the kind has a fixed order.
@@ -415,6 +424,21 @@ function buildOverview(sessions, prefs, ctx) {
     group.older = result.older;
   }
   return { groups, total, running };
+}
+
+/**
+ * Where a render put its cards, to pass back as the next `previousOrder`: per
+ * group, each card followed by the earlier sessions of its slug, then the
+ * closed cards held back for "+ N older" likewise. Without them the next render
+ * would take those for new cards and put them on top: a held-back card would
+ * push the shown ones out, and the session a resumed card stood for would jump
+ * to the top instead of coming after it.
+ */
+function overviewPlaces(groups) {
+  return new Map(groups.map(group => [
+    group.key,
+    [...group.cards, ...group.older].flatMap(card => [card.id, ...(card.earlierIds || [])]),
+  ]));
 }
 
 // ---- Geometry ----

@@ -373,6 +373,69 @@ test('closed sessions sharing a slug show the latest with the earlier count', ()
   assert.equal(byId.o1.earlier, 0);
 });
 
+test('a card lists the earlier sessions of its slug, newest first', () => {
+  const sessions = [
+    s('x1', { slug: 'job', days: 3 }), s('x2', { slug: 'job', days: 1 }), s('x3', { slug: 'job', days: 2 }),
+    s('y1', { slug: 'other', days: 1 }),
+  ];
+  const group = build(sessions, { includeClosed: true }, { isOpen: () => false }).groups[0];
+  const byId = Object.fromEntries(group.cards.map(c => [c.id, c]));
+  assert.deepEqual(byId.x2.earlierIds, ['x3', 'x1']);
+  assert.equal(byId.x2.earlier, 2);
+  assert.deepEqual(byId.y1.earlierIds, []);
+});
+
+test('a resumed session keeps its place', () => {
+  // Three closed cards in their places. The middle one is resumed: it is open
+  // now, running and the most recent, and still where its closed card was.
+  const sessions = [s('a', { days: 1 }), s('b', { days: 2 }), s('c', { days: 3 })];
+  const first = build(sessions, { includeClosed: true }, { isOpen: () => false });
+  assert.deepEqual(cardIds(first.groups[0]), ['a', 'b', 'c']);
+  const previousOrder = new Map([[first.groups[0].key, ['a', 'b', 'c']]]);
+  const resumed = [s('a', { days: 1 }), s('b', { days: 0 }), s('c', { days: 3 })];
+  const ctx = { isOpen: id => id === 'b', isRunning: id => id === 'b', previousOrder };
+  const later = build(resumed, { includeClosed: true }, ctx).groups[0];
+  assert.deepEqual(cardIds(later), ['a', 'b', 'c']);
+  assert.equal(later.cards[1].live, true);
+  // Grouped by folder, its group keeps its place too.
+  const folders = [s('a', { days: 1, projectPath: '/Users/demo/alpha' }), s('b', { days: 2, projectPath: '/Users/demo/beta' })];
+  const previousGroups = ['/Users/demo/alpha', '/Users/demo/beta'];
+  const moved = [folders[0], s('b', { days: 0, projectPath: '/Users/demo/beta' })];
+  const groups = build(moved, { includeClosed: true, group: { by: 'folder' } }, { ...ctx, previousGroups }).groups;
+  assert.deepEqual(groups.map(g => g.key), previousGroups);
+});
+
+test('held-back and earlier sessions keep their places from one render to the next', () => {
+  // overviewPlaces is what the page passes back as previousOrder.
+  const places = result => fn('overviewPlaces')(result.groups);
+  const placesIn = (result, key) => Array.from(places(result).get(key));
+  const sessions = [
+    s('open', { days: 0.5 }),
+    s('c1', { days: 1 }), s('c2', { days: 2 }), s('c3', { days: 3 }), s('c4', { days: 4 }),
+  ];
+  const ctx = { isOpen: id => id === 'open', visibleCount: 2 };
+  const first = build(sessions, { includeClosed: true }, ctx);
+  assert.deepEqual(cardIds(first.groups[0]), ['open', 'c1', 'c2']);
+  const key = first.groups[0].key;
+  assert.deepEqual(placesIn(first, key), ['open', 'c1', 'c2', 'c3', 'c4']);
+  // The held-back ones are not new cards: they stay behind "+ N older".
+  const second = build(sessions, { includeClosed: true }, { ...ctx, previousOrder: places(first) });
+  assert.deepEqual(cardIds(second.groups[0]), ['open', 'c1', 'c2']);
+  assert.deepEqual(second.groups[0].older.map(c => c.id), ['c3', 'c4']);
+  // Shown all ("+ N older"), they come after the others.
+  const expanded = build(sessions, { includeClosed: true }, { ...ctx, previousOrder: places(first), expanded: new Set([key]) });
+  assert.deepEqual(cardIds(expanded.groups[0]), ['open', 'c1', 'c2', 'c3', 'c4']);
+
+  // The latest of a slug is resumed: the earlier one it stood for takes the place after it, not the top.
+  const slugged = [s('a', { days: 1 }), s('x2', { slug: 'job', days: 2 }), s('x1', { slug: 'job', days: 4 }), s('c', { days: 3 })];
+  const before = build(slugged, { includeClosed: true }, { isOpen: () => false });
+  assert.deepEqual(cardIds(before.groups[0]), ['a', 'x2', 'c']);
+  assert.deepEqual(placesIn(before, key), ['a', 'x2', 'x1', 'c']);
+  const resumed = [slugged[0], s('x2', { slug: 'job', days: 0 }), slugged[2], slugged[3]];
+  const after = build(resumed, { includeClosed: true }, { isOpen: id => id === 'x2', previousOrder: places(before) });
+  assert.deepEqual(cardIds(after.groups[0]), ['a', 'x2', 'x1', 'c']);
+});
+
 test('docked sessions are not cards', () => {
   const sessions = [s('a'), s('b')];
   const result = build(sessions, {}, { excludeIds: new Set(['a']) });
