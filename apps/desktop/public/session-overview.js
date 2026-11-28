@@ -23,8 +23,8 @@
 // cachedAllProjects, cachedProjectTreeAll, activePtyIds, attentionSessions,
 // responseReadySessions, sessionBusyState, sessionEventTime, activeSessionId,
 // activeTab, visibleSessionCount, sessionMaxAgeDays, pendingSessions,
-// projectsChangedWhileAway, terminalsEl, terminalArea, placeholder,
-// setActiveSession, clearNotifications, confirmAndStopSession,
+// projectsChangedWhileAway, terminalsEl, terminalArea, terminalHeader,
+// placeholder, setActiveSession, clearNotifications, confirmAndStopSession,
 // updateRunningIndicators, loadProjects (app.js); gridCards,
 // isTextEditingTarget (grid-view.js); fitAndScroll, isMac (terminal-manager.js);
 // isSessionRunning (sidebar.js); projectForSession, projectRootLabel,
@@ -272,6 +272,8 @@ function unmountSessionOverview() {
   ovState.terminalsObserver = ovState.cardsObserver = ovState.resizeObserver = null;
   // Every terminal goes back where the single view and the project pages look for it.
   for (const [entry, card] of ovState.cards) releaseOverviewCard(entry, card);
+  // None is in view now, so neither is the single view's header: showSession puts it back.
+  terminalHeader.style.display = 'none';
   ovState.cards.clear();
   ovState.groupEls.clear();
   ovState.entryByContainer.clear();

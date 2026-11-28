@@ -44,7 +44,7 @@ const PROJECT_Q = { id: 'q', name: 'Other', root: '/Users/demo/other', folders: 
  * The main window with the overview open on the Sessions tab, project `selected`
  * chosen in the Projects tab and remembering session `remembered` on its Session tab.
  */
-function harness({ selected = 'p', remembered = 'b', away = false, tab = 'sessions' } = {}) {
+function harness({ selected = 'p', remembered = 'b', away = false, tab = 'sessions', realUnmount = false } = {}) {
   const calls = { cleared: [], shown: [], loaded: 0, home: 0, overviewPages: 0 };
   const tabs = ['projects', 'sessions', 'plans', 'memory', 'stats'].map(name => {
     const listeners = [];
@@ -85,7 +85,7 @@ function harness({ selected = 'p', remembered = 'b', away = false, tab = 'sessio
     sidebarContent: element(), projectsContent: { ...element(), querySelectorAll: () => [] },
     plansContent: element(), statsContent: element(), memoryContent: element(),
     filesFilters: null, plansFilters: null, sessionFilters: element(), donateBar: null,
-    placeholder: element(), terminalsEl: element(), gridViewActive: false,
+    placeholder: element(), terminalsEl: element(), terminalHeader: element(), gridViewActive: false,
     openSessions: new Map(Object.values(sessions).map(s => [s.sessionId, terminalEntry(s)])),
     sessionMap: new Map(Object.values(sessions).map(s => [s.sessionId, s])),
     cachedProjectTree: { projects: [PROJECT_P, PROJECT_Q] },
@@ -101,6 +101,8 @@ function harness({ selected = 'p', remembered = 'b', away = false, tab = 'sessio
     showProjectOverview: () => { calls.overviewPages++; },
     // terminal-manager.js, around showSession
     hidePlanViewer() {}, showTerminalHeader() {}, fitAndScroll() {}, onSessionShown() {},
+    // session-overview.js, for its real unmount
+    addEventListener() {}, removeEventListener() {}, clearInterval() {}, cancelAnimationFrame() {},
   });
   context.window = context;
   vm.runInContext([
@@ -131,8 +133,9 @@ function harness({ selected = 'p', remembered = 'b', away = false, tab = 'sessio
   vm.runInContext(overview, context);
   ready();
   if (remembered) vm.runInContext(`rememberProjectSession(projectsUi.selectedProjectId, ${JSON.stringify(remembered)});`, context);
-  // The overview is open; mounting and unmounting it need a real page.
-  vm.runInContext('overviewLifecycle = createOverviewLifecycle({ mount() {}, unmount() {} }); overviewLifecycle.open();', context);
+  // The overview is open; mounting it needs a real page. Unmounting it with no
+  // card drawn (`realUnmount`) does not.
+  vm.runInContext(`overviewLifecycle = createOverviewLifecycle({ mount() {}, unmount: ${realUnmount ? 'unmountSessionOverview' : '() => {}'} }); overviewLifecycle.open();`, context);
   assert.equal(vm.runInContext('isSessionOverviewOpen()', context), true);
   const run = code => vm.runInContext(code, context);
   return { context, calls, run };
@@ -181,4 +184,20 @@ test('the Projects tab already open still shows the session once', () => {
   run('openSessionNormally("a")');
   assert.deepEqual(calls.cleared, ['a']);
   assert.deepEqual(calls.shown, ['a']);
+});
+
+test('closing onto a page with no session leaves no session header behind', () => {
+  // The Projects tab with no project selected shows the placeholder. Every
+  // terminal went back out of view with the page, so the single view's header
+  // must go too.
+  const { context, run } = harness({ selected: null, remembered: null, realUnmount: true });
+  // The start showed the active session (showSession) before the page opened over it.
+  context.terminalHeader.style.display = '';
+  // hideAllViewers closes the page (hideViewerPanels' hook).
+  context.hideAllViewers = () => run("closeSessionOverview('page')");
+  context.document.querySelector('.sidebar-tab[data-tab="projects"]').click();
+  assert.equal(context.activeTab, 'projects');
+  assert.equal(run('isSessionOverviewOpen()'), false);
+  assert.equal(context.placeholder.style.display, '');
+  assert.equal(context.terminalHeader.style.display, 'none');
 });
