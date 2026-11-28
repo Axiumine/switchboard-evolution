@@ -32,9 +32,9 @@ function line(source, start) {
 // Icons are their names: the menus are compared by label.
 const icons = new Proxy({}, { get: (_, name) => () => `<${String(name)}>` });
 
-const FOLDER = '/work/demo-app';
-const WORKTREE = '/work/demo-app/.claude/worktrees/fix-login';
-const PROJECT = { id: 'p1', name: 'Demo', root: '/work/demo' };
+const FOLDER = '/Users/demo/demo-app';
+const WORKTREE = '/Users/demo/demo-app/.claude/worktrees/fix-login';
+const PROJECT = { id: 'p1', name: 'Demo', root: '/Users/demo/demo' };
 
 function groups({ folders = {}, schedules = [], running = 0 } = {}) {
   const calls = [];

@@ -18,7 +18,7 @@ function body(source, header) {
   return source.slice(start, source.indexOf('\n}\n', start) + 2);
 }
 
-const FOLDER = '/work/demo-app';
+const FOLDER = '/Users/demo/demo-app';
 
 function harness({ answer = true, folders = null, running = [] } = {}) {
   const log = [];
@@ -30,7 +30,7 @@ function harness({ answer = true, folders = null, running = [] } = {}) {
   const context = vm.createContext({
     Promise,
     cachedAllProjects: folders || [
-      { projectPath: '/work/other', sessions: [{ sessionId: 'x', archived: 0 }] },
+      { projectPath: '/Users/demo/other', sessions: [{ sessionId: 'x', archived: 0 }] },
       { projectPath: FOLDER, sessions },
     ],
     cachedProjects: [],
@@ -53,14 +53,14 @@ test('archiving a folder asks first, stops the running sessions and archives eac
   // No: nothing is stopped or archived.
   const refused = harness({ answer: false, running: ['a'] });
   assert.equal(await refused.context.archiveFolderSessions(FOLDER), false);
-  assert.deepEqual(refused.log, ['confirm: Archive all 2 sessions in work/demo-app?']);
+  assert.deepEqual(refused.log, ['confirm: Archive all 2 sessions in demo/demo-app?']);
   assert.deepEqual(refused.sessions.map(s => s.archived), [0, 0, 1]);
 
   // Yes: the running one is stopped before it is archived, the archived one is left alone.
   const { context, log, sessions } = harness({ running: ['a'] });
   assert.equal(await context.archiveFolderSessions(FOLDER), true);
   assert.deepEqual(log, [
-    'confirm: Archive all 2 sessions in work/demo-app?',
+    'confirm: Archive all 2 sessions in demo/demo-app?',
     'stop a', 'archive a 1', 'forget a',
     'archive b 1', 'forget b',
     'poll', 'loadProjects',
@@ -71,7 +71,7 @@ test('archiving a folder asks first, stops the running sessions and archives eac
 test('a folder with nothing to archive asks nothing', async () => {
   const { context, log } = harness({ folders: [{ projectPath: FOLDER, sessions: [{ sessionId: 'c', archived: 1 }] }] });
   assert.equal(await context.archiveFolderSessions(FOLDER), false);
-  assert.equal(await context.archiveFolderSessions('/work/unknown'), false);
+  assert.equal(await context.archiveFolderSessions('/Users/demo/unknown'), false);
   assert.deepEqual(log, []);
 });
 
@@ -79,7 +79,7 @@ test('the sessions given are the ones archived, and one alone is "1 session"', a
   // The Sessions list hands over the ones it shows (during a search, the ones found).
   const { context, log, sessions } = harness();
   assert.equal(await context.archiveFolderSessions(FOLDER, [sessions[1]]), true);
-  assert.deepEqual(log, ['confirm: Archive all 1 session in work/demo-app?', 'archive b 1', 'forget b', 'poll', 'loadProjects']);
+  assert.deepEqual(log, ['confirm: Archive all 1 session in demo/demo-app?', 'archive b 1', 'forget b', 'poll', 'loadProjects']);
   assert.deepEqual(sessions.map(s => s.archived), [0, 1, 1]);
 });
 
