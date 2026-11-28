@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   removeOpenedFile: (filePath) => ipcRenderer.invoke('remove-opened-file', filePath),
   setFilePinned: (filePath, pinned) => ipcRenderer.invoke('set-file-pinned', filePath, pinned),
   movePinnedFile: (filePath, toIndex) => ipcRenderer.invoke('move-pinned-file', filePath, toIndex),
+  setFilesProjectPinned: (key, pinned) => ipcRenderer.invoke('set-files-project-pinned', key, pinned),
+  movePinnedFilesProject: (key, toIndex) => ipcRenderer.invoke('move-pinned-files-project', key, toIndex),
   openFileWindow: (filePath) => ipcRenderer.invoke('open-file-window', filePath),
   getProjects: (showArchived) => ipcRenderer.invoke('get-projects', showArchived),
   getHarnesses: () => ipcRenderer.invoke('get-harnesses'),

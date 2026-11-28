@@ -1719,7 +1719,8 @@ ipcMain.handle('save-memory', (_event, filePath, content) => {
 
 // --- IPC: the Files tab's opened and pinned files (opened-files.js) ---
 // Opened: files dropped on the sidebar (files-drop.js). Pinned: any file of
-// the tab, kept at its top in the order the user gives.
+// the tab, kept at its top in the order the user gives. Its project groups
+// can be pinned the same way.
 function readOpenedFilesState() {
   return openedFiles.normalizeOpenedFiles(getSetting(openedFiles.OPENED_FILES_SETTING));
 }
@@ -1782,6 +1783,12 @@ ipcMain.handle('move-pinned-file', (_event, filePath, toIndex) => {
   if (!openedFiles.isFilePath(filePath)) return describeOpenedFilesState(readOpenedFilesState());
   return saveOpenedFilesState(openedFiles.movePinned(readOpenedFilesState(), filePath, toIndex));
 });
+
+ipcMain.handle('set-files-project-pinned', (_event, key, pinned) =>
+  saveOpenedFilesState(openedFiles.setProjectPinned(readOpenedFilesState(), key, !!pinned)));
+
+ipcMain.handle('move-pinned-files-project', (_event, key, toIndex) =>
+  saveOpenedFilesState(openedFiles.movePinnedProject(readOpenedFilesState(), key, toIndex)));
 
 // --- IPC: search ---
 ipcMain.handle('search-session-ids', (_event, query, sessionIds) => {
