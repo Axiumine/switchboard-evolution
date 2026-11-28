@@ -21,6 +21,14 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 const APP = '/Users/demo/app';
+const leaf = id => ({ session: id });
+const split = (kind, a, b) => ({ split: kind, ratio: 0.5, a, b });
+
+/** A console whose warnings are kept, to check that a failure says why. */
+function warningConsole() {
+  const warnings = [];
+  return { warnings, console: { ...console, warn: (...args) => warnings.push(args.map(String).join(' ')) } };
+}
 
 function memoryStorage(initial = {}) {
   const data = new Map(Object.entries(initial));
@@ -46,6 +54,8 @@ function element(tag = 'div') {
   const el = {
     tagName: tag.toUpperCase(), className: '', textContent: '', type: '', title: '', id: '',
     classList: classes(), children: [], parentNode: null, listeners: {}, focused: 0,
+    rect: { width: 800, height: 600 },
+    getBoundingClientRect() { return el.rect; },
     appendChild(child) {
       child.remove?.();
       child.parentNode = el;
@@ -113,6 +123,7 @@ function replayWindow({ live = [] } = {}) {
   const log = [];
   const timers = [];
   const listeners = {};
+  const { warnings, console } = warningConsole();
   const context = vm.createContext({
     console, Map, Set, JSON, Promise, URLSearchParams,
     location: { search: '' },
@@ -127,7 +138,7 @@ function replayWindow({ live = [] } = {}) {
   context.window = context;
   context.api = { onTerminalReplayed: fn => { listeners.replayed = fn; } };
   vm.runInContext(read('session-window.js'), context);
-  return { context, log, timers, listeners };
+  return { context, log, timers, listeners, warnings };
 }
 
 test('a reattach answers nothing until xterm has read the whole replay', () => {
@@ -215,12 +226,21 @@ test('a shadow answers nothing, before a replay or after it', () => {
   assert.equal(entry.terminal.options.disableStdin, false);
 });
 
+test('a terminal whose replies cannot be held says so', () => {
+  const { context, log, warnings } = replayWindow({ live: ['S1'] });
+  const entry = terminalEntry('S1', log);
+  Object.defineProperty(entry.terminal, 'options', { get() { throw new Error('terminal disposed'); } });
+  context.beginTerminalReplay(entry);
+  assert.match(warnings.join('\n'), /terminal disposed/);
+});
+
 // ---- The main window ----
 
 /** session-window.js and session-window-host.js in the main window, with `ids` open here. */
-function mainWindow({ ids = ['S1'], live = ids, closes = true } = {}) {
+function mainWindow({ ids = ['S1'], live = ids, closes = true, storage = memoryStorage(), tabStorage = memoryStorage(), setup } = {}) {
   const log = [];
   const listeners = {};
+  const { warnings, console } = warningConsole();
   const on = name => fn => { listeners[name] = fn; };
   const entries = new Map(ids.map(id => [id, terminalEntry(id, log)]));
   const api = {
@@ -244,7 +264,8 @@ function mainWindow({ ids = ['S1'], live = ids, closes = true } = {}) {
     console, Map, Set, JSON, Promise, URLSearchParams, Object, Array,
     location: { search: '' },
     document: { body: element('body'), activeElement: null, createElement: element, addEventListener() {} },
-    localStorage: memoryStorage(),
+    localStorage: storage,
+    sessionStorage: tabStorage,
     setTimeout: () => 0,
     clearTimeout: () => {},
     cancelAnimationFrame: () => {},
@@ -255,14 +276,16 @@ function mainWindow({ ids = ['S1'], live = ids, closes = true } = {}) {
     terminalWriteBuffers: new Map(),
     flushTerminalBuffer: id => log.push(['flush', id]),
     setSessionMcpActive: (id, on) => log.push(['mcp', id, on]),
+    safeFit: () => log.push(['fit']),
     refreshTileHeaderButtons: () => {},
     ICONS: { popOut: () => '<svg></svg>' },
   });
   context.window = context;
   context.api = api;
+  setup?.(context);
   vm.runInContext(read('session-window.js'), context);
   vm.runInContext(read('session-window-host.js'), context);
-  return { context, log, listeners, entries };
+  return { context, log, listeners, entries, warnings };
 }
 
 const texts = el => [el.textContent, ...el.children.flatMap(texts)].filter(Boolean);
@@ -299,6 +322,7 @@ test('a session that comes back is reset, reattached quietly and sized to its te
     ['reset'],
     ['openTerminal', 'S1', APP, false, null],
     ['mcp', 'S1', true],
+    ['fit'],
     ['resize', 'S1', 120, 40],
   ]);
   listeners.replayed('S1');
@@ -331,7 +355,7 @@ test('Bring back closes the window; with no window left it reattaches here', asy
   // It had ended here once (its exit banner) before its window resumed it.
   gone.entries.get('S1').closed = true;
   await gone.context.bringBackSession('S1');
-  assert.deepEqual(gone.log.map(call => call[0]), ['close', 'reset', 'openTerminal', 'mcp', 'resize']);
+  assert.deepEqual(gone.log.map(call => call[0]), ['close', 'reset', 'openTerminal', 'mcp', 'fit', 'resize']);
   assert.equal(gone.entries.get('S1').closed, false, 'its terminal here is the live one again');
 });
 
@@ -396,6 +420,62 @@ test('a session whose id changes is found under its new id by a window opening f
   assert.equal(context.currentSessionId('S1'), 'S1');
 });
 
+test('a session that cannot come back says why, in its terminal here', async () => {
+  const { context, listeners, entries, log, warnings } = mainWindow();
+  context.api.openTerminal = async () => ({ ok: false, error: 'project directory no longer exists' });
+  const entry = entries.get('S1');
+  listeners.owner('S1', 'window', false);
+  listeners.owner('S1', 'returning', false);
+  await settle();
+  assert.ok(entry.terminal.pending.some(write => write.data.includes('Error: project directory no longer exists')));
+  assert.equal(entry.closed, true);
+  assert.equal(entry.shadow, false, 'the error is in sight, not under the placeholder');
+  assert.equal(entry.element.find('session-popout-placeholder'), null);
+  assert.equal(entry.terminal.options.disableStdin, false);
+  assert.ok(!log.some(call => call[0] === 'resize'), 'no size for a session that is not here');
+  assert.match(warnings.join('\n'), /Bring back.*S1.*project directory no longer exists/);
+});
+
+test('Bring back sizes the PTY from a terminal laid out here; a hidden one waits for its next fit', async () => {
+  const { listeners, entries, log } = mainWindow();
+  entries.get('S1').element.rect = { width: 0, height: 0 };
+  listeners.owner('S1', 'window', false);
+  listeners.owner('S1', 'returning', false);
+  await settle();
+  assert.deepEqual(log.map(call => call[0]), ['reset', 'openTerminal', 'mcp']);
+  assert.equal(entries.get('S1').shadow, false, 'its next fit sizes the PTY');
+});
+
+test('a session resumed in a window is live there: its ended terminal here is not reopened over it', () => {
+  const { listeners, entries } = mainWindow();
+  // It had died here (its exit banner), and its window resumed it.
+  entries.get('S1').closed = true;
+  listeners.owner('S1', 'window', false);
+  assert.equal(entries.get('S1').closed, false);
+});
+
+test('the window layouts an earlier run left go when the main window first loads; its reload keeps them', () => {
+  const storage = memoryStorage();
+  const tabStorage = memoryStorage();
+  let store;
+  const setup = context => {
+    vm.runInContext(read('tile-layout-model.js'), context);
+    store = vm.runInContext('createTileStore(localStorage)', context);
+    context.tileStore = () => store;
+  };
+  const before = context => {
+    setup(context);
+    store.set('home', split('row', leaf('A'), leaf('B')), 'main');
+    store.set('old', split('row', leaf('X'), leaf('Y')), 'window:X');
+  };
+  mainWindow({ storage, tabStorage, setup: before });
+  assert.deepEqual(plain(store.all().map(l => [l.id, l.scope])), [['home', 'main']]);
+  // A reload of the same window: the session windows it has are still open.
+  store.set('live', split('row', leaf('X'), leaf('Z')), 'window:X');
+  mainWindow({ storage, tabStorage, setup });
+  assert.deepEqual(plain(store.all().map(l => [l.id, l.scope])), [['home', 'main'], ['live', 'window:X']]);
+});
+
 // ---- A closed window's panes come back into the main window's layouts ----
 
 function withLayouts(setup) {
@@ -414,8 +494,6 @@ function withLayouts(setup) {
   return { ...harness, store };
 }
 
-const leaf = id => ({ session: id });
-const split = (kind, a, b) => ({ split: kind, ratio: 0.5, a, b });
 
 test('closing the window puts its panes in place of the placeholder', async () => {
   const { store, listeners, log } = withLayouts((store, context) => {
@@ -450,10 +528,11 @@ test('a session shown alone gets the window\'s layout as its own', async () => {
 // ---- The session window ----
 
 /** session-window.js in a window opened for `own`, with stubs for app.js and the page. */
-function sessionWindow({ own = 'S1', live = [own], sessions = [own], states = [], storage = memoryStorage() } = {}) {
+function sessionWindow({ own = 'S1', live = [own], sessions = [own], states = [], storage = memoryStorage(), tabStorage = memoryStorage(), setup } = {}) {
   const log = [];
   const listeners = {};
   const timers = [];
+  const { warnings, console } = warningConsole();
   let ready = null;
   const on = name => fn => { listeners[name] = fn; };
   const api = {
@@ -473,6 +552,7 @@ function sessionWindow({ own = 'S1', live = [own], sessions = [own], states = []
       addEventListener: (type, fn) => { if (type === 'DOMContentLoaded') ready = fn; },
     },
     localStorage: storage,
+    sessionStorage: tabStorage,
     setTimeout: (fn, ms = 0) => timers.push({ fn, ms }),
     clearTimeout: () => {},
     activePtyIds: new Set(live),
@@ -501,11 +581,12 @@ function sessionWindow({ own = 'S1', live = [own], sessions = [own], states = []
   });
   context.window = context;
   context.api = api;
+  setup?.(context);
   vm.runInContext(read('session-window.js'), context);
   ready();
   // What waits for the other listeners of an event (app.js's) to run first.
   const later = () => timers.splice(0).filter(timer => !timer.ms).forEach(timer => timer.fn());
-  return { context, log, listeners, later };
+  return { context, log, listeners, later, timers, warnings };
 }
 
 test('a session window opens its own session and nothing else, in its own layouts', async () => {
@@ -518,6 +599,27 @@ test('a session window opens its own session and nothing else, in its own layout
   // Cmd+Shift+[ / ] and Cmd+Arrows would open the sidebar's other sessions here.
   context.navigateSession(1);
   assert.deepEqual(log, [['open', 'S1'], ['show', 'S1']]);
+});
+
+test('a session window drops a layout an earlier window of its session left; its reload keeps it', async () => {
+  const storage = memoryStorage();
+  const tabStorage = memoryStorage();
+  let store;
+  const setup = context => {
+    vm.runInContext(read('tile-layout-model.js'), context);
+    store = vm.runInContext('createTileStore(localStorage)', context);
+    context.tileStore = () => store;
+  };
+  const first = sessionWindow({ storage, tabStorage, setup });
+  store.set('old', split('row', leaf('S1'), leaf('S7')), 'window:S1');
+  store.set('other', split('row', leaf('S2'), leaf('S3')), 'window:S2');
+  await first.context.startSessionWindow();
+  assert.deepEqual(store.all().map(l => l.id), ['other'], 'only its own scope goes');
+  // The same window reloaded (its sessionStorage stays): its layout is its own.
+  store.set('mine', split('row', leaf('S1'), leaf('S8')), 'window:S1');
+  const reloaded = sessionWindow({ storage, tabStorage, setup });
+  await reloaded.context.startSessionWindow();
+  assert.deepEqual(store.all().map(l => l.id).sort(), ['mine', 'other']);
 });
 
 test('a session window opens its session under the id it has now, or closes when it is gone', async () => {
@@ -567,19 +669,47 @@ test('a new terminal in a session window is started by the main window; its own 
   assert.deepEqual(log.slice(2), [['open', 'T2']]);
 });
 
-test('a start the main window refuses resolves as nothing started', async () => {
-  const { context, log } = sessionWindow();
+test('a start the main window refuses resolves as nothing started, and says so', async () => {
+  const { context, log, warnings } = sessionWindow();
   context.api.sessionWindowRun = async () => false;
   assert.equal(await context.launchNewSession({ projectPath: APP }, {}, { focus: false }), undefined);
   const result = await context.openRawTerminalSession({ sessionId: 'T5', type: 'terminal', projectPath: APP }, { show: false });
   assert.equal(result.ok, false);
   assert.deepEqual(log, []);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /refused launchNewSession/);
+  assert.match(warnings[1], /refused openRawTerminalSession/);
+});
+
+test('a session window says why it closes, or why a start came to nothing', async () => {
+  // Main could not be asked which sessions run: the window closes, and the console says why.
+  const broken = sessionWindow({ own: 'N2', live: [], sessions: [] });
+  broken.context.api.getSessionStates = async () => { throw new Error('no answer from main'); };
+  await broken.context.startSessionWindow();
+  assert.deepEqual(broken.log, [['close window']]);
+  assert.match(broken.warnings.join('\n'), /no answer from main/);
+  assert.match(broken.warnings.join('\n'), /N2/);
+
+  // The relay itself failed.
+  const { context, warnings, timers } = sessionWindow();
+  context.api.sessionWindowRun = async () => { throw new Error('no main window'); };
+  assert.equal(await context.launchNewSession({ projectPath: APP }, {}, { focus: false }), undefined);
+  assert.match(warnings.join('\n'), /launchNewSession.*no main window/);
+
+  // Sent, but nothing was handed over in time.
+  context.api.sessionWindowRun = async () => true;
+  const waiting = context.launchNewSession({ projectPath: APP }, {}, { focus: false });
+  await settle();
+  const limit = vm.runInContext('SESSION_WINDOW_RELAY_MS', context);
+  timers.filter(timer => timer.ms === limit).at(-1).fn();
+  assert.equal(await waiting, undefined);
+  assert.match(warnings.at(-1), /did not hand over/);
 });
 
 test('a session another window takes leaves this one; the last one to end closes it', async () => {
   const { context, log, listeners, later } = sessionWindow();
   await context.startSessionWindow();
-  context.openSessions.set('S2', { session: { sessionId: 'S2' }, closed: false });
+  context.openSessions.set('S2', { session: { sessionId: 'S2' }, terminal: { options: {} }, closed: false });
   log.length = 0;
   listeners.owner('S2', 'main', false);
   assert.deepEqual(log, [['unsplit', 'S2'], ['destroy', 'S2', { forgetPersisted: false, preserveHistory: true }]]);
@@ -595,4 +725,40 @@ test('a session another window takes leaves this one; the last one to end closes
   context.openSessions.delete('S1');
   later();
   assert.deepEqual(log.slice(2), [['close window']]);
+});
+
+// ---- #terminal-header's button (tile-view.js) ----
+
+test('for a session in its own window the header offers Show window, and none in a session window', () => {
+  const log = [];
+  const entry = { session: { sessionId: 'S1', projectPath: APP }, shadow: false };
+  const context = vm.createContext({
+    console, Map, Set, JSON,
+    activeSessionId: 'S1',
+    openSessions: new Map([['S1', entry]]),
+    sessionMap: new Map([['S1', entry.session]]),
+    popOutSession: id => log.push(['open', id]),
+    showSessionWindow: id => log.push(['show', id]),
+  });
+  vm.runInContext(read('tile-view.js'), context);
+  const button = () => ({ hidden: true, title: '', setAttribute(name, value) { this[name] = value; } });
+  const state = vm.runInContext('tileState', context);
+  state.headerSplit = button();
+  state.headerPopOut = button();
+  const header = () => ({ hidden: state.headerPopOut.hidden, title: state.headerPopOut.title, label: state.headerPopOut['aria-label'] });
+
+  context.refreshTileHeaderButtons();
+  assert.deepEqual(header(), { hidden: false, title: 'Open in new window', label: 'Open in new window' });
+  context.popOutFromHeader();
+  // Its window has it: the button brings that window forward, as the menus' Show window does.
+  entry.shadow = true;
+  context.refreshTileHeaderButtons();
+  assert.deepEqual(header(), { hidden: false, title: 'Show window', label: 'Show window' });
+  context.popOutFromHeader();
+  assert.deepEqual(log, [['open', 'S1'], ['show', 'S1']]);
+
+  // A session window shows its sessions in a window already.
+  vm.runInContext('var SESSION_WINDOW = { sessionId: "S1" }', context);
+  context.refreshTileHeaderButtons();
+  assert.equal(state.headerPopOut.hidden, true);
 });

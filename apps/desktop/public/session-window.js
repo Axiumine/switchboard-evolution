@@ -58,7 +58,12 @@ const replayExpected = new Set();
 
 /** The terminal answers and takes input, unless it is reading a replay or stands for a session shown in another window. */
 function muteTerminalInput(entry) {
-  try { entry.terminal.options.disableStdin = !!(entry.replaying || entry.shadow); } catch {}
+  try {
+    entry.terminal.options.disableStdin = !!(entry.replaying || entry.shadow);
+  } catch (err) {
+    // The replay's protection rests on this: say so when it cannot be set (a terminal already disposed).
+    console.warn('[session window] Could not set whether the terminal of', entry?.session?.sessionId, 'answers:', err);
+  }
 }
 
 function holdTerminalReplies(entry) {
@@ -127,6 +132,25 @@ function rememberSessionRekey(oldId, newId) {
   try { localStorage.setItem(SESSION_REKEYS_KEY, JSON.stringify(kept.slice(-SESSION_REKEYS_MAX))); } catch {}
 }
 
+// ---- Window layouts left from before ----
+// A session window keeps its panes under the scope 'window:<id>' (tileLayouts.v1).
+// No session window outlives the main window (they close with it), so at a
+// main window's first load every such layout is left from before (an app
+// quit, a main window closed with one open), and at a session window's first
+// load so is its own scope's (an earlier window of the same session). A reload
+// keeps them: sessionStorage outlives it, and its windows are still open.
+
+const SESSION_WINDOW_LAYOUTS_CHECKED = 'sessionWindowLayouts.checked';
+
+/** Drops, once per page, the window layouts whose scope `stale(scope)` names. */
+function dropStaleWindowLayouts(stale) {
+  if (sessionStorage.getItem(SESSION_WINDOW_LAYOUTS_CHECKED)) return;
+  sessionStorage.setItem(SESSION_WINDOW_LAYOUTS_CHECKED, '1');
+  if (typeof tileStore !== 'function') return;
+  const store = tileStore();
+  for (const layout of store.all()) if (stale(layout.scope)) store.drop(layout.id);
+}
+
 /** The id a session has now: through the changes this page heard of, then those the main window kept. */
 function currentSessionId(id) {
   if (typeof tileCurrentId === 'function') id = tileCurrentId(id);
@@ -155,7 +179,9 @@ async function sessionToOpen(id) {
   let state = null;
   try {
     state = (await window.api.getSessionStates() || []).find(s => s.sessionId === id && !s.exited) || null;
-  } catch {}
+  } catch (err) {
+    console.warn('[session window] Could not ask main which sessions run:', err);
+  }
   if (!state) return null;
   const terminal = state.type === 'terminal';
   const now = new Date().toISOString();
@@ -180,11 +206,16 @@ async function sessionToOpen(id) {
 
 /** app.js's boot branch: the window opens its own session, which makes it its owner. */
 async function startSessionWindow() {
-  if (typeof tileState !== 'undefined') tileState.scope = `window:${SESSION_WINDOW.sessionId}`;
+  if (typeof tileState !== 'undefined') {
+    tileState.scope = `window:${SESSION_WINDOW.sessionId}`;
+    dropStaleWindowLayouts(scope => scope === tileState.scope);
+  }
   installSessionWindowChrome();
-  const session = await sessionToOpen(currentSessionId(SESSION_WINDOW.sessionId));
+  const id = currentSessionId(SESSION_WINDOW.sessionId);
+  const session = await sessionToOpen(id);
   // Gone before the window could open it (a terminal that ended, a start that failed).
   if (!session) {
+    console.warn('[session window] Nothing to open for', id, '(it ended, or main could not say): the window closes');
     window.close();
     return;
   }
@@ -229,10 +260,21 @@ function relayToMainWindow(name, args, id = null) {
       resolve(value);
     };
     sessionWindowRelays.push(relay);
-    relay.timer = setTimeout(() => relay.settle(null), SESSION_WINDOW_RELAY_MS);
+    relay.timer = setTimeout(() => {
+      if (!sessionWindowRelays.includes(relay)) return;
+      console.warn(`[session window] The main window did not hand over the session of ${name} in time`);
+      relay.settle(null);
+    }, SESSION_WINDOW_RELAY_MS);
     Promise.resolve()
       .then(() => window.api.sessionWindowRun(name, args))
-      .then(sent => { if (!sent) relay.settle(null); }, () => relay.settle(null));
+      .then(sent => {
+        if (sent) return;
+        console.warn(`[session window] The main window refused ${name}`);
+        relay.settle(null);
+      }, err => {
+        console.warn(`[session window] Could not ask the main window for ${name}:`, err);
+        relay.settle(null);
+      });
   });
 }
 

@@ -33,7 +33,7 @@
 // rekeyLaunchSpec (session-split.js); sessionTitle, sessionMenuItems,
 // showContextMenu, projectForSession, rememberProjectSession, saveProjectsUi,
 // refreshProjectDrawers (projects-view.js); isSessionOverviewOpen
-// (session-overview.js); popOutSession (session-window-host.js); SESSION_WINDOW
+// (session-overview.js); popOutSession, showSessionWindow (session-window-host.js); SESSION_WINDOW
 // (session-window.js); ICONS (icons.js).
 // All are looked up when called.
 
@@ -748,9 +748,7 @@ function installTileHeaderButtons() {
   tileState.headerSplit = button('terminal-split-btn', 'Split', TILE_ICONS.split(15), () => {
     if (tileHeaderSession()) runTileAction('Split', () => splitSession(activeSessionId, { scope: tileState.scope }));
   });
-  tileState.headerPopOut = button('terminal-popout-btn', 'Open in new window', typeof ICONS !== 'undefined' ? ICONS.popOut(15) : '', () => {
-    if (tileHeaderSession() && typeof popOutSession === 'function') popOutSession(activeSessionId);
-  });
+  tileState.headerPopOut = button('terminal-popout-btn', 'Open in new window', typeof ICONS !== 'undefined' ? ICONS.popOut(15) : '', popOutFromHeader);
   const stop = document.getElementById('terminal-stop-btn');
   controls.insertBefore(tileState.headerSplit, stop || null);
   controls.insertBefore(tileState.headerPopOut, stop || null);
@@ -773,6 +771,21 @@ function refreshTileHeaderButtons() {
   // A session window shows its sessions in a window already (session-window.js).
   tileState.headerPopOut.hidden = !session || !!session.archived || typeof popOutSession !== 'function'
     || (typeof SESSION_WINDOW !== 'undefined' && !!SESSION_WINDOW);
+  const label = tileHeaderSessionAway() ? 'Show window' : 'Open in new window';
+  tileState.headerPopOut.title = label;
+  tileState.headerPopOut.setAttribute('aria-label', label);
+}
+
+/** The session in #terminal-header is in a window of its own: here is its shadow (session-window-host.js). */
+function tileHeaderSessionAway() {
+  return !!activeSessionId && !!openSessions.get(activeSessionId)?.shadow && typeof showSessionWindow === 'function';
+}
+
+/** #terminal-header's Open in new window, or Show window for a session in a window of its own already, as the menus say. */
+function popOutFromHeader() {
+  if (!tileHeaderSession()) return;
+  if (tileHeaderSessionAway()) showSessionWindow(activeSessionId);
+  else if (typeof popOutSession === 'function') popOutSession(activeSessionId);
 }
 
 // ---- Events: re-keys, exits, busy ----

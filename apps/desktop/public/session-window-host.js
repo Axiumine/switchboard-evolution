@@ -26,9 +26,10 @@
 // a session window does not send its sessions on to another one.
 //
 // Depends on: muteTerminalInput, holdTerminalReplies, endTerminalReplay,
-// rememberSessionRekey (session-window.js); openSessions, sessionMap,
+// rememberSessionRekey, dropStaleWindowLayouts (session-window.js);
+// openSessions, sessionMap,
 // activePtyIds, activeSessionId, launchNewSession, loadProjects (app.js);
-// openRawTerminalSession (dialogs.js); createTerminalEntry,
+// openRawTerminalSession (dialogs.js); createTerminalEntry, safeFit,
 // terminalWriteBuffers (terminal-manager.js); setSessionMcpActive
 // (file-panel.js); tileStore, tileState, tileCurrentId, newTileLayoutId,
 // refreshTileView, syncTileLayout, refreshTileHeaderButtons
@@ -120,6 +121,8 @@ function buildPopOutPlaceholder(entry) {
 /** Another window shows the session now: the terminal here is a shadow under the placeholder. */
 function markPoppedOut(entry) {
   entry.shadow = true;
+  // Live there: a terminal that had ended here (its exit banner) is not one openSession starts again.
+  entry.closed = false;
   muteTerminalInput(entry);
   const container = entry.element;
   container.classList.add('popped-out');
@@ -133,6 +136,7 @@ function markPoppedOut(entry) {
     entry.terminal.textarea?.addEventListener('focus', entry.popOutFocusGuard);
   }
   if (container.contains(document.activeElement)) entry.popOutFocusGuard();
+  if (typeof refreshTileHeaderButtons === 'function') refreshTileHeaderButtons();
 }
 
 function clearPoppedOut(entry) {
@@ -142,6 +146,7 @@ function clearPoppedOut(entry) {
   entry.element.classList.remove('popped-out');
   entry.popOutPlaceholder?.remove();
   entry.popOutPlaceholder = null;
+  if (typeof refreshTileHeaderButtons === 'function') refreshTileHeaderButtons();
 }
 
 /** The terminal here of a session the main window has none of yet (it was never opened here), made hidden. */
@@ -155,8 +160,9 @@ function terminalHere(id) {
 /**
  * The session is the main window's again: what its shadow holds goes
  * (reset), it is reattached with the replay, read without answering
- * (holdTerminalReplies), and sized to the terminal here, which main otherwise
- * learns only at the next fit.
+ * (holdTerminalReplies), and, when its terminal is laid out here, fitted and
+ * sized to it; a hidden one sizes the PTY at its next fit. One that cannot be
+ * reattached says why in its terminal, as openSession does.
  */
 async function reattachHere(id) {
   const entry = terminalHere(id);
@@ -176,11 +182,22 @@ async function reattachHere(id) {
     const result = await window.api.openTerminal(s.sessionId, s.projectPath, plain,
       plain ? { type: 'terminal', projectId: s.projectId || null, trackId: s.trackId || null } : null);
     endTerminalReplay(entry, result);
-    if (!result?.ok) return result;
+    if (!result?.ok) {
+      const reason = result?.error || 'it could not be reattached';
+      console.warn('[session window] Bring back failed for', id, reason);
+      entry.terminal.write(`\r\nError: ${reason}\r\n`);
+      entry.closed = true;
+      clearPoppedOut(entry);
+      return result;
+    }
     entry.closed = false;
     clearPoppedOut(entry);
     if (typeof setSessionMcpActive === 'function') setSessionMcpActive(s.sessionId, !!result.mcpActive);
-    window.api.resizeTerminal(s.sessionId, entry.terminal.cols, entry.terminal.rows);
+    const box = entry.element.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0) {
+      safeFit(entry);
+      window.api.resizeTerminal(s.sessionId, entry.terminal.cols, entry.terminal.rows);
+    }
     return result;
   } finally {
     entry.reattaching = false;
@@ -237,7 +254,6 @@ function onSessionOwnerChangedHere(id, ownerKind) {
   if (!entry) return null;
   if (ownerKind === 'window') markPoppedOut(entry);
   else clearPoppedOut(entry);
-  if (typeof refreshTileHeaderButtons === 'function') refreshTileHeaderButtons();
   return null;
 }
 
@@ -265,6 +281,8 @@ async function runForSessionWindow(name, args, windowId) {
 }
 
 if (sessionWindowsHere()) {
+  // A new main window has no session window open: their layouts are left from before.
+  dropStaleWindowLayouts(scope => scope.startsWith('window:'));
   window.api.onSessionOwnerChanged((id, ownerKind) => Promise.resolve(onSessionOwnerChangedHere(id, ownerKind))
     .catch(err => console.warn('[session window] Could not follow the session', id, err)));
   window.api.onSessionWindowRun((name, args, windowId) => runForSessionWindow(name, args, windowId)
