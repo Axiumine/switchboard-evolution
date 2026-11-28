@@ -449,6 +449,11 @@ const stmts = {
     SELECT sessionId, headTexts, tailTexts FROM session_cache
     WHERE sessionId IN (SELECT value FROM json_each(?))
   `),
+  // Cached sessions with no search document, which the index cannot find.
+  cacheGetUnindexedIds: db.prepare(`
+    SELECT sessionId FROM session_cache
+    WHERE sessionId NOT IN (SELECT id FROM search_map WHERE type = 'session')
+  `),
   cacheUpdateAiTitle: db.prepare('UPDATE session_cache SET aiTitle = ? WHERE sessionId = ? AND runtime = ?'),
   cacheDeleteSession: db.prepare('DELETE FROM session_cache WHERE sessionId = ?'),
   cacheDeleteFolder: db.prepare('DELETE FROM session_cache WHERE folder = ?'),
@@ -501,12 +506,13 @@ const stmts = {
       AND search_fts MATCH ?
   `),
   // Every cached session whose messages hold a text, without the 50-row limit
-  // of searchQuery: the same sessions First and Last look at.
+  // of searchQuery: the same sessions First and Last look at. CROSS JOIN keeps
+  // the index lookup outermost, run once rather than once per cached session.
   searchSessionBodyIds: db.prepare(`
     SELECT DISTINCT search_map.id
     FROM search_fts
-    JOIN search_map ON search_fts.rowid = search_map.rowid
-    WHERE search_map.type = 'session' AND search_fts MATCH ?
+    CROSS JOIN search_map ON search_map.rowid = search_fts.rowid
+    WHERE search_fts MATCH ? AND search_map.type = 'session'
       AND search_map.id IN (SELECT sessionId FROM session_cache)
   `),
   // Project statements
@@ -752,16 +758,26 @@ function searchSessionIds(query, sessionIds) {
  * The sessions whose messages (the FTS body) hold `query` literally, without
  * regard to case. Quoted as one phrase, so FTS syntax and LIKE wildcards are
  * plain text; under 3 characters, which the trigram index cannot look up,
- * nothing matches, and a query the index refuses finds nothing either.
+ * nothing matches. Null when the index refuses the query.
  */
-function searchSessionBodyIds(query) {
+function matchSessionBodyIds(query) {
   const text = typeof query === 'string' ? query.trim() : '';
   if (text.length < 3) return [];
   try {
     return stmts.searchSessionBodyIds.all('body:"' + text.replace(/"/g, '""') + '"').map(row => row.id);
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** matchSessionBodyIds, where a query the index refuses finds nothing. */
+function searchSessionBodyIds(query) {
+  return matchSessionBodyIds(query) || [];
+}
+
+/** The cached sessions that have no search document. */
+function getUnindexedSessionIds() {
+  return stmts.cacheGetUnindexedIds.all().map(row => row.sessionId);
 }
 
 /** { sessionId, headTexts, tailTexts } of every cached session, or of those in `sessionIds`. */
@@ -1059,7 +1075,8 @@ module.exports = {
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,
   upsertSearchEntries, updateSearchTitle, deleteSearchSession, deleteSearchFolder, deleteSearchType,
-  searchByType, searchSessionIds, searchSessionBodyIds, getMessageWindows, isSearchIndexPopulated, searchFtsRecreated,
+  searchByType, searchSessionIds, searchSessionBodyIds, matchSessionBodyIds, getMessageWindows, getUnindexedSessionIds,
+  isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   listProjects, getProject, getProjectBySlug, insertProject, updateProject, deleteProject,
   listProjectFolders, listAllProjectFolders, upsertProjectFolder, deleteProjectFolder,

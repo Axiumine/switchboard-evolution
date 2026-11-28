@@ -1714,12 +1714,13 @@ ipcMain.handle('search', (_event, type, query, titleOnly) => {
 });
 
 // The overview's search in messages: the ids of the sessions whose first or
-// last `n` messages hold the query (message-windows.js), or any of them (`all`).
+// last `n` messages hold the query (message-windows.js, which reads only the
+// sessions the full-text index finds), or any of them (`all`).
 const messageWindows = require('./message-windows');
 ipcMain.handle('search-sessions', (_event, query, options) => {
   if (typeof query !== 'string') return [];
   if (options?.which === 'all') return dbModule.searchSessionBodyIds(query);
-  return messageWindows.sessionsMatchingMessages(dbModule.getMessageWindows(), query, options || {});
+  return messageWindows.searchMessageWindows(query, options || {}, dbModule);
 });
 
 // The last message of each session asked for, cut at 300 characters: { [id]: text }.

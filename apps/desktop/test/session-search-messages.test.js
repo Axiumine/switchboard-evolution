@@ -8,6 +8,7 @@ const path = require('node:path');
 const {
   MESSAGE_WINDOW, MESSAGE_TEXT_MAX,
   pushMessageWindow, parseMessageWindows, matchesMessageWindow, sessionsMatchingMessages, lastMessageText,
+  indexQueryFor, searchMessageWindows,
 } = require('../message-windows');
 const { readSessionFile } = require('../harnesses/claude');
 
@@ -269,4 +270,185 @@ test('Codex and OpenCode keep their first and last texts the same way', () => {
   });
   assert.equal(row.headTexts, expected.headTexts);
   assert.equal(row.tailTexts, expected.tailTexts);
+});
+
+/** A db.js stand-in: the index finds the indexed sessions whose texts hold the lookup; every read of windows is kept. */
+function fakeDb(sessions, { refuse = false } = {}) {
+  const calls = { lookups: [], reads: [] };
+  const rowOf = s => {
+    const windows = windowsOf(s.texts);
+    return { sessionId: s.id, headTexts: JSON.stringify(windows.head), tailTexts: JSON.stringify(windows.tail) };
+  };
+  return {
+    calls,
+    matchSessionBodyIds(lookup) {
+      calls.lookups.push(lookup);
+      if (refuse) return null;
+      return sessions.filter(s => s.indexed !== false && s.texts.join('\n').toLowerCase().includes(lookup.toLowerCase())).map(s => s.id);
+    },
+    getUnindexedSessionIds: () => sessions.filter(s => s.indexed === false).map(s => s.id),
+    getMessageWindows(ids = null) {
+      calls.reads.push(ids);
+      return sessions.filter(s => ids === null || ids.includes(s.id)).map(rowOf);
+    },
+    allRows: () => sessions.map(rowOf),
+  };
+}
+
+test('first and last read only the sessions the full-text index finds', () => {
+  const sessions = [
+    { id: 'opens', texts: ['The alpha question', ...numbered(23, 'middle'), 'The omega answer'] },
+    { id: 'closes', texts: ['A plain question', ...numbered(23, 'middle'), 'Back to alpha'] },
+    { id: 'quiet', texts: ['Nothing here', 'Nothing there'] },
+    { id: 'unindexed', indexed: false, texts: ['An alpha nobody indexed'] },
+  ];
+  const cases = [['alpha', 'first', 1], ['alpha', 'last', 1], ['ALPHA', 'last', 3], ['omega', 'first', 20],
+    ['middle 2', 'first', 3], ['nothing', 'last', 1], ['zzz', 'first', 1]];
+  for (const [query, which, n] of cases) {
+    const db = fakeDb(sessions);
+    const before = sessionsMatchingMessages(db.allRows(), query, { which, n }).sort();
+    assert.deepEqual(searchMessageWindows(query, { which, n }, db).sort(), before, `${query} ${which} ${n}`);
+    assert.ok(db.calls.reads.every(ids => Array.isArray(ids)), 'never every row');
+  }
+
+  // Only what the index found, and the sessions it has no document for.
+  let db = fakeDb(sessions);
+  assert.deepEqual(searchMessageWindows('alpha', { which: 'first', n: 1 }, db).sort(), ['opens', 'unindexed']);
+  assert.deepEqual(db.calls.lookups, ['alpha']);
+  assert.deepEqual(db.calls.reads, [['opens', 'closes', 'unindexed']]);
+  db = fakeDb(sessions);
+  assert.deepEqual(searchMessageWindows('zzz', { which: 'last', n: 1 }, db), []);
+  assert.deepEqual(db.calls.reads, [['unindexed']]);
+
+  // A long list is read a batch at a time.
+  const many = Array.from({ length: 1200 }, (_, i) => ({ id: 'many-' + i, texts: ['common words ' + i] }));
+  db = fakeDb(many);
+  assert.equal(searchMessageWindows('common', { which: 'first', n: 1 }, db).length, 1200);
+  assert.deepEqual(db.calls.reads.map(ids => ids.length), [500, 500, 200]);
+
+  // When the index cannot be trusted or refuses the query, every row is read, as before.
+  db = fakeDb(sessions, { refuse: true });
+  assert.deepEqual(searchMessageWindows('alpha', { which: 'first', n: 1 }, db).sort(), ['opens', 'unindexed']);
+  assert.deepEqual(db.calls.reads, [null]);
+  db = fakeDb([{ id: 'georgian', texts: ['ᲐᲑᲒ upper case'] }]);
+  assert.deepEqual(searchMessageWindows('აბგ', { which: 'first', n: 1 }, db), ['georgian']);
+  assert.deepEqual(db.calls.lookups, []);
+  assert.deepEqual(db.calls.reads, [null]);
+  db = fakeDb([]);
+  assert.deepEqual(searchMessageWindows('al', { which: 'first', n: 1 }, db), []);
+  assert.deepEqual(db.calls, { lookups: [], reads: [] });
+});
+
+test('the index lookup is trusted only where it folds case as the windows do', () => {
+  assert.equal(indexQueryFor('alpha'), 'alpha');
+  assert.equal(indexQueryFor('  ALPHA  '), 'ALPHA');
+  assert.equal(indexQueryFor('perché così'), 'perché così');
+  assert.equal(indexQueryFor('Привет'), 'Привет');
+  assert.equal(indexQueryFor('“100%” a_b'), '“100%” a_b');
+  assert.equal(indexQueryFor('日本語'), '日本語');
+  // 'İ' lowers to 'i' and a combining dot the index does not see: a final 'i' is not looked up.
+  assert.equal(indexQueryFor('tutti'), 'tutt');
+  assert.equal(indexQueryFor('TUTTI'), 'TUTT');
+  assert.equal(indexQueryFor('abi'), null);
+  assert.equal(indexQueryFor('ab i'), null);
+  assert.equal(indexQueryFor('abc i'), 'abc');
+  assert.equal(indexQueryFor('İstanbul'), null);
+  // Case pairs the index does not fold: Georgian, Cherokee, newer Latin.
+  assert.equal(indexQueryFor('აბგ'), null);
+  assert.equal(indexQueryFor('ꭰꭱꭲ'), null);
+  assert.equal(indexQueryFor('aƛb'), null);
+  assert.equal(indexQueryFor('😀a'), null);
+  assert.equal(indexQueryFor('ab'), null);
+});
+
+test('first and last find through the index what a scan of every row finds', () => {
+  const sessions = {
+    long: ['The alpha question', ...numbered(23, 'middle'), 'The omega answer'],
+    percent: ['progress at 100% now'], digits: ['progress at 1000 now'], underscore: ['name a_b here'],
+    quoted: ['say "quoted" here'], plain: ['say quoted here'], accents: ['Perché TUTTI così?'],
+  };
+  const cases = [['alpha', 'first', 1], ['omega', 'first', 1], ['omega', 'last', 1], ['alpha', 'last', 3],
+    ['middle 2', 'first', 3], ['100%', 'first', 1], ['a_b', 'last', 1], ['"quoted"', 'first', 1],
+    ['ALPHA', 'first', 1], ['perché tutti', 'first', 1], ['così', 'last', 1], ['tutti', 'first', 1], ['al', 'first', 1]];
+  const result = runInElectronNode(`
+    const fs = require('fs');
+    const path = require('path');
+    const db = require('./db');
+    const cache = require('./session-cache');
+    const { sessionsMatchingMessages, searchMessageWindows } = require('./message-windows');
+    const projectsDir = path.join(process.env.SWITCHBOARD_DATA_DIR, 'projects');
+    const folderPath = path.join(projectsDir, ${JSON.stringify(FOLDER)});
+    fs.mkdirSync(folderPath, { recursive: true });
+    const sessions = ${JSON.stringify(sessions)};
+    const transcript = ${transcript.toString()};
+    const line = ${line.toString()};
+    const PROJECT = ${JSON.stringify(PROJECT)};
+    for (const [id, texts] of Object.entries(sessions)) fs.writeFileSync(path.join(folderPath, id + '.jsonl'), transcript(texts));
+    cache.init({ PROJECTS_DIR: projectsDir, activeSessions: new Map(), getMainWindow: () => null, log: console, db });
+    cache.refreshFolder(${JSON.stringify(FOLDER)});
+    let rowsRead = 0;
+    const counted = { ...db, getMessageWindows: ids => { const rows = db.getMessageWindows(ids); rowsRead += rows.length; return rows; } };
+    const out = { cached: db.getMessageWindows().length, cases: [] };
+    for (const [q, which, n] of ${JSON.stringify(cases)}) {
+      const before = sessionsMatchingMessages(db.getMessageWindows(), q, { which, n }).sort();
+      rowsRead = 0;
+      const after = searchMessageWindows(q, { which, n }, counted).sort();
+      out.cases.push({ q, which, n, before, after, rowsRead, candidates: (db.matchSessionBodyIds(q) || []).length });
+    }
+    db.closeDb();
+    console.log(JSON.stringify(out));
+  `);
+  assert.equal(result.cached, Object.keys(sessions).length);
+  const expected = {
+    'alpha first 1': ['long'], 'omega first 1': [], 'omega last 1': ['long'], 'alpha last 3': [],
+    'middle 2 first 3': ['long'], '100% first 1': ['percent'], 'a_b last 1': ['underscore'],
+    '"quoted" first 1': ['quoted'], 'ALPHA first 1': ['long'], 'perché tutti first 1': ['accents'],
+    'così last 1': ['accents'], 'tutti first 1': ['accents'], 'al first 1': [],
+  };
+  for (const c of result.cases) {
+    const key = `${c.q} ${c.which} ${c.n}`;
+    assert.deepEqual(c.after, c.before, `${key}: the same sessions as a scan of every row`);
+    assert.deepEqual(c.after, expected[key], key);
+    assert.ok(c.rowsRead <= Math.max(c.candidates, 1) && c.rowsRead < result.cached, `${key}: read ${c.rowsRead} rows`);
+  }
+});
+
+test('the full-text index finds every message a trusted query matches', () => {
+  // Every character JS lower-cases, in a text and in a query, each way round:
+  // wherever indexQueryFor trusts the index, the index must find the text.
+  const result = runInElectronNode(`
+    const db = require('./db');
+    const { indexQueryFor } = require('./message-windows');
+    const pairs = [];
+    for (let cp = 0; cp <= 0x10FFFF; cp++) {
+      if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+      const c = String.fromCodePoint(cp);
+      const lower = c.toLowerCase();
+      if (lower === c) continue;
+      pairs.push(['ab' + c + 'cd', 'b' + lower + 'c'], ['ab' + lower + 'cd', 'b' + c + 'c']);
+    }
+    pairs.push(['xabİcd', 'xabi'], ['xabİcd', 'XABI']);
+    const ids = pairs.map((_, i) => 'pair-' + i);
+    db.upsertCachedSessions(pairs.map(([text], i) => ({ sessionId: ids[i], folder: 'f', projectPath: '/Users/demo/p', summary: 's', textContent: text })));
+    db.upsertSearchEntries(pairs.map(([text], i) => ({ id: ids[i], type: 'session', folder: 'f', title: 't', body: text })));
+    // Latin-1, Greek and Cyrillic: the scripts whose case pairs should all be looked up.
+    const common = cp => cp < 0x100 || (cp >= 0x370 && cp < 0x500);
+    const missed = [];
+    const untrustedCommon = new Set();
+    pairs.forEach(([text, query], i) => {
+      if (!text.toLowerCase().includes(query.toLowerCase())) return;
+      const lookup = indexQueryFor(query);
+      if (lookup === null) {
+        const cps = [text.codePointAt(2), ...[...query].slice(1, -1).map(c => c.codePointAt(0))];
+        if (i < pairs.length - 2 && cps.every(common)) untrustedCommon.add(cps[0].toString(16));
+        return;
+      }
+      if (!(db.matchSessionBodyIds(lookup) || []).includes(ids[i])) missed.push(query);
+    });
+    db.closeDb();
+    console.log(JSON.stringify({ missed, untrustedCommon: [...untrustedCommon].sort() }));
+  `);
+  assert.deepEqual(result.missed, []);
+  // Only Greek yot, whose capital the index does not fold, is left to a scan of every row.
+  assert.deepEqual(result.untrustedCommon, ['37f', '3f3']);
 });

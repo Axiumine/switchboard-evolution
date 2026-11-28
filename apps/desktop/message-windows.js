@@ -6,7 +6,7 @@
 // once with the first MESSAGE_WINDOW texts, the tail slides over the last
 // MESSAGE_WINDOW. session_cache keeps both as JSON (headTexts, tailTexts), so
 // an appended transcript moves its tail without being read again from the
-// start. Pure: no database, no files.
+// start. No database or files of its own: searchMessageWindows is handed db.js.
 
 const MESSAGE_WINDOW = 20;
 const MESSAGE_TEXT_MAX = 8000;
@@ -86,6 +86,60 @@ function sessionsMatchingMessages(rows, query, options = {}) {
   }, q, options)).map(row => row.sessionId);
 }
 
+// Read the windows of this many sessions at a time.
+const MESSAGE_WINDOW_BATCH = 500;
+
+// Lower-case characters the trigram index (case_sensitive 0) folds as
+// toLowerCase() does: Latin to U+024F, Greek and Cyrillic, but for ƛ and ϳ,
+// whose capitals (newer than the index's case table) it does not fold.
+// Characters with no case at all match only themselves either way, but for the
+// dot 'İ' lowers to. The last test of session-search-messages checks every
+// code point against the real index.
+function trustedInIndex(char) {
+  const cp = char.codePointAt(0);
+  if (cp === 0x019B || cp === 0x03F3 || cp === 0x0307) return false;
+  if (cp < 0x0250 || (cp >= 0x0370 && cp < 0x0500)) return true;
+  return char.toUpperCase() === char && char.toLowerCase() === char;
+}
+
+/**
+ * What to look up in the full-text index before First or Last, or null when
+ * the index could miss a session the windows match. 'İ' lowers to 'i' and a
+ * combining dot the index does not see, so only a query's last 'i' can fall on
+ * one: it is left out of the lookup. Trigrams need 3 characters.
+ */
+function indexQueryFor(query) {
+  const q = String(query ?? '').trim();
+  const lower = [...q.toLowerCase()];
+  if (!lower.every(trustedInIndex)) return null;
+  const chars = [...q];
+  if (lower[lower.length - 1] === 'i') chars.pop();
+  const lookup = chars.join('').trim();
+  return [...lookup].length < 3 ? null : lookup;
+}
+
+/**
+ * search-sessions with First or Last. A text kept in a window is part of its
+ * session's indexed messages, so only the sessions the full-text index finds
+ * (`db.matchSessionBodyIds`), and those cached without a search document, can
+ * match: their windows are the only ones read, a batch at a time. When the
+ * index cannot be trusted with the query or refuses it, every row is read.
+ * `db` is db.js.
+ */
+function searchMessageWindows(query, options, db) {
+  const q = String(query ?? '').trim();
+  if (q.length < MESSAGE_SEARCH_MIN) return [];
+  const lookup = indexQueryFor(q);
+  const found = lookup === null ? null : db.matchSessionBodyIds(lookup);
+  if (found === null) return sessionsMatchingMessages(db.getMessageWindows(), q, options);
+  const ids = [...new Set([...found, ...db.getUnindexedSessionIds()])];
+  const matches = [];
+  for (let i = 0; i < ids.length; i += MESSAGE_WINDOW_BATCH) {
+    matches.push(...sessionsMatchingMessages(db.getMessageWindows(ids.slice(i, i + MESSAGE_WINDOW_BATCH)), q, options));
+  }
+  return matches;
+}
+
 /** The last text of a conversation, trimmed and cut at `max` characters; '' without one. */
 function lastMessageText(windows, max = 300) {
   const last = windows.tail[windows.tail.length - 1] ?? windows.head[windows.head.length - 1] ?? '';
@@ -96,4 +150,5 @@ module.exports = {
   MESSAGE_WINDOW, MESSAGE_TEXT_MAX, MESSAGE_SEARCH_MIN,
   emptyMessageWindows, pushMessageWindow, messageWindowsOf, messageWindowColumns,
   parseMessageWindows, matchesMessageWindow, sessionsMatchingMessages, lastMessageText,
+  indexQueryFor, searchMessageWindows,
 };
