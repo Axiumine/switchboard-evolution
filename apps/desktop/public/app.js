@@ -586,6 +586,7 @@ function refreshSidebar({ resort = false, reason = 'project' } = {}) {
   renderProjects(projects, resort);
   if (typeof refreshProjectViews === 'function') refreshProjectViews({ reason });
   updateSearchActions();
+  if (typeof refreshOverviewTab === 'function') refreshOverviewTab();
 }
 
 // --- Search results: leave some out, stop the rest ---
@@ -1399,7 +1400,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
       // or Global settings. Plans and Files leave the main area as it is, as
       // when they are picked from another tab.
       if (pageHadUnderline) {
-        if (tabName === 'sessions') restoreTerminalArea();
+        if (tabName === 'sessions') { if (typeof showOverviewTab === 'function') showOverviewTab(); else restoreTerminalArea(); }
         else if (tabName === 'projects') showProjectHome();
         else if (tabName === 'stats') showStatsPage();
       }
@@ -1429,6 +1430,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     if (filesFilters) filesFilters.style.display = 'none';
     if (plansFilters) plansFilters.style.display = 'none';
     sessionFilters.style.display = 'none';
+    document.getElementById('overview-panel')?.setAttribute('hidden', '');
     searchBar.style.display = 'none';
     // The grouping combo beside the field belongs to the Projects tab.
     searchBar.classList.remove('with-group');
@@ -1436,11 +1438,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     if (donateBar) donateBar.hidden = tabName !== 'projects';
 
     if (tabName === 'sessions') {
-      sessionFilters.style.display = '';
-      searchBar.style.display = '';
-      searchInput.placeholder = 'Search sessions...';
-      sidebarContent.style.display = '';
-      restoreTerminalArea();
+      if (typeof showOverviewTab === 'function') showOverviewTab(); else restoreTerminalArea();
       // Catch up on changes that happened while on another tab
       if (projectsChangedWhileAway) {
         projectsChangedWhileAway = false;

@@ -175,6 +175,8 @@ function setOverviewPrefs(patch) {
   if (overviewPrefs.layout.mode !== before.layout.mode) ovState.page = 0;
   const resort = !!patch && ('sort' in patch || overviewPrefs.group.by !== before.group.by);
   refreshSessionOverview({ resort });
+  // The Sessions tab's controls show the choice, wherever it was made (a filter chip's ×).
+  if (typeof refreshOverviewPanel === 'function') refreshOverviewPanel();
 }
 
 /** Prefs with a patch over them, one level deep (`dock` is a tree and is replaced whole). */
@@ -347,8 +349,8 @@ function overviewContext({ resort }) {
     timeOf: session => sessionEventTime(session),
     folderOf: overviewFolderOf,
     projectOf: overviewProjectOf,
-    searchIds: null,
-    leftOut: new Set(),
+    searchIds: typeof overviewSearch !== 'undefined' && overviewSearch ? overviewSearch.ids : null,
+    leftOut: typeof overviewLeftOut !== 'undefined' ? overviewLeftOut : new Set(),
     excludeIds: new Set(),
     previousOrder: resort ? null : ovState.previousOrder,
     previousGroups: resort ? undefined : ovState.previousGroups,

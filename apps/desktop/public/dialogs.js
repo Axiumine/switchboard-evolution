@@ -255,7 +255,7 @@ async function showResumeSessionDialog(session) {
 // Settings viewer is in settings-panel.js (openSettingsViewer / closeSettingsViewer)
 // Global settings button & add project button bindings are in app.js (need DOM refs)
 
-function showAddProjectDialog() {
+function showAddProjectDialog({ onAdded } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'add-project-overlay';
 
@@ -305,6 +305,7 @@ function showAddProjectDialog() {
     close();
 
     await loadProjects();
+    if (typeof onAdded === 'function') onAdded(result.projectPath || projectPath);
   }
 
   dialog.querySelector('.add-project-browse-btn').onclick = async () => {

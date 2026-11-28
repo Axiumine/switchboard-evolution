@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="web-page.css">
   <link rel="stylesheet" href="command-catalog.css">
   <link rel="stylesheet" href="session-overview.css">
+  <link rel="stylesheet" href="session-overview-panel.css">
   <script src="accent.js"></script>
 </head>
 <body>
@@ -69,6 +70,8 @@
         <option value="state">State</option>
       </select>
     </div>
+    <!-- The Sessions tab's controls of the Session Overview (session-overview-panel.js). -->
+    <div id="overview-panel" hidden></div>
     <!-- The Files tab's filter, right under its search field (files-view.js). -->
     <div id="files-filters" style="display:none;">
       <select id="files-filter-select" class="session-filter-select" title="Show the files of the list" aria-label="Show">
@@ -223,6 +226,7 @@
   <script src="task-runner.js"></script>
   <script src="grid-view.js"></script>
   <script src="session-overview.js"></script>
+  <script src="session-overview-panel.js"></script>
   <script src="stats-view.js"></script>
   <script src="message-search.js"></script>
   <script src="jsonl-viewer.js"></script>
