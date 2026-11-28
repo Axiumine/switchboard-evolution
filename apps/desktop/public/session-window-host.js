@@ -15,8 +15,9 @@
 //   back.
 // - Bring back closes the window. Its sessions come back (ownerKind
 //   'returning') and are reattached here: reset, reattach with the replay,
-//   then a resize to the size of the terminal here. The window's panes come
-//   back too, in place of the placeholder (graftTile).
+//   then a resize to the size of the terminal here, also when it is hidden
+//   (unless no layout here ever fitted it). The window's panes come back too,
+//   in place of the placeholder (graftTile).
 // - A session window's splits are started here, without being shown, and
 //   handed over (session-window-run, move-session-to-window).
 // - What a window shows counts as seen here through main, as a phone's does
@@ -157,15 +158,37 @@ function terminalHere(id) {
   const entry = openSessions.get(id);
   if (entry) return entry;
   const session = sessionMap.get(id);
-  return session && typeof createTerminalEntry === 'function' ? createTerminalEntry(session) : null;
+  const made = session && typeof createTerminalEntry === 'function' ? createTerminalEntry(session) : null;
+  markUnfitted(made);
+  return made;
+}
+
+/**
+ * A terminal made here and never shown has xterm's starting size, which no
+ * layout here gave it: reattachHere does not size the PTY from it. Its first
+ * fit changes that size, which sizes the PTY (terminal-manager.js onResize),
+ * and from then on it counts as laid out.
+ */
+function markUnfitted(entry) {
+  if (!entry || entry.unfitted !== undefined) return;
+  entry.unfitted = true;
+  const listener = entry.terminal.onResize?.(() => {
+    entry.unfitted = false;
+    listener?.dispose?.();
+  });
 }
 
 /**
  * The session is the main window's again: what its shadow holds goes
  * (reset), it is reattached with the replay, read without answering
- * (holdTerminalReplies), and, when its terminal is laid out here, fitted and
- * sized to it; a hidden one sizes the PTY at its next fit. One that cannot be
- * reattached says why in its terminal, as openSession does.
+ * (holdTerminalReplies), and the PTY is sized to its terminal here: fitted
+ * first when it is laid out, else at the size its layout here last gave it.
+ * A hidden one must be sized now: the PTY still has the session window's
+ * size, and the fit that shows it again, to the same size, does nothing
+ * (xterm's resize ignores an unchanged size, so onResize never fires). One
+ * never fitted here (markUnfitted) waits for its first fit, which changes its
+ * size. One that cannot be reattached says why in its terminal, as
+ * openSession does.
  */
 async function reattachHere(id) {
   const entry = terminalHere(id);
@@ -197,10 +220,9 @@ async function reattachHere(id) {
     clearPoppedOut(entry);
     if (typeof setSessionMcpActive === 'function') setSessionMcpActive(s.sessionId, !!result.mcpActive);
     const box = entry.element.getBoundingClientRect();
-    if (box.width > 0 && box.height > 0) {
-      safeFit(entry);
-      window.api.resizeTerminal(s.sessionId, entry.terminal.cols, entry.terminal.rows);
-    }
+    const laidOut = box.width > 0 && box.height > 0;
+    if (laidOut) safeFit(entry);
+    if (laidOut || !entry.unfitted) window.api.resizeTerminal(s.sessionId, entry.terminal.cols, entry.terminal.rows);
     return result;
   } finally {
     entry.reattaching = false;
@@ -268,11 +290,13 @@ function onSessionOwnerChangedHere(id, ownerKind) {
 async function runForSessionWindow(name, args, windowId) {
   if (!Array.isArray(args)) return;
   let id = null;
+  let existing = null; // a terminal it already had here, maybe laid out
   if (name === 'launchNewSession') {
     const [project, sessionOptions, opts] = args;
     id = await launchNewSession(project, sessionOptions, { ...(opts || {}), focus: false });
   } else if (name === 'openRawTerminalSession') {
     const [session] = args;
+    existing = session?.sessionId ? openSessions.get(session.sessionId) || null : null;
     const result = session?.sessionId ? await openRawTerminalSession(session, { show: false }) : null;
     if (result?.ok) {
       id = session.sessionId;
@@ -280,6 +304,9 @@ async function runForSessionWindow(name, args, windowId) {
     }
   }
   if (typeof id !== 'string' || !id) return;
+  // Started unseen: no layout here has sized a terminal made for it now.
+  const entry = openSessions.get(id);
+  if (entry !== existing) markUnfitted(entry);
   await window.api.moveSessionToWindow(typeof tileCurrentId === 'function' ? tileCurrentId(id) : id, windowId);
 }
 

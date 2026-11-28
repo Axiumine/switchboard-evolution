@@ -90,29 +90,45 @@ function element(tag = 'div') {
   return el;
 }
 
-/** An xterm with what the files use; its writes wait until parse() is called, as xterm parses later. */
-function fakeTerminal(log) {
+/**
+ * An xterm with what the files use; its writes wait until parse() is called,
+ * as xterm parses later. As xterm 6's, resize does nothing for an unchanged
+ * size, and only a change reaches onResize.
+ */
+function fakeTerminal(log, { cols = 120, rows = 40 } = {}) {
   const pending = [];
-  return {
+  const resized = [];
+  const terminal = {
     options: { disableStdin: false },
-    cols: 120,
-    rows: 40,
+    cols,
+    rows,
     textarea: element('textarea'),
     reset: () => log.push(['reset']),
     write: (data, done) => pending.push({ data, done }),
     focus() {},
+    resize(newCols, newRows) {
+      if (newCols === terminal.cols && newRows === terminal.rows) return;
+      terminal.cols = newCols;
+      terminal.rows = newRows;
+      [...resized].forEach(fn => fn({ cols: newCols, rows: newRows }));
+    },
+    onResize(fn) {
+      resized.push(fn);
+      return { dispose: () => resized.splice(resized.indexOf(fn), 1) };
+    },
     parse() {
       while (pending.length) pending.shift().done?.();
     },
     pending,
   };
+  return terminal;
 }
 
-function terminalEntry(id, log, extra = {}) {
+function terminalEntry(id, log, extra = {}, size) {
   return {
     session: { sessionId: id, projectPath: APP, runtime: 'claude', ...extra },
     element: element(),
-    terminal: fakeTerminal(log),
+    terminal: fakeTerminal(log, size),
     closed: false,
   };
 }
@@ -426,6 +442,30 @@ test('a session window\'s split starts here, unseen, and moves to the window', a
   ]);
 });
 
+test('a terminal started here for a session window waits for its first fit when it comes back hidden', async () => {
+  const { context, listeners, log } = mainWindow({ ids: ['T2'] });
+  const laidOut = context.openSessions.get('T2');
+  context.launchNewSession = async () => {
+    const entry = terminalEntry('N1', log, {}, { cols: 80, rows: 24 });
+    entry.element.rect = { width: 0, height: 0 };
+    context.openSessions.set('N1', entry);
+    context.sessionMap.set('N1', entry.session);
+    context.activePtyIds.add('N1');
+    return 'N1';
+  };
+  context.openRawTerminalSession = async () => ({ ok: true });
+  context.loadProjects = () => {};
+  await listeners.run('launchNewSession', [{ projectPath: APP }, {}, {}], 7);
+  await listeners.run('openRawTerminalSession', [{ sessionId: 'T2', type: 'terminal', projectPath: APP }, {}], 7);
+  assert.equal(context.openSessions.get('N1').unfitted, true);
+  assert.equal(laidOut.unfitted, undefined, 'a terminal it already had keeps counting as laid out');
+  log.length = 0;
+  listeners.owner('N1', 'window', false);
+  listeners.owner('N1', 'returning', false);
+  await settle();
+  assert.ok(!log.some(call => call[0] === 'resize'));
+});
+
 test('a session whose id changes is found under its new id by a window opening for the old one', () => {
   const { context, listeners } = mainWindow();
   listeners.detected('N1', 'R1');
@@ -450,14 +490,52 @@ test('a session that cannot come back says why, in its terminal here', async () 
   assert.match(warnings.join('\n'), /Bring back.*S1.*project directory no longer exists/);
 });
 
-test('Bring back sizes the PTY from a terminal laid out here; a hidden one waits for its next fit', async () => {
-  const { listeners, entries, log } = mainWindow();
-  entries.get('S1').element.rect = { width: 0, height: 0 };
+// A session brought back while it is not on screen here: the PTY still has its
+// window's size (wider: that window has no sidebar). The terminal here keeps
+// the size its layout last gave it, and the fit that shows it again, to that
+// same size, does nothing in xterm: the PTY must take that size at once.
+test('Bring back sizes the PTY from the terminal here, also while it is hidden', async () => {
+  const { context, listeners, entries, log } = mainWindow();
+  const entry = entries.get('S1');
+  entry.element.rect = { width: 0, height: 0 };
   listeners.owner('S1', 'window', false);
   listeners.owner('S1', 'returning', false);
   await settle();
-  assert.deepEqual(log.map(call => call[0]), ['reset', 'openTerminal', 'mcp']);
-  assert.equal(entries.get('S1').shadow, false, 'its next fit sizes the PTY');
+  assert.deepEqual(log.map(call => call[0]), ['reset', 'openTerminal', 'mcp', 'resize']);
+  assert.deepEqual(log.at(-1), ['resize', 'S1', 120, 40]);
+  // Shown later: its fit finds the size it has, and xterm does nothing more.
+  context.safeFit = target => target.terminal.resize(120, 40);
+  context.safeFit(entry);
+  assert.deepEqual(log.at(-1), ['resize', 'S1', 120, 40]);
+});
+
+test('a terminal made here for a session that comes back hidden waits for its first fit', async () => {
+  const { context, listeners, log } = mainWindow({ ids: [] });
+  // Opened in its window from a list: the main window never had a terminal of it.
+  const session = { sessionId: 'W1', projectPath: APP, runtime: 'claude' };
+  context.sessionMap.set('W1', session);
+  context.activePtyIds.add('W1');
+  context.createTerminalEntry = made => {
+    const entry = terminalEntry(made.sessionId, log, {}, { cols: 80, rows: 24 });
+    entry.element.rect = { width: 0, height: 0 };
+    // terminal-manager.js sizes the PTY on a change of size, unless it is a shadow.
+    entry.terminal.onResize(({ cols, rows }) => { if (!entry.shadow) context.api.resizeTerminal(made.sessionId, cols, rows); });
+    context.openSessions.set(made.sessionId, entry);
+    return entry;
+  };
+  listeners.owner('W1', 'window', false);
+  listeners.owner('W1', 'returning', false);
+  await settle();
+  assert.ok(!log.some(call => call[0] === 'resize'), "xterm's starting size is no layout's");
+  // Its first fit changes that size, and the PTY follows.
+  context.openSessions.get('W1').terminal.resize(150, 45);
+  assert.deepEqual(log.at(-1), ['resize', 'W1', 150, 45]);
+  // Fitted once, it counts as laid out: another hidden return sizes the PTY from it.
+  log.length = 0;
+  listeners.owner('W1', 'window', false);
+  listeners.owner('W1', 'returning', false);
+  await settle();
+  assert.deepEqual(log.at(-1), ['resize', 'W1', 150, 45]);
 });
 
 test('a session resumed in a window is live there: its ended terminal here is not reopened over it', () => {
