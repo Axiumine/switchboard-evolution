@@ -2607,6 +2607,7 @@ function toolWindowKindOf(webContents) {
   for (const win of viewerFileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'file';
   for (const win of webWindows.keys()) if (!win.isDestroyed() && win.webContents === webContents) return 'web-page';
   if (sessionWindows.isSessionWindow(webContents)) return 'session';
+  for (const win of commandsWindows.values()) if (!win.isDestroyed() && win.webContents === webContents) return 'commands';
   return null;
 }
 
