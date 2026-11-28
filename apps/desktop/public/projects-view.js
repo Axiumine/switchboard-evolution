@@ -21,7 +21,7 @@
 // sessionBusyState, sessionMap, pendingSessions, openSessions, activeTab,
 // gridViewActive, visibleSessionCount, loadProjects, refreshSidebar, launchNewSession,
 // openSession, pollActiveSessions, placeholder, terminalArea, memoryViewer,
-// memoryPanel, hideAllViewers, showSession, fitAndScroll,
+// hideAllViewers, showSession, fitAndScroll,
 // resolveDefaultSessionOptions
 // Depends on sidebar.js: isSessionRunning
 // Depends on task-runner.js: showTaskPopover, tasksByPath, updateTaskButton,
