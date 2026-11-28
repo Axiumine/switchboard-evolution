@@ -111,9 +111,15 @@ if (window.api && window.api.onPromptImproverSettingsChanged && !improverWindowM
   });
 }
 
-/** What the CLI's box holds now: `{ text, confident, reason }`. */
+/**
+ * What the CLI's box holds now: `{ text, confident, reason }`. A session in a
+ * window of its own has only a shadow here (session-window-host.js), still
+ * showing the screen it left with: it is not read, so Replace cannot act on
+ * an old prompt in the live one.
+ */
 function readSessionPrompt(entry, cli) {
   if (!entry || !entry.terminal) return { text: '', confident: false, reason: 'The terminal is not open.' };
+  if (entry.shadow) return { text: '', confident: false, reason: 'The session is in a window of its own: improve its prompt there.' };
   const rows = window.TuiPromptReader.rowsFromXterm(entry.terminal, 60);
   return window.TuiPromptReader.readTuiPrompt(rows, cli, { cols: entry.terminal.cols });
 }

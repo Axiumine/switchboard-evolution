@@ -80,3 +80,26 @@ test('the window names the session the prompt goes into', () => {
   const own = context.improverTargetHtml({ title: 'Login work', cli: 'claude', folder: '', windowMode: true });
   assert.match(own, /even if another session is in front in the main window\. You do not need to go back to it/);
 });
+
+// A session shown in a window of its own keeps a shadow terminal in the main
+// window (session-window-host.js): hidden under a placeholder, it still shows
+// the screen from when the session left. Read here, its old prompt would pass
+// for the live one, and Replace would cut whatever was typed since in the
+// other window.
+test('a session in a window of its own is not read here, so Replace stays off', () => {
+  const { context, calls } = setup({ active: 's1', screen: '❯ fix it' });
+  const entry = context.openSessions.get('s1');
+  entry.shadow = true;
+  const read = context.readSessionPrompt(entry, 'claude');
+  assert.equal(read.confident, false);
+  assert.equal(read.text, '');
+  assert.match(read.reason, /window of its own/);
+  // A Replace asked with what an earlier read found is refused too.
+  const res = context.applyToSession({ sessionId: 's1', cli: 'claude', how: 'replace', readText: 'fix it', readConfident: true, text: 'Fix the login.' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /could not be read for sure|changed since it was read/);
+  assert.equal(calls.filter(call => call[0] === 'input').length, 0, 'nothing typed into the live session');
+  // Back in the main window, it is read again.
+  entry.shadow = false;
+  assert.equal(context.readSessionPrompt(entry, 'claude').confident, true);
+});
