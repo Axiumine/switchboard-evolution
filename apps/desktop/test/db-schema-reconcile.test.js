@@ -590,6 +590,73 @@ for (const version of [4, 12]) {
   });
 }
 
+// The first and last texts of each transcript (headTexts, tailTexts) are new
+// columns: an older cache keeps its rows, and the transcripts of the rows
+// without them are read once more, from the start, by the next pass.
+test('message windows are added to an older session cache, whose transcripts are read once more', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-db-windows-'));
+  try {
+    const seed = runInElectronNode(`
+      const Database = require('better-sqlite3');
+      const db = new Database(require('path').join(process.env.SWITCHBOARD_DATA_DIR, 'switchboard.db'));
+      db.exec(\`CREATE TABLE session_cache (
+        sessionId TEXT PRIMARY KEY, folder TEXT NOT NULL, projectPath TEXT,
+        summary TEXT, firstPrompt TEXT, created TEXT, modified TEXT,
+        messageCount INTEGER DEFAULT 0, slug TEXT, aiTitle TEXT, fileMtime TEXT,
+        runtime TEXT DEFAULT 'claude', sessionFile TEXT, customTitle TEXT, textContent TEXT,
+        headHash TEXT, indexedBytes INTEGER DEFAULT 0, firstTimestamp TEXT, lastTimestamp TEXT
+      )\`);
+      db.exec('CREATE TABLE cache_meta (folder TEXT PRIMARY KEY, projectPath TEXT, indexMtimeMs REAL)');
+      db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+      db.prepare("INSERT INTO settings (key, value) VALUES ('db_version', '4')").run();
+      db.prepare(\`INSERT INTO session_cache (sessionId, folder, projectPath, summary, fileMtime, textContent, headHash, indexedBytes)
+        VALUES ('old', '-Users-demo-project', '/Users/demo/project', 'Old question', '2026-01-01T00:00:00.000Z',
+        'Old question', 'v3:abc', 42)\`).run();
+      db.prepare("INSERT INTO cache_meta VALUES ('-Users-demo-project', '/Users/demo/project', 123)").run();
+      db.prepare("INSERT INTO cache_meta VALUES ('-Users-demo-empty', '/Users/demo/empty', 456)").run();
+      db.close();
+    `, dir);
+    assert.equal(seed.status, 0, seed.stderr);
+
+    assert.equal(loadDbModule(dir).status, 0);
+    const state = inspectDb(dir);
+    assert.ok(state.cols.includes('headTexts'), 'headTexts added');
+    assert.ok(state.cols.includes('tailTexts'), 'tailTexts added');
+    assert.equal(state.cacheCount, 1, 'rows kept');
+    assert.equal(state.metaCount, 2, 'folders kept');
+
+    const result = runInElectronNode(`
+      const assert = require('node:assert/strict');
+      let db = require('./db');
+      const old = db.getCachedSession('old');
+      assert.equal(old.summary, 'Old question');
+      assert.equal(old.textContent, 'Old question');
+      assert.equal(old.headTexts, null);
+      assert.equal(old.fileMtime, null, 'the row is read again whatever its transcript says');
+      assert.equal(db.getFolderMeta('-Users-demo-project').indexMtimeMs, 0, 'its folder is planned again');
+      assert.equal(db.getFolderMeta('-Users-demo-project').projectPath, '/Users/demo/project');
+      assert.equal(db.getFolderMeta('-Users-demo-empty').indexMtimeMs, 456, 'a folder without such rows keeps its gate');
+
+      // The new read writes both windows, and the reset is not done again.
+      db.upsertCachedSessions([{ ...old, fileMtime: '2026-01-02T00:00:00.000Z',
+        headTexts: JSON.stringify(['Old question']), tailTexts: JSON.stringify(['Old question', 'New answer']) }]);
+      db.setFolderMeta('-Users-demo-project', '/Users/demo/project', 789);
+      db.closeDb();
+      delete require.cache[require.resolve('./db')];
+      db = require('./db');
+      const row = db.getCachedSession('old');
+      assert.equal(row.fileMtime, '2026-01-02T00:00:00.000Z');
+      assert.equal(row.headTexts, '["Old question"]');
+      assert.equal(row.tailTexts, '["Old question","New answer"]');
+      assert.equal(db.getFolderMeta('-Users-demo-project').indexMtimeMs, 789);
+      assert.ok(!Object.hasOwn(db.getAllCached()[0], 'headTexts'), 'bulk queries must not load the windows');
+      db.closeDb();
+      console.log(JSON.stringify({ ok: true }));
+    `, dir);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('incremental refresh persists resume state and keeps Codex, search and displayed times intact', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-db-refresh-'));
   try {

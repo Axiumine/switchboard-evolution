@@ -175,9 +175,12 @@ if (migrations.length > currentDbVersion) {
   // their cache/search data and get a full read on their next modification.
   // Raw timestamp bounds are separate from created/modified, whose fallback
   // to file times must not become an accumulator value on a later append.
+  // headTexts/tailTexts: the first and last texts of the conversation, as JSON
+  // (message-windows.js), for the overview's search in messages.
   for (const col of [
     'customTitle TEXT', 'textContent TEXT', 'headHash TEXT',
     'indexedBytes INTEGER DEFAULT 0', 'firstTimestamp TEXT', 'lastTimestamp TEXT',
+    'headTexts TEXT', 'tailTexts TEXT',
   ]) {
     if (!cols.has(col.split(' ')[0])) db.exec(`ALTER TABLE session_cache ADD COLUMN ${col}`);
   }
@@ -190,6 +193,18 @@ db.transaction(() => {
   if (db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) return;
   db.exec("UPDATE session_cache SET fileMtime = NULL WHERE runtime = 'codex'");
   db.exec("DELETE FROM cache_meta WHERE folder LIKE 'codex/%'");
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, 'true');
+})();
+
+// Read once more, from the start, every transcript cached before its message
+// windows existed. Only those rows and their folders lose their gates; their
+// data stays until the indexer replaces it, and a pass the app does not finish
+// is taken up by the next one.
+db.transaction(() => {
+  const key = 'session_message_windows_v1';
+  if (db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) return;
+  db.exec('UPDATE cache_meta SET indexMtimeMs = 0 WHERE folder IN (SELECT folder FROM session_cache WHERE headTexts IS NULL)');
+  db.exec('UPDATE session_cache SET fileMtime = NULL WHERE headTexts IS NULL');
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, 'true');
 })();
 
@@ -405,8 +420,8 @@ const stmts = {
     FROM session_cache
   `),
   cacheUpsert: db.prepare(`
-    INSERT INTO session_cache (sessionId, folder, projectPath, summary, firstPrompt, created, modified, messageCount, slug, aiTitle, fileMtime, runtime, sessionFile, customTitle, textContent, headHash, indexedBytes, firstTimestamp, lastTimestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO session_cache (sessionId, folder, projectPath, summary, firstPrompt, created, modified, messageCount, slug, aiTitle, fileMtime, runtime, sessionFile, customTitle, textContent, headHash, indexedBytes, firstTimestamp, lastTimestamp, headTexts, tailTexts)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET
       folder = excluded.folder, projectPath = excluded.projectPath,
       summary = excluded.summary, firstPrompt = excluded.firstPrompt,
@@ -416,7 +431,8 @@ const stmts = {
       runtime = excluded.runtime, sessionFile = excluded.sessionFile,
       customTitle = excluded.customTitle, textContent = excluded.textContent,
       headHash = excluded.headHash, indexedBytes = excluded.indexedBytes,
-      firstTimestamp = excluded.firstTimestamp, lastTimestamp = excluded.lastTimestamp
+      firstTimestamp = excluded.firstTimestamp, lastTimestamp = excluded.lastTimestamp,
+      headTexts = excluded.headTexts, tailTexts = excluded.tailTexts
   `),
   // Every Claude session with a slug, for linking plan-mode plans (named
   // <slug>.md) to their session, folder and project (plans-source.js).
@@ -427,6 +443,12 @@ const stmts = {
   `),
   cacheGetByFolder: db.prepare('SELECT sessionId, fileMtime FROM session_cache WHERE folder = ?'),
   cacheGetSession: db.prepare('SELECT * FROM session_cache WHERE sessionId = ?'),
+  // What search in messages reads (message-windows.js): every row, or the rows asked for.
+  cacheGetMessageWindows: db.prepare('SELECT sessionId, headTexts, tailTexts FROM session_cache'),
+  cacheGetMessageWindowsOf: db.prepare(`
+    SELECT sessionId, headTexts, tailTexts FROM session_cache
+    WHERE sessionId IN (SELECT value FROM json_each(?))
+  `),
   cacheUpdateAiTitle: db.prepare('UPDATE session_cache SET aiTitle = ? WHERE sessionId = ? AND runtime = ?'),
   cacheDeleteSession: db.prepare('DELETE FROM session_cache WHERE sessionId = ?'),
   cacheDeleteFolder: db.prepare('DELETE FROM session_cache WHERE folder = ?'),
@@ -477,6 +499,15 @@ const stmts = {
     WHERE search_map.type = 'session'
       AND search_map.id IN (SELECT value FROM json_each(?))
       AND search_fts MATCH ?
+  `),
+  // Every cached session whose messages hold a text, without the 50-row limit
+  // of searchQuery: the same sessions First and Last look at.
+  searchSessionBodyIds: db.prepare(`
+    SELECT DISTINCT search_map.id
+    FROM search_fts
+    JOIN search_map ON search_fts.rowid = search_map.rowid
+    WHERE search_map.type = 'session' AND search_fts MATCH ?
+      AND search_map.id IN (SELECT sessionId FROM session_cache)
   `),
   // Project statements
   projectList: db.prepare('SELECT * FROM projects ORDER BY created'),
@@ -593,7 +624,8 @@ const upsertCachedSessionsBatch = db.transaction((sessions) => {
       s.slug || null, s.aiTitle || null, s.fileMtime || null,
       s.runtime || 'claude', s.sessionFile || null,
       s.customTitle || null, s.textContent || null, s.headHash || null,
-      s.indexedBytes || 0, s.firstTimestamp || null, s.lastTimestamp || null
+      s.indexedBytes || 0, s.firstTimestamp || null, s.lastTimestamp || null,
+      s.headTexts || null, s.tailTexts || null
     );
   }
 });
@@ -714,6 +746,28 @@ function searchSessionIds(query, sessionIds) {
   if (!query.trim() || !sessionIds.length) return [];
   const match = '"' + query.replace(/"/g, '""') + '"';
   return stmts.searchSessionIds.all(JSON.stringify(sessionIds), match).map(row => row.id);
+}
+
+/**
+ * The sessions whose messages (the FTS body) hold `query` literally, without
+ * regard to case. Quoted as one phrase, so FTS syntax and LIKE wildcards are
+ * plain text; under 3 characters, which the trigram index cannot look up,
+ * nothing matches, and a query the index refuses finds nothing either.
+ */
+function searchSessionBodyIds(query) {
+  const text = typeof query === 'string' ? query.trim() : '';
+  if (text.length < 3) return [];
+  try {
+    return stmts.searchSessionBodyIds.all('body:"' + text.replace(/"/g, '""') + '"').map(row => row.id);
+  } catch {
+    return [];
+  }
+}
+
+/** { sessionId, headTexts, tailTexts } of every cached session, or of those in `sessionIds`. */
+function getMessageWindows(sessionIds = null) {
+  if (sessionIds === null) return stmts.cacheGetMessageWindows.all();
+  return sessionIds.length ? stmts.cacheGetMessageWindowsOf.all(JSON.stringify(sessionIds)) : [];
 }
 
 function isSearchIndexPopulated() {
@@ -1005,7 +1059,7 @@ module.exports = {
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,
   upsertSearchEntries, updateSearchTitle, deleteSearchSession, deleteSearchFolder, deleteSearchType,
-  searchByType, searchSessionIds, isSearchIndexPopulated, searchFtsRecreated,
+  searchByType, searchSessionIds, searchSessionBodyIds, getMessageWindows, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   listProjects, getProject, getProjectBySlug, insertProject, updateProject, deleteProject,
   listProjectFolders, listAllProjectFolders, upsertProjectFolder, deleteProjectFolder,

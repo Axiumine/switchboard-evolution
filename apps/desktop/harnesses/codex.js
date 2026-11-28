@@ -14,6 +14,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { scanLines } = require('../jsonl-scan');
+const { messageWindowsOf, messageWindowColumns } = require('../message-windows');
 
 const id = 'codex';
 const label = 'Codex';
@@ -305,6 +306,7 @@ function readSessionFile(filePath, folder) {
       modified: lastTimestamp || firstTimestamp || stat.birthtime.toISOString(),
       fileMtime: stat.mtime.toISOString(),
       messageCount, textContent: textParts.join('\n'),
+      ...messageWindowColumns(messageWindowsOf(textParts)),
       slug: null, customTitle: null, aiTitle: null,
     };
   } catch {

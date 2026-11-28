@@ -16,6 +16,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { scanLines } = require('../jsonl-scan');
 const { encodeProjectPath } = require('../encode-project-path');
+const { emptyMessageWindows, pushMessageWindow, messageWindowColumns, parseMessageWindows } = require('../message-windows');
 
 const id = 'claude';
 const label = 'Claude';
@@ -244,7 +245,7 @@ function hashHead(fd, stat) {
 /** Accumulator. Every field is either a first-occurrence or a running total,
  *  which is what makes resuming mid-file valid. */
 function emptyState() {
-  return { summary: '', messageCount: 0, textParts: [], slug: null, customTitle: null, aiTitle: null, firstTimestamp: null, lastTimestamp: null };
+  return { summary: '', messageCount: 0, textParts: [], windows: emptyMessageWindows(), slug: null, customTitle: null, aiTitle: null, firstTimestamp: null, lastTimestamp: null };
 }
 
 function stateFrom(prev) {
@@ -252,6 +253,7 @@ function stateFrom(prev) {
     summary: prev.summary || '',
     messageCount: prev.messageCount || 0,
     textParts: prev.textContent ? [prev.textContent] : [],
+    windows: parseMessageWindows(prev),
     slug: prev.slug || null,
     customTitle: prev.customTitle || null,
     aiTitle: prev.aiTitle || null,
@@ -296,7 +298,10 @@ function applyLine(line, st) {
   }
 
   // Search every conversation text block without tools, thinking, or bookkeeping.
-  if (isConversationMessage && text) st.textParts.push(text);
+  if (isConversationMessage && text) {
+    st.textParts.push(text);
+    pushMessageWindow(st.windows, text);
+  }
 }
 
 /**
@@ -317,6 +322,8 @@ function readSessionFile(filePath, folder, projectPath, prev = null) {
     const canResume = !!prev && !!headHash
       && prev.runtime === id && prev.sessionId === sessionId
       && prev.sessionFile === filePath && prev.headHash === headHash
+      // A row cached before the message windows existed is read once from the start.
+      && typeof prev.headTexts === 'string'
       && Number.isSafeInteger(prev.indexedBytes) && prev.indexedBytes > 0
       && prev.indexedBytes <= stat.size
       && (prev.indexedBytes < stat.size || prev.fileMtime === fileMtime);
@@ -337,6 +344,7 @@ function readSessionFile(filePath, folder, projectPath, prev = null) {
       modified: st.lastTimestamp || fileMtime,
       fileMtime,
       messageCount: st.messageCount, textContent: st.textParts.join('\n'),
+      ...messageWindowColumns(st.windows),
       slug: st.slug, customTitle: st.customTitle, aiTitle: st.aiTitle,
       firstTimestamp: st.firstTimestamp, lastTimestamp: st.lastTimestamp,
       headHash,

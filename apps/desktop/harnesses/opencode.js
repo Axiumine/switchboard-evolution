@@ -21,6 +21,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { messageWindowsOf, messageWindowColumns } = require('../message-windows');
 
 const id = 'opencode';
 const label = 'OpenCode';
@@ -318,6 +319,7 @@ function readSessionRow(locator, folder) {
     // The invalidation key: session-cache compares it to listSessionStamps.
     fileMtime: iso(s.time_updated),
     messageCount, textContent: textParts.join('\n'),
+    ...messageWindowColumns(messageWindowsOf(textParts)),
     slug: null, customTitle: null, aiTitle: realTitle(s.title),
   };
 }
