@@ -389,8 +389,8 @@ async function knOpenInFiles(project, folderPath, file, line) {
   filesState(project, folderPath).selected = rel;
   showProjectTab(project, 'files');
   const showing = () => {
-    const ed = typeof projectEditor !== 'undefined' ? projectEditor : null;
-    return ed && ed.projectId === project.id && ed.root === folderPath && ed.rel === rel && ed.panel?.editorView ? ed : null;
+    const ed = typeof projectEditors !== 'undefined' ? projectEditors.get(project.id) : null;
+    return ed && ed.root === folderPath && ed.rel === rel && ed.panel?.editorView ? ed : null;
   };
   for (let i = 0; i < 80; i++) {
     const ed = showing();
