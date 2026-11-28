@@ -405,6 +405,34 @@ test('a resumed session keeps its place', () => {
   assert.deepEqual(groups.map(g => g.key), previousGroups);
 });
 
+test('a session just started goes on top of its group, also with closed cards shown', () => {
+  const places = result => fn('overviewPlaces')(result.groups);
+  const closed = [s('c1', { days: 1 }), s('c2', { days: 2 })];
+  const first = build(closed, { includeClosed: true }, { isOpen: () => false });
+  assert.deepEqual(cardIds(first.groups[0]), ['c1', 'c2']);
+
+  // The render between its launch and its terminal: listed and not open, so a
+  // closed card brought in after the known ones, and given that place.
+  const started = [...closed, s('n', { days: 0 })];
+  const gap = build(started, { includeClosed: true }, { isOpen: () => false, previousOrder: places(first) });
+  assert.deepEqual(cardIds(gap.groups[0]), ['c1', 'c2', 'n']);
+
+  // Its terminal is there and it is new: on top, the known cards in their places.
+  const live = { isOpen: id => id === 'n', isRunning: id => id === 'n' };
+  const onTop = build(started, { includeClosed: true }, { ...live, previousOrder: places(gap), newIds: new Set(['n']) });
+  assert.deepEqual(cardIds(onTop.groups[0]), ['n', 'c1', 'c2']);
+  assert.equal(onTop.groups[0].cards[0].live, true);
+  // From then on it keeps that place, as every card does.
+  const next = build(started, { includeClosed: true }, { ...live, previousOrder: places(onTop) });
+  assert.deepEqual(cardIds(next.groups[0]), ['n', 'c1', 'c2']);
+  // A closed card that turns live without being new (Resume) keeps its place.
+  const resumed = build(started, { includeClosed: true }, { ...live, previousOrder: places(gap) });
+  assert.deepEqual(cardIds(resumed.groups[0]), ['c1', 'c2', 'n']);
+  // Closed cards hidden, nothing gave it a place: on top either way.
+  const hidden = build(started, {}, { ...live, previousOrder: new Map([[first.groups[0].key, []]]), newIds: new Set(['n']) });
+  assert.deepEqual(cardIds(hidden.groups[0]), ['n']);
+});
+
 test('closed sessions a search brings in go after the live ones, and a new live card still goes on top', () => {
   // The closed ones are the most recent: by time alone they would come first.
   const live = [s('live1', { days: 2 }), s('live2', { days: 3 })];

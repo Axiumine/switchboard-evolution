@@ -311,6 +311,13 @@ function overviewGroupOf(by, card, ctx) {
  * (group keys, in the order of the last render, or undefined) the groups'
  * places; `resort` ignores both. Groups by period and status have a fixed
  * order and ignore `previousGroups`.
+ *
+ * `newIds` (a Set, optional) are sessions just started: they go on top of
+ * their group like any new card, even when an earlier render gave them a place.
+ * One did: with closed cards shown, the render between a session's launch and
+ * its terminal sees it listed and not open, a closed card brought in after the
+ * known ones, and its live card would keep that place. A resumed session is
+ * not new and keeps its card's place.
  */
 function buildOverview(sessions, prefs, ctx) {
   const searching = !!ctx.searchIds;
@@ -414,8 +421,13 @@ function buildOverview(sessions, prefs, ctx) {
 
   // Per group: the order of its cards, then the closed ones cut down to the limits.
   const showAllByFilter = searching || overviewFiltersActive(prefs);
+  // A session just started has no place yet, whatever an earlier render gave it.
+  const placesOf = key => {
+    const ids = ctx.previousOrder?.get(key);
+    return ids && ctx.newIds?.size ? ids.filter(id => !ctx.newIds.has(id)) : ids;
+  };
   for (const group of groups) {
-    const ordered = orderCards(group.cards, { sort: prefs.sort, resort: ctx.resort, previousIds: ctx.previousOrder?.get(group.key) });
+    const ordered = orderCards(group.cards, { sort: prefs.sort, resort: ctx.resort, previousIds: placesOf(group.key) });
     const closed = ordered.filter(card => !card.live);
     const hasOpen = closed.length < ordered.length;
     const showAll = showAllByFilter || has(ctx.expanded, group.key);

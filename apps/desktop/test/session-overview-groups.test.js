@@ -200,3 +200,29 @@ test('the page loads the group headers after the other overview scripts', () => 
   assert.ok(body(overviewSource, 'function ensureOverviewGroup(')
     .includes("if (typeof decorateOverviewGroupHeader === 'function') decorateOverviewGroupHeader(header, group);"));
 });
+
+test('a session launched while the page is open is new until the render that puts it on top', () => {
+  const container = () => ({ classList: { contains: name => name === 'terminal-container' } });
+  const entry = id => ({ element: container(), session: { sessionId: id } });
+  const entries = { launched: entry('launched'), resumed: entry('resumed'), restored: entry('restored'), attached: entry('attached') };
+  const context = vm.createContext({
+    Set, WeakSet,
+    ovState: { bornHere: new WeakSet(), newIds: new Set() },
+    openSessions: new Map(Object.entries(entries)),
+    // Launched here: pending, no PTY yet. A terminal from an earlier run: pending, restored.
+    // A terminal running in main, attached now: pending, with its PTY. A resumed session: not pending.
+    pendingSessions: new Map([['launched', {}], ['restored', { restored: true }], ['attached', {}]]),
+    activePtyIds: new Set(['attached']),
+  });
+  vm.runInContext(body(overviewSource, 'function noteNewTerminals('), context);
+  const added = Object.values(entries).map(e => e.element);
+  assert.equal(context.noteNewTerminals([{ addedNodes: added }]), true);
+  assert.deepEqual([...context.ovState.newIds], ['launched']);
+  for (const e of Object.values(entries)) assert.ok(context.ovState.bornHere.has(e));
+
+  // The model is told, and the render forgets them once it has placed them.
+  assert.ok(body(overviewSource, 'function overviewContext(').includes('newIds: ovState.newIds,'));
+  const render = body(overviewSource, 'function renderSessionOverview(');
+  const built = render.indexOf('const model = buildOverview(');
+  assert.ok(built !== -1 && render.indexOf('ovState.newIds.clear();') > built);
+});

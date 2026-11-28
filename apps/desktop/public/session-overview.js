@@ -79,6 +79,7 @@ const ovState = {
   maximized: null, // the entry whose card fills the page
   adopted: new Set(), // ids whose next showSession focuses them here (overviewAdopt)
   bornHere: new WeakSet(), // entries whose terminal was made while the page was open
+  newIds: new Set(), // sessions launched while the page is open, until the render that puts them on top
   exit: null, // { id, shown } while openSessionNormally opens the Projects tab
   layout: null, // what the last render drew, for the layout pass
   results: null, // what the last render counted, for the search's results bar (overviewLastResults)
@@ -313,15 +314,27 @@ function unmountSessionOverview() {
   ovState.maximized = null;
   ovState.adopted.clear();
   ovState.bornHere = new WeakSet();
+  ovState.newIds.clear();
   ovState.layout = null;
   ovState.results = null;
   document.getElementById('grid-toggle-btn')?.classList.remove('active');
 }
 
-/** Terminals made while the page is open (createTerminalEntry adds them to #terminals); true when there are some. */
+/**
+ * Terminals made while the page is open (createTerminalEntry adds them to
+ * #terminals); true when there are some. One made for a session launched just
+ * now (pending, no PTY yet: not a resumed one, nor a terminal from an earlier
+ * run) is new: the next render puts it on top of its group (newIds).
+ */
 function noteNewTerminals(records) {
   const added = records.flatMap(r => [...r.addedNodes]).filter(n => n.classList?.contains('terminal-container'));
-  for (const entry of openSessions.values()) if (added.includes(entry.element)) ovState.bornHere.add(entry);
+  for (const entry of openSessions.values()) {
+    if (!added.includes(entry.element)) continue;
+    ovState.bornHere.add(entry);
+    const id = entry.session?.sessionId;
+    const pending = id ? pendingSessions.get(id) : null;
+    if (pending && !pending.restored && !activePtyIds.has(id)) ovState.newIds.add(id);
+  }
   return added.length > 0;
 }
 
@@ -386,6 +399,8 @@ function overviewContext({ resort }) {
     searchIds: typeof overviewSearch !== 'undefined' && overviewSearch ? overviewSearch.ids : null,
     leftOut: typeof overviewLeftOut !== 'undefined' ? overviewLeftOut : new Set(),
     excludeIds: new Set(),
+    // Sessions just launched: on top, whatever place the render before their terminal gave them.
+    newIds: ovState.newIds,
     previousOrder: resort ? null : ovState.previousOrder,
     previousGroups: resort ? undefined : ovState.previousGroups,
     resort,
@@ -405,6 +420,8 @@ function renderSessionOverview({ resort = false } = {}) {
   if (ovState.terminalsObserver) noteNewTerminals(ovState.terminalsObserver.takeRecords());
   const prefs = ensureOverviewPrefs();
   const model = buildOverview(overviewSessions(), prefs, overviewContext({ resort }));
+  // On top now, they keep that place from here on, as every card does.
+  ovState.newIds.clear();
   // Places are kept for every card the model gave, drawn or not, held back or not.
   ovState.previousOrder = overviewPlaces(model.groups);
   ovState.previousGroups = model.groups.map(group => group.key);
