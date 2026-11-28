@@ -758,16 +758,23 @@ function searchSessionIds(query, sessionIds) {
  * The sessions whose messages (the FTS body) hold `query` literally, without
  * regard to case. Quoted as one phrase, so FTS syntax and LIKE wildcards are
  * plain text; under 3 characters, which the trigram index cannot look up,
- * nothing matches. Null when the index refuses the query.
+ * nothing matches. Null when the index refuses the query, or cannot be read:
+ * the second is logged, as it is no fault of the query.
  */
 function matchSessionBodyIds(query) {
   const text = typeof query === 'string' ? query.trim() : '';
   if (text.length < 3) return [];
   try {
     return stmts.searchSessionBodyIds.all('body:"' + text.replace(/"/g, '""') + '"').map(row => row.id);
-  } catch {
+  } catch (err) {
+    if (!isRefusedFtsQuery(err)) console.warn('[search] The message index could not be read:', err?.message || err);
     return null;
   }
+}
+
+/** What FTS5 says of a query it cannot parse (a NUL in it ends the phrase early). */
+function isRefusedFtsQuery(err) {
+  return err?.code === 'SQLITE_ERROR' && /unterminated string|^fts5: /i.test(String(err.message));
 }
 
 /** matchSessionBodyIds, where a query the index refuses finds nothing. */

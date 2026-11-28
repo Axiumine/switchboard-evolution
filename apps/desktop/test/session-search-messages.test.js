@@ -228,6 +228,26 @@ test('short or odd queries match literally or not at all', () => {
   assert.deepEqual(hits[''], []);
 });
 
+test('a query the index refuses finds nothing quietly; a database that fails says so', () => {
+  const out = runInElectronNode(`
+    const warnings = [];
+    console.warn = (...args) => warnings.push(args.map(String).join(' '));
+    const db = require('./db');
+    // A NUL ends FTS5's phrase early: "unterminated string". No fault of the database.
+    const refused = db.matchSessionBodyIds('\\u0000abc');
+    const quiet = warnings.length;
+    db.closeDb();
+    const failed = db.matchSessionBodyIds('alpha');
+    console.log(JSON.stringify({ refused, quiet, failed, warnings }));
+  `);
+  assert.equal(out.refused, null);
+  assert.equal(out.quiet, 0);
+  // Still null (First and Last fall back to reading every row), but logged.
+  assert.equal(out.failed, null);
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /message index/i);
+});
+
 test('Codex and OpenCode keep their first and last texts the same way', () => {
   const texts = numbered(25);
   const expected = { headTexts: JSON.stringify(texts.slice(0, 20)), tailTexts: JSON.stringify(texts.slice(5)) };
