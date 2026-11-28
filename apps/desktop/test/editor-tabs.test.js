@@ -75,7 +75,11 @@ function setup({ panel = false, project = false, stored = new Map(), drafts = ne
     requestAnimationFrame: () => {},
   });
   vm.runInContext('globalThis.window = globalThis', context);
-  context.addEventListener = (type, callback) => { listeners[type] = callback; };
+  // Every script's listener of a type is called, as a window calls them.
+  context.addEventListener = (type, callback) => {
+    const before = listeners[type];
+    listeners[type] = before ? (event) => { before(event); callback(event); } : callback;
+  };
   context.ViewerPanel = FakePanel;
   context.api = new Proxy({
     getDraft: filePath => drafts.get(filePath) || null,
@@ -122,7 +126,7 @@ function setup({ panel = false, project = false, stored = new Map(), drafts = ne
   const state = id => run('filePanelState').get(id);
   const tabsOf = id => state(id).editors.tabs.map(tab => tab.path);
   const settle = () => new Promise(resolve => setImmediate(resolve));
-  return { context, panels, alerts, answers, stored, drafts, files, state, tabsOf, settle, pages, editor, openIn, pathsOf, labelsOf };
+  return { context, panels, alerts, answers, stored, drafts, files, listeners, state, tabsOf, settle, pages, editor, openIn, pathsOf, labelsOf };
 }
 
 const labels = files => {
@@ -356,4 +360,78 @@ test('a file closed from the list leaves every editor, those not made yet too', 
   assert.equal(tabs.tabs.length, 0);
   assert.deepEqual(Array.from(context.storedEditorTabs('other'), file => file.path), ['/b.js']);
   assert.equal(stored.has('only'), false);
+});
+
+/** The main window with two files of project a open, and a folder of its tree. */
+async function mainWithFiles() {
+  const files = { '/w/a/notes.txt': 'notes', '/w/a/src/main.js': 'code', '/w/a/old.js': 'old', '/w/a/typed.js': 'typed' };
+  const main = setup({ project: true, files });
+  const project = main.context.findTreeProject('a');
+  await main.openIn('a', 'notes.txt');
+  await main.openIn('a', 'src/main.js');
+  await main.openIn('a', 'notes.txt');
+  main.context.filesState(project).expanded.add('src');
+  return { main, project, files };
+}
+
+/** Project a's window, sharing the main window's storage. */
+function filesWindow({ stored, files, drafts }, tab = 'files') {
+  const win = setup({ project: true, stored, files, drafts });
+  win.context.PROJECT_WINDOW = { projectId: 'a', tab };
+  return win;
+}
+
+test('the project\'s Files window opens on the folder, tree and files the main window shows', async () => {
+  const { main, project, files } = await mainWithFiles();
+  // Left in the window the last time: one file saved, one with unsaved text.
+  const own = rel => ({ path: `/w/a/${rel}`, data: { projectId: 'a', root: '/w/a', rel }, used: 9 });
+  main.stored.set('editorTabs:project-window:a', JSON.stringify({ files: [own('old.js'), own('typed.js')] }));
+  main.drafts.set('/w/a/typed.js', { content: 'more', base: 'typed' });
+  const mine = main.stored.get('editorTabs:project:a');
+  main.context.leaveFilesViewForWindow(project);
+
+  const win = filesWindow({ stored: main.stored, files, drafts: main.drafts });
+  assert.ok(win.context.takeFilesViewFromMain(project));
+  assert.deepEqual(win.pathsOf('a'), ['/w/a/notes.txt', '/w/a/src/main.js', '/w/a/typed.js']);
+  assert.equal(win.editor('a').tabs.lastUsed().path, '/w/a/notes.txt');
+  const tree = win.context.filesState(project, '/w/a');
+  assert.deepEqual([...tree.expanded], ['src']);
+  assert.equal(tree.selected, 'notes.txt');
+  assert.equal(win.context.currentFilesRoot(project), '/w/a');
+  assert.equal(main.stored.get('editorTabs:project:a'), mine);
+  // Taken once.
+  assert.equal(win.context.takeFilesViewFromMain(project), null);
+});
+
+test('an open Files window follows the main window, keeping the viewer of a file it has', async () => {
+  const { main, project, files } = await mainWithFiles();
+  const win = filesWindow({ stored: main.stored, files });
+  let drawn = 0;
+  win.context.renderOverview = () => { drawn++; };
+  await win.openIn('a', 'old.js');
+  await win.openIn('a', 'notes.txt');
+  const viewer = win.editor('a').panel;
+  main.context.leaveFilesViewForWindow(project);
+
+  const key = 'projectWindowFiles:a';
+  win.listeners.storage({ key, newValue: main.stored.get(key) });
+  assert.equal(drawn, 1);
+  assert.deepEqual(win.pathsOf('a'), ['/w/a/notes.txt', '/w/a/src/main.js']);
+  assert.equal(win.editor('a').tabs.tabs[0].panel, viewer);
+  assert.equal(win.panels[0].disposed, true);
+  assert.equal(main.stored.has(key), false);
+});
+
+test('a window on another tab, or opened long after, leaves the main window\'s view alone', async () => {
+  const { main, project, files } = await mainWithFiles();
+  main.context.leaveFilesViewForWindow(project);
+  const key = 'projectWindowFiles:a';
+  assert.equal(filesWindow({ stored: main.stored, files }, 'git').context.takeFilesViewFromMain(project), null);
+  assert.equal(main.context.takeFilesViewFromMain(project), null);
+  assert.equal(main.stored.has(key), true);
+
+  main.stored.set(key, JSON.stringify({ ...JSON.parse(main.stored.get(key)), at: Date.now() - 120000 }));
+  const late = filesWindow({ stored: main.stored, files });
+  assert.equal(late.context.takeFilesViewFromMain(project), null);
+  assert.equal(main.stored.has(key), false);
 });

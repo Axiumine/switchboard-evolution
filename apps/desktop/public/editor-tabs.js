@@ -320,6 +320,43 @@ class EditorTabs {
     this.el.remove();
   }
 
+  /**
+   * Show the open files of another editor, as it remembers them: in its order,
+   * its shown one as the last used. A file already open keeps its viewer; a tab
+   * the other editor does not have stays, after them, only for its unsaved
+   * changes. No tab is shown until the host activates one.
+   */
+  mirror(files) {
+    if (this.active) this._saveScroll(this.active);
+    const own = this.tabs;
+    this.tabs = [];
+    this.active = null;
+    this._used = 0;
+    for (const file of Array.isArray(files) ? files : []) {
+      const tab = own.find(t => t.path === file?.path);
+      if (!tab) { this._addRemembered(file); continue; }
+      if (this.tabs.includes(tab)) continue;
+      Object.assign(tab.data, file.data);
+      tab.used = Number(file.used) || 0;
+      this._used = Math.max(this._used, tab.used);
+      this.tabs.push(tab);
+    }
+    for (const tab of own) {
+      if (this.tabs.includes(tab)) continue;
+      if (this.isDirty(tab)) {
+        tab.used = 0;
+        this.tabs.push(tab);
+      } else {
+        tab.panel?.dispose();
+        tab.element?.remove();
+      }
+    }
+    for (const tab of this.tabs) if (tab.element) tab.element.hidden = true;
+    this.emptyEl.hidden = false;
+    this._persist();
+    this.render();
+  }
+
   setStorageKey(storageKey) {
     if (this.storageKey) localStorage.removeItem(this.storageKey);
     this.storageKey = storageKey;
@@ -412,15 +449,18 @@ class EditorTabs {
 
   _restore() {
     if (!this.storageKey) return;
-    for (const file of storedEditorTabs(this.storageKey)) {
-      if (this.find(file.path)) continue;
-      const used = Number(file.used) || 0;
-      this._used = Math.max(this._used, used);
-      this.tabs.push({
-        path: file.path, data: { ...file.data }, used, loaded: false,
-        kept: !!window.api.getDraft?.(file.path), panel: null, element: null,
-      });
-    }
+    for (const file of storedEditorTabs(this.storageKey)) this._addRemembered(file);
+  }
+
+  /** A tab for a remembered file, read when it is first shown. */
+  _addRemembered(file) {
+    if (typeof file?.path !== 'string' || !file.path || this.find(file.path)) return;
+    const used = Number(file.used) || 0;
+    this._used = Math.max(this._used, used);
+    this.tabs.push({
+      path: file.path, data: { ...file.data }, used, loaded: false,
+      kept: !!window.api.getDraft?.(file.path), panel: null, element: null,
+    });
   }
 }
 
