@@ -73,3 +73,14 @@ test('a session on a phone screen keeps being seen when its id changes', () => {
   assert.deepEqual(events, [['remote-viewing', ['temp-id']], ['remote-viewing', ['real-id']]]);
   assert.deepEqual(notices.viewingIds(), ['real-id']);
 });
+
+test('a phone with the session on screen is told apart from a session window', () => {
+  const notices = createSessionNotices({ emit() {} });
+  const phone = { name: 'phone' };
+  notices.setViewing('session-window:3', 'windowed');
+  notices.setViewing(phone, 'on-phone');
+  assert.equal(notices.viewedByPhone('on-phone'), true);
+  assert.equal(notices.viewedByPhone('windowed'), false);
+  notices.setViewing(phone, null);
+  assert.equal(notices.viewedByPhone('on-phone'), false);
+});

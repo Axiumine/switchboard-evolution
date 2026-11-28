@@ -15,7 +15,7 @@ The app talks directly to the Switchboard Evolution desktop app running on your 
 - **Fit to phone** resizes the session's terminal to the phone while you look at it; the computer gets its own size back when you leave.
 - Starts a new Claude, Codex, OpenCode or terminal session in a project, track or folder, with a first message and the same options as the desktop; resumes (with or without changed options) and forks (not OpenCode sessions yet).
 - Renames, pins, moves to a project, marks as read or unread, archives or stops a session (long-press a row).
-- Tells you, while the app is open, when another session needs you or finishes its turn.
+- Shows a system notification when a session needs you, finishes its turn or wants to change a file, also while the app is in the background; a tap opens it. On Android a foreground service keeps the connection to the computer for that, with a notification of its own and some battery use (Settings › Computer turns either off). Everything goes straight from your computer to your phone: no push service.
 - **Projects**: active, snoozed and done; a project's plan and todos to tick, add to and start a session on; its tracks, sessions, schedules (run now, pause, edit) and folders; snooze, finish, rename, add tracks and attach folders, in place or as a worktree (from the ⋯ of a project, or by long-pressing it in the list). Starred projects, and each project's pinned sessions, go in the order you drag them into by the handle at the end of their row.
 - **Files**: browse a project's folders with file-type icons, read and edit text and Markdown, look at images, and search and replace across a folder (query with match case, whole word and regular expression, files to include and exclude, results by file, replace one match, one file or all).
 - **Git**: what changed in each repository, as a list or a tree, with diffs, and Merge Changes, Staged Changes and Changes with stage and unstage for a file, a hunk or the lines you pick; the **Git Graph** with branches, tags, stashes and uncommitted changes, each commit's files and diffs, and its actions (check out, merge, rebase, push, pull, fetch, branch, tag, cherry-pick, revert, reset, stash), asking first for the ones that lose work.
@@ -43,7 +43,7 @@ You need Switchboard Evolution with the remote-access server on the computer, an
 3. In Switchboard Evolution on the computer, turn on the **Mobile app access** switch in the sidebar header. With no phone paired yet, it shows a pairing QR code.
 4. In the app, tap **Scan the pairing code** and scan that QR code, then **Pair**.
 
-In Expo Go, scan the pairing code from inside the app: the phone's own camera cannot open `switchboard-e://` links, because Expo Go does not register that scheme. A development build (`npx expo run:ios` / `npx expo run:android`) does.
+Expo Go does not include the background connection (`modules/switchboard-keepalive`): there, notifications come only while Expo Go keeps the app running. In Expo Go, scan the pairing code from inside the app: the phone's own camera cannot open `switchboard-e://` links, because Expo Go does not register that scheme. A development build (`npx expo run:ios` / `npx expo run:android`) does.
 
 The pairing code works once and expires after two minutes. To pair again, right-click the switch on the computer and choose **Pair a phone…**. To remove a phone, right-click the switch and choose **Phones and port…**.
 

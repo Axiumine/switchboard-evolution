@@ -255,6 +255,8 @@ export class RemoteClient {
   private stopped = false;
   private connecting = false;
   private lastAddress: string | undefined;
+  /** Counts the connections tried: one that was given up on is no longer heard. */
+  private attempt = 0;
   status: ConnectionStatus = { state: 'connecting' };
 
   constructor(private readonly options: ClientOptions) {}
@@ -271,14 +273,15 @@ export class RemoteClient {
     if (this.connection || this.stopped || this.connecting) return;
     this.connecting = true;
     this.setStatus({ state: 'connecting' });
+    const attempt = ++this.attempt;
     try {
       const connection = await connectToDesktop(this.options.link, {
         device: this.options.device,
         connectTimeoutMs: this.options.connectTimeoutMs,
         socketFactory: this.options.socketFactory,
         preferAddress: this.lastAddress,
-        onMessage: (message) => this.handleMessage(message),
-        onClose: (code, reason) => this.handleClose(code, reason),
+        onMessage: (message) => { if (attempt === this.attempt) this.handleMessage(message); },
+        onClose: (code, reason) => { if (attempt === this.attempt) this.handleClose(code, reason); },
       });
       if (this.stopped) { connection.ws.close(1000, 'Closed'); return; }
       this.connection = connection;
@@ -340,6 +343,18 @@ export class RemoteClient {
       this.pending.set(id, { resolve, reject, timer });
       connection.ws.send(connection.channel.seal({ id, method, params }));
     });
+  }
+
+  /**
+   * Give up on a connection that answers nothing (a network changed under it)
+   * and connect again. Its socket may take long to notice: it is not waited for.
+   */
+  restart() {
+    const connection = this.connection;
+    if (!connection || this.stopped) return;
+    this.attempt += 1;
+    this.handleClose(1006, 'No answer');
+    try { connection.ws.close(1000, 'No answer'); } catch {}
   }
 
   /** Close for good (forgetting the computer, or leaving the app). */

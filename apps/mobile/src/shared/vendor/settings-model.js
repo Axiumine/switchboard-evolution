@@ -121,6 +121,8 @@
       help: 'Where new projects are created. Existing projects stay where they are.', default: '', folder: false, maxLength: 4096 },
     { key: 'mcpEmulation', tab: 'application', section: 'Application', kind: 'bool', label: 'IDE Emulation',
       help: 'Emulate an IDE so Claude can open files and diffs in a side panel. Disable to use your own IDE instead. Changes take effect for new sessions only.', default: false, folder: false },
+    { key: 'desktopNotifications', tab: 'application', section: 'Application', kind: 'bool', label: 'Desktop Notifications',
+      help: 'A system notification when a session needs you or finishes while you are not looking at it. Click it to open the session.', default: true, folder: false },
     { key: 'editorPrefs', tab: 'editor', section: 'Editor', kind: 'editorPrefs', label: 'Editor', help: '', default: editorPrefDefaults(), folder: false },
     { key: 'languageServers', tab: 'editor', section: 'Editor', kind: 'bool', label: 'Language Servers',
       help: EDITOR_PREFS.find(p => p.name === 'languageServers').help, default: true, folder: false },

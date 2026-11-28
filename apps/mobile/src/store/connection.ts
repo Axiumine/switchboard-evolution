@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { pairWithDesktop, RemoteClient, type ConnectionStatus, type RouteName } from '@/remote/client';
+import { ConnectionError, pairWithDesktop, RemoteClient, type ConnectionStatus, type RouteName } from '@/remote/client';
 import { queryClient } from '@/remote/query';
 import type { PairingPayload } from '@/remote/pairing';
 import { applyDiffEvent, diffsFrom, type PendingDiffs } from '@/diffs/model';
@@ -37,7 +37,12 @@ type ConnectionStore = {
   forget(): Promise<void>;
   /** Reconnect now instead of waiting for the next retry. */
   reconnect(): void;
+  /** Ask the computer something small, and connect again when nothing answers. */
+  checkConnection(): void;
 };
+
+/** How long the computer has to answer a check. */
+const CHECK_TIMEOUT_MS = 15_000;
 
 let client: RemoteClient | null = null;
 let foreground = true;
@@ -240,6 +245,19 @@ export const useConnection = create<ConnectionStore>((set, get) => {
 
     reconnect() {
       if (client && get().status.state === 'offline') client.start();
+    },
+
+    checkConnection() {
+      const checked = client;
+      if (!checked) return;
+      if (get().status.state !== 'online') {
+        get().reconnect();
+        return;
+      }
+      checked.request('get-app-version', [], { timeoutMs: CHECK_TIMEOUT_MS }).catch((err) => {
+        // An error the computer sends back is an answer too.
+        if (err instanceof ConnectionError && client === checked) checked.restart();
+      });
     },
 
     async setRoute(route) {

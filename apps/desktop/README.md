@@ -63,7 +63,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 - **Session browser** — Every session from every supported CLI, in the Session Overview (grouped by folder, project, CLI and more) and in each project's sessions drawer, searchable by content.
 - **Fork and resume** — Branch off from any point in a session's history.
 - **Built-in terminal** — Connect to running sessions or launch new ones without leaving the app. `Ctrl` + mouse wheel (or `Cmd` + wheel on macOS, or a touchpad pinch) makes the terminals' text larger or smaller, apart from the app's own zoom in the View menu.
-- **Status notifications** — In-app alerts when a session is waiting for permission approval or user input.
+- **Status notifications** — A system notification, and marks in the app, when a session is waiting for permission approval or user input, or finishes while you are not looking at it.
 - **Session Overview** — A page of live terminals for all open sessions, with its own filters, sorting, groups, search in messages, and five layouts.
 - **Split panes** — Split a session's page like tmux: the new half starts a session like the one you split.
 - **Session windows** — Any session in a window of its own, and back.
@@ -116,6 +116,7 @@ Switchboard watches every session in the background, whichever CLI runs it, and 
 - **Waiting for input** — A session that needs your response is highlighted.
 - **Permission approval** — A session blocked on a permission grant or approval gets a badge immediately. Switchboard reads each CLI's own wording, so Claude's permission prompts, Codex's approval requests and OpenCode's permission and question prompts all register.
 - **Activity indicators** — See which sessions are running, idle, or finished.
+- **System notifications** — When nobody is looking at a session that needs you or has finished (its window is not focused, shows another session, or you have been away for two minutes), the computer shows a notification, and so does each paired phone. A click opens the session; opening it, answering it or marking it as read takes the notification back. Turn the computer's off in Settings › Application › Desktop Notifications.
 
 ### Session Overview
 

@@ -67,6 +67,14 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#8088ff",
+          "enableRemoteNotifications": false
+        }
+      ],
       "./plugins/with-display-metrics",
       "./plugins/with-multi-window"
     ],

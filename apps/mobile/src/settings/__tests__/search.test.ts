@@ -20,6 +20,7 @@ const computer: ComputerInfo = {
   hello: { appVersion: '1.21.0', deviceName: 'Demo phone' },
   offline: false,
   mobileVersion: '1.21.0',
+  keepAlive: true,
 };
 
 const global: GlobalSettingsInfo = {
@@ -114,9 +115,9 @@ describe('settingsEntries', () => {
   });
 
   it('lists the Computer rows the tab shows in its state', () => {
-    expect(ids(all, 'computer')).toEqual(['desktop-version', 'mobile-version', 'source', 'device', 'addresses', 'paired', 'pair-again', 'forget']);
-    const away = { computer: { ...computer, routes: ['Local network', 'ngrok'], hello: null, offline: true } };
-    expect(ids(away, 'computer')).toEqual(['route', 'desktop-version', 'mobile-version', 'source', 'addresses', 'paired', 'reconnect', 'pair-again', 'forget']);
+    expect(ids(all, 'computer')).toEqual(['desktop-version', 'mobile-version', 'source', 'device', 'addresses', 'paired', 'notifications', 'keep-connected', 'pair-again', 'forget']);
+    const away = { computer: { ...computer, routes: ['Local network', 'ngrok'], hello: null, offline: true, keepAlive: false } };
+    expect(ids(away, 'computer')).toEqual(['route', 'desktop-version', 'mobile-version', 'source', 'addresses', 'paired', 'notifications', 'reconnect', 'pair-again', 'forget']);
   });
 
   it('has CBM\'s settings only while the program can be used, and never the Lens', () => {

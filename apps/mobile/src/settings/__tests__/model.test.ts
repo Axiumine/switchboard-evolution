@@ -57,13 +57,13 @@ describe('fieldsFor', () => {
   it('Application: the desktop\'s fields, in order', () => {
     expect(fieldsFor('application').map((s) => s.section)).toEqual(['Application']);
     expect(fieldsFor('application')[0].fields.map((f) => f.label)).toEqual([
-      'Terminal Theme', 'Accent Color', 'Shell Profile', 'Max Visible Sessions', 'Session Max Age (days)', 'Terminal Engine', 'Projects Folder', 'IDE Emulation',
+      'Terminal Theme', 'Accent Color', 'Shell Profile', 'Max Visible Sessions', 'Session Max Age (days)', 'Terminal Engine', 'Projects Folder', 'IDE Emulation', 'Desktop Notifications',
     ]);
   });
 
   it('Application: Project Templates between Projects Folder and IDE Emulation, as on the desktop', () => {
     const rows = fieldsFor('application')[0].fields.flatMap((f) => (f.key === TEMPLATES_AFTER ? [f.label, 'Project Templates'] : [f.label]));
-    expect(rows.slice(-3)).toEqual(['Projects Folder', 'Project Templates', 'IDE Emulation']);
+    expect(rows.slice(-4)).toEqual(['Projects Folder', 'Project Templates', 'IDE Emulation', 'Desktop Notifications']);
   });
 
   it('Editor: the five switches, one per preference', () => {

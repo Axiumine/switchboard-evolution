@@ -15,6 +15,8 @@ import { SEARCH_GROUPS, searchParts, searchSettings, searchStatus } from '@/shar
 import { useConnection } from '@/store/connection';
 import { colors, spacing } from '@/theme';
 
+import { keepAliveAvailable } from '../../../modules/switchboard-keepalive';
+
 /** The search box above Settings' tabs. */
 export function SettingsSearchBar({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
@@ -59,6 +61,7 @@ function useSettingsEntries(tabs: readonly { key: PhoneSettingsTab; label: strin
       hello: hello ? { appVersion: hello.appVersion, deviceName: hello.device.name } : null,
       offline: status.state === 'offline',
       mobileVersion: Constants.expoConfig?.version ?? null,
+      keepAlive: keepAliveAvailable,
     } : undefined,
     global: global.data,
     binary: binary.data,

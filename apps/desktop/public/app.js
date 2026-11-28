@@ -67,6 +67,7 @@ function setActiveSession(id) {
   // The main window's session to restore is the main window's: a session
   // window's file panel and buttons follow its session, nothing is saved.
   if (PROJECT_WINDOW) return;
+  if (!SESSION_WINDOW) globalThis.window?.api?.setFrontSession?.(id);
   if (id && !SESSION_WINDOW) {
     sessionStorage.setItem(ACTIVE_SESSION_KEY, id);
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
@@ -1680,6 +1681,12 @@ if (!PROJECT_WINDOW && !SESSION_WINDOW) {
   window.api.onProjectWindowRun((name, args) => {
     const run = { openSession, showSession, launchNewSession, openRawTerminalSession }[name];
     if (typeof run === 'function' && Array.isArray(args)) run(...args);
+  });
+  // A session's system notification was clicked (main.js, openAlertSession).
+  window.api.onOpenSessionAlert?.((sessionId) => {
+    const session = sessionMap.get(sessionId);
+    if (session) openSession(session);
+    else if (openSessions.has(sessionId)) showSession(sessionId);
   });
 }
 

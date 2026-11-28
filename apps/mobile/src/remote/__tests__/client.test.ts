@@ -129,3 +129,23 @@ test('a dropped connection comes back on its own, through the address that worke
   expect(desktop.connections).toEqual(['192.168.1.20']);
   client.stop();
 });
+
+test('a connection given up on is replaced, and the old one is not heard any more', async () => {
+  const desktop = new FakeDesktop();
+  const device = await pairedPhone(desktop);
+  const events: any[] = [];
+  const client = new RemoteClient({ link: linkTo(desktop), device, socketFactory: desktop.factory, onEvent: (e) => events.push(e) });
+  await client.start();
+  const waiting = client.request('get-usage');
+  client.restart();
+  await expect(waiting).rejects.toThrow('The connection was lost');
+  expect(client.status).toMatchObject({ state: 'offline', retryInMs: 1000 });
+  await until(() => client.status.state === 'online');
+  // The old socket's close arrives after the new connection: it changes nothing.
+  await wait(20);
+  expect(client.status.state).toBe('online');
+  desktop.emit('cli-busy-state', 's1', true);
+  await wait(10);
+  expect(events).toEqual(['cli-busy-state']);
+  client.stop();
+});

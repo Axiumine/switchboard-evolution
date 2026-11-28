@@ -32,6 +32,14 @@ function createSessionNotices({ emit }) {
     return [...new Set(viewing.values())].sort();
   }
 
+  /** Whether a paired phone has the session on its screen (a session window is a client too). */
+  function viewedByPhone(sessionId) {
+    for (const [client, id] of viewing) {
+      if (id === sessionId && !String(client).startsWith('session-window:')) return true;
+    }
+    return false;
+  }
+
   /** Tell the window when the set of sessions on a phone screen changes. */
   function changeViewing(change) {
     const before = viewingIds().join('\n');
@@ -68,7 +76,7 @@ function createSessionNotices({ emit }) {
     });
   }
 
-  return { publish, snapshot: () => notices, setRead, setViewing, clientClosed, viewingIds, eventSink };
+  return { publish, snapshot: () => notices, setRead, setViewing, clientClosed, viewingIds, viewedByPhone, eventSink };
 }
 
 module.exports = { createSessionNotices };

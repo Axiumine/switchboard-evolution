@@ -42,6 +42,8 @@ export interface ComputerInfo {
   /** Offline, the tab offers to reconnect. */
   offline: boolean;
   mobileVersion: string | null;
+  /** This build can stay connected in the background (Android). */
+  keepAlive: boolean;
 }
 
 /** What has been read of each tab; a tab whose data is missing gives no rows. */
@@ -73,7 +75,7 @@ function rowsOf(tab: PhoneSettingsTab, sources: SettingsSources): Row[] {
   }
 }
 
-function computerRows({ desktop, routes, hello, offline, mobileVersion }: ComputerInfo): Row[] {
+function computerRows({ desktop, routes, hello, offline, mobileVersion, keepAlive }: ComputerInfo): Row[] {
   const rows: (Row | false)[] = [
     routes.length > 1 && { id: 'route', title: COMPUTER.route, description: routes.join(', ') },
     { id: 'desktop-version', title: COMPUTER.desktopVersion, description: desktopVersionText(hello?.appVersion) },
@@ -82,6 +84,8 @@ function computerRows({ desktop, routes, hello, offline, mobileVersion }: Comput
     !!hello && { id: 'device', title: COMPUTER.device, description: hello.deviceName },
     { id: 'addresses', title: COMPUTER.addresses, description: addressesText(desktop) },
     { id: 'paired', title: COMPUTER.paired, description: pairedText(desktop) },
+    { id: 'notifications', title: COMPUTER.notifications, description: COMPUTER.notificationsHelp },
+    keepAlive && { id: 'keep-connected', title: COMPUTER.keepConnected, description: COMPUTER.keepConnectedHelp },
     offline && { id: 'reconnect', title: COMPUTER.reconnect },
     { id: 'pair-again', title: COMPUTER.pairAgain },
     { id: 'forget', title: COMPUTER.forget },

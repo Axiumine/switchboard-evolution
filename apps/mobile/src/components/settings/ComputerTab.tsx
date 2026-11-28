@@ -5,11 +5,15 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { DonateBox } from '@/components/DonateBox';
 import { RoutePicker } from '@/components/RoutePicker';
+import { SwitchRow } from '@/components/form';
 import { SettingRow, SettingsScroll } from '@/components/settings/found';
 import { routesOffered } from '@/remote/client';
 import { COMPUTER, addressesText, desktopVersionText, mobileVersionText, pairedText } from '@/settings/rows';
 import { useConnection } from '@/store/connection';
+import { useNotificationPrefs } from '@/store/notificationPrefs';
 import { colors, spacing } from '@/theme';
+
+import { keepAliveAvailable } from '../../../modules/switchboard-keepalive';
 
 const REPOSITORY = `https://${COMPUTER.sourceAddress}`;
 /** This app's version as it was built (app.json's, embedded in the build). */
@@ -29,7 +33,8 @@ function describe(status: ReturnType<typeof useConnection.getState>['status']): 
  * Settings' Computer tab: the paired computer with its dot (green while connected),
  * the way it is reached (local network, Cloudflare, ngrok), the versions of
  * the paired Switchboard Evolution and of this app side by side, the source
- * code on GitHub, forgetting the computer, and the donation box.
+ * code on GitHub, the phone's notifications, forgetting the computer, and the
+ * donation box.
  */
 export function ComputerTab() {
   const desktop = useConnection((s) => s.desktop);
@@ -90,6 +95,7 @@ export function ComputerTab() {
       {hello ? <Row id="device" label={COMPUTER.device} value={hello.device.name} /> : null}
       <Row id="addresses" label={COMPUTER.addresses} value={addressesText(desktop)} />
       <Row id="paired" label={COMPUTER.paired} value={pairedText(desktop)} />
+      <Notifications />
       {status.state === 'offline' ? (
         <SettingRow id="reconnect">
           <Pressable onPress={reconnect} style={styles.button} accessibilityRole="button">
@@ -110,6 +116,31 @@ export function ComputerTab() {
       {/* The donation box of the Projects tab, always here and without its X. */}
       <DonateBox style={styles.donate} />
     </SettingsScroll>
+  );
+}
+
+/** The phone's own notification switches, and the way out when Android blocks them. */
+function Notifications() {
+  const { enabled, background, allowed, setEnabled, setBackground } = useNotificationPrefs();
+  return (
+    <>
+      <SettingRow id="notifications" style={styles.row}>
+        <SwitchRow label={COMPUTER.notifications} help={COMPUTER.notificationsHelp} value={enabled} onChange={setEnabled} />
+        {enabled && allowed === false ? (
+          <>
+            <Text style={styles.blocked}>{COMPUTER.notificationsBlocked}</Text>
+            <Pressable onPress={() => { Linking.openSettings().catch(() => {}); }} accessibilityRole="button">
+              <Text style={[styles.value, styles.link]}>{COMPUTER.openSystemSettings}</Text>
+            </Pressable>
+          </>
+        ) : null}
+      </SettingRow>
+      {keepAliveAvailable ? (
+        <SettingRow id="keep-connected" style={styles.row}>
+          <SwitchRow label={COMPUTER.keepConnected} help={COMPUTER.keepConnectedHelp} value={enabled && background} disabled={!enabled} onChange={setBackground} />
+        </SettingRow>
+      ) : null}
+    </>
   );
 }
 
@@ -135,6 +166,7 @@ const styles = StyleSheet.create({
   value: { color: colors.text, fontSize: 15 },
   faint: { color: colors.textFaint },
   link: { color: colors.accent },
+  blocked: { color: colors.attention, fontSize: 13 },
   pressed: { opacity: 0.7 },
   // One card, two halves: the computer's version and this app's.
   versions: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 10, padding: spacing.md, gap: spacing.md },

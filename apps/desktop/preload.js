@@ -348,6 +348,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('remote-mark-read', (_event, sessionId, read) => callback(sessionId, read));
   },
   publishSessionNotices: (notices) => ipcRenderer.send('session-notices', notices),
+  // The session in front in the main window: its notifications are not needed.
+  setFrontSession: (sessionId) => ipcRenderer.send('front-session', sessionId),
+  // A session's notification was clicked.
+  onOpenSessionAlert: (callback) => {
+    ipcRenderer.on('open-session-alert', (_event, sessionId) => callback(sessionId));
+  },
   onStatusUpdate: (callback) => {
     ipcRenderer.on('status-update', (_event, text, type) => callback(text, type));
   },

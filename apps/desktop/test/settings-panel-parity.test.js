@@ -31,6 +31,7 @@ const PANEL_IDS = {
   terminalEngine: 'sv-terminal-engine',
   projectsRoot: 'sv-projects-root',
   mcpEmulation: 'sv-mcp-emulation',
+  desktopNotifications: 'sv-desktop-notifications',
   disabledHarnesses: 'sv-harness-toggle',
 };
 // editor-settings.js draws these, in the Editor tab.

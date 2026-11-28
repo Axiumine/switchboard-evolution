@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu, webContents } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, screen, session: electronSession, shell, ShareMenu, webContents } = require('electron');
 // `--help` and `--version` answer and exit here, before anything below runs (cli-flags.js).
 require('./cli-flags').answerCliFlags(process.argv, app);
 // Capture every IPC handler as it is registered, so the remote-access server
@@ -24,6 +24,8 @@ const { markBusy, markIdle, applyStatusReport, takeStatusRecords } = require('./
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
 const { createSessionNotices } = require('./session-notices');
+const { createSessionAlerts } = require('./session-alerts');
+const { createLookingCheck, createDesktopNotifications } = require('./desktop-notifications');
 const { createSessionWindows } = require('./session-windows');
 const { listFolders, createFolder, createPhoneFiles } = require('./remote-files');
 const { planLineText } = require('./remote-plan');
@@ -61,6 +63,9 @@ if (process.env.SWITCHBOARD_DATA_DIR) {
     log.warn(`[startup] could not copy the settings of OmniboardV: ${err.message}`);
   }
 }
+
+// Windows shows an app's notifications under this id (package.json, build.appId).
+if (process.platform === 'win32') app.setAppUserModelId?.('io.github.vivi7.switchboard-e');
 
 log.transports.file.level = app.isPackaged ? 'info' : 'debug';
 log.transports.console.level = app.isPackaged ? 'info' : 'debug';
@@ -1945,6 +1950,7 @@ const SETTING_DEFAULTS = {
   sidebarWidth: 340,
   terminalTheme: 'switchboard',
   mcpEmulation: false,
+  desktopNotifications: true,
   shellProfile: 'auto',
   // Codex equivalents of the permission settings above. Kept separate because
   // the vocabularies do not map: codex has no permission modes, and Claude has
@@ -2952,7 +2958,10 @@ function releaseRemoteFit(session, client) {
 // Unread and needs-you marks, and what phones have on screen.
 const sessionNotices = createSessionNotices({ emit });
 addSink(sessionNotices.eventSink);
-ipcMain.on('session-notices', (_event, notices) => sessionNotices.publish(notices));
+ipcMain.on('session-notices', (_event, notices) => {
+  sessionNotices.publish(notices);
+  sessionAlerts.noticesChanged(notices);
+});
 
 // --- A session in a window of its own (session-windows.js) ---
 // index.html?sessionWindow=<id>, opened from the main window, at its size.
@@ -2967,6 +2976,62 @@ ipcMain.handle('close-session-window', (_event, sessionId) => sessionWindows.clo
 ipcMain.handle('session-window-run', (event, name, args) => sessionWindows.run(event?.sender, name, args));
 ipcMain.handle('move-session-to-window', (event, sessionId, windowId) => sessionWindows.move(event?.sender, sessionId, windowId));
 ipcMain.on('session-window-viewing', (event, sessionId) => sessionWindows.viewing(event?.sender, sessionId));
+
+// A session that needs you, or finishes, while nobody looks at it: a system
+// notification here, and one on each paired phone (session-alerts.js).
+let frontSessionId = null; // the session in front in the main window
+const isLookingAtSession = createLookingCheck({
+  powerMonitor,
+  focusedWindow: () => BrowserWindow.getFocusedWindow(),
+  mainWindow: () => mainWindow,
+  frontSessionId: () => frontSessionId,
+  sessionWindow: (sessionId) => sessionWindows.windowFor(sessionId),
+});
+const desktopNotifications = createDesktopNotifications({
+  Notification,
+  enabled: () => (getSetting('global') || {}).desktopNotifications !== false,
+  open: openAlertSession,
+  log,
+});
+const sessionAlerts = createSessionAlerts({
+  emit,
+  titleOf: alertTitle,
+  isLooking: isLookingAtSession,
+  onPhone: sessionNotices.viewedByPhone,
+  show: desktopNotifications.show,
+  close: desktopNotifications.close,
+});
+addSink(sessionAlerts.eventSink);
+ipcMain.on('front-session', (event, sessionId) => {
+  if (!mainWindow || event?.sender !== mainWindow.webContents) return;
+  frontSessionId = typeof sessionId === 'string' ? sessionId : null;
+  sessionAlerts.refresh();
+});
+app.on('browser-window-focus', () => sessionAlerts.refresh());
+
+/** The session's name as the lists show it, on one short line. */
+function alertTitle(sessionId) {
+  const row = getCachedSession(sessionId);
+  const name = getMeta(sessionId)?.name || row?.aiTitle || row?.summary || liveSession(sessionId)?._cliTitle || '';
+  return String(name).replace(/<\/?[a-zA-Z][^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+/** A notification was clicked: the window that shows the session comes forward. */
+function openAlertSession(sessionId) {
+  sessionAlerts.read(sessionId);
+  const own = sessionWindows.windowFor(sessionId);
+  if (own) {
+    bringForward(own);
+    return;
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  showWindow(mainWindow);
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  mainWindow.webContents.send('open-session-alert', sessionId);
+}
 
 // A phone's change to a line of the plan, only if the line still holds the
 // text the phone saw there (remote-plan.js).
@@ -3015,9 +3080,16 @@ const remoteLocalMethods = {
     return size || (session?.pty ? { cols: session.pty.cols, rows: session.pty.rows } : null);
   },
   'get-session-notices': () => sessionNotices.snapshot(),
-  'mark-read': (_client, sessionId) => sessionNotices.setRead(sessionId, true),
+  'mark-read': (_client, sessionId) => {
+    sessionAlerts.read(sessionId);
+    return sessionNotices.setRead(sessionId, true);
+  },
   'mark-unread': (_client, sessionId) => sessionNotices.setRead(sessionId, false),
-  'set-viewing': (client, sessionId) => sessionNotices.setViewing(client, sessionId || null),
+  'set-viewing': (client, sessionId) => {
+    if (sessionId) sessionAlerts.read(sessionId);
+    return sessionNotices.setViewing(client, sessionId || null);
+  },
+  'get-session-alerts': () => sessionAlerts.snapshot(),
   'list-pending-diffs': () => listPendingDiffs(),
   'run-schedule': (_client, scheduleId) => sessionLauncher.runSchedule(scheduleId),
   'list-folders': (_client, dir, hidden) => listFolders(dir || undefined, { hidden: !!hidden }),

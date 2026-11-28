@@ -91,6 +91,9 @@ allow('mark-read', [isId], { local: true });
 allow('mark-unread', [isId], { local: true });
 // The session on the phone's screen (or null), which then counts as seen.
 allow('set-viewing', [optional(isId)], { local: true });
+// The alerts that stand (session-alerts.js): a phone that connects asks for
+// the ones it missed.
+allow('get-session-alerts', [], { local: true });
 
 // IDE diffs from sessions started with IDE emulation. The first answer wins,
 // from the window or any phone; editing the change stays on the desktop.
@@ -256,6 +259,9 @@ const EVENTS = new Set([
   'session-forked',
   'project-plan-changed',
   'session-notices-changed',
+  // A session that needs you or finished while nobody looked, and its end.
+  'session-alert',
+  'session-alert-cleared',
   'mcp-open-diff',
   'mcp-close-tab',
   'mcp-close-all-diffs',

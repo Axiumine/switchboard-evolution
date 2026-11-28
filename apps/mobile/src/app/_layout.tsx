@@ -6,7 +6,6 @@ import { useEffect, type ReactNode } from 'react';
 import { AppState, StyleSheet, View } from 'react-native';
 import { KeyboardProvider, useKeyboardState } from 'react-native-keyboard-controller';
 
-import { AttentionToast } from '@/components/AttentionToast';
 import { DownloadBar } from '@/components/files/DownloadBar';
 import { NoteFloating } from '@/components/notes/NoteFloating';
 import { SyncBar } from '@/components/SyncBar';
@@ -15,6 +14,7 @@ import { AppStack as Stack } from '@/layout/AppStack';
 import { BottomInsetTaken } from '@/layout/bottomInset';
 import { SidebarDivider } from '@/layout/SidebarDivider';
 import { isDuoModel } from '@/layout/hinge';
+import { NotificationTaps } from '@/notifications/NotificationTaps';
 import { queryClient } from '@/remote/query';
 import { useConnection } from '@/store/connection';
 import { useDonateUsage } from '@/store/donate';
@@ -94,7 +94,7 @@ export default function RootLayout() {
           </Stack>
           <SidebarDivider />
         </WithDownloadBar>
-        <AttentionToast />
+        <NotificationTaps />
         <SyncBar />
         {/* Over every screen, and kept through navigation. */}
         <NoteFloating />

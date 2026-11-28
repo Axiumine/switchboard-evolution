@@ -42,6 +42,7 @@
     terminalEngine: 'sv-terminal-engine',
     projectsRoot: 'sv-projects-root',
     mcpEmulation: 'sv-mcp-emulation',
+    desktopNotifications: 'sv-desktop-notifications',
   };
 
   // What a field shows when neither the settings nor the app's defaults have a value.
@@ -49,6 +50,7 @@
     permissionMode: '', worktree: false, worktreeName: '', chrome: false, addDirs: '',
     codexSandbox: '', codexApproval: '', codexModel: '', preLaunchCmd: '',
     visibleSessionCount: 10, sessionMaxAgeDays: 3, terminalTheme: 'switchboard', mcpEmulation: true, shellProfile: 'auto',
+    desktopNotifications: true,
   };
 
   // The page on screen follows settings changed elsewhere (a phone, another
@@ -343,6 +345,7 @@
     // Global only: the accent colour of the whole app (accent.js).
     const accentValue = window.AccentColor ? AccentColor.normalize(current.accentColor) : '#8088ff';
     const mcpEmulationValue = fieldValue('mcpEmulation');
+    const desktopNotificationsValue = fieldValue('desktopNotifications');
     // Global-only: where new projects get their folder (projects.js). Empty
     // means the default, ~/Switchboard.
     const projectsRootValue = (!isProject && typeof current.projectsRoot === 'string') ? current.projectsRoot : '';
@@ -603,6 +606,16 @@
           </div>
           <div class="settings-field-control">
             <label class="settings-toggle"><input type="checkbox" id="sv-mcp-emulation" ${mcpEmulationValue ? 'checked' : ''}><span class="settings-toggle-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <div class="settings-field-info">
+            <span class="settings-label">Desktop Notifications</span>
+            <div class="settings-description">A system notification when a session needs you or finishes while you are not looking at it. Click it to open the session.</div>
+          </div>
+          <div class="settings-field-control">
+            <label class="settings-toggle"><input type="checkbox" id="sv-desktop-notifications" ${desktopNotificationsValue ? 'checked' : ''}><span class="settings-toggle-slider"></span></label>
           </div>
         </div>
       </div>
