@@ -85,6 +85,7 @@
     changes.stop();
     knowledgeChanges.stop();
     settingsViewer.style.display = 'none';
+    if (typeof reopenCoveredOverview === 'function' && reopenCoveredOverview()) return;
     const terminalArea = document.getElementById('terminal-area');
     const terminalHeader = document.getElementById('terminal-header');
     const placeholder = document.getElementById('placeholder');

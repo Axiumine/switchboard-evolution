@@ -10,8 +10,12 @@
 // (projects-view.js) and showStatsPage (app.js) close it, toggleGridView
 // (grid-view.js) toggles it, and app.js calls onAppRestored once the terminals
 // are back after a start. showSession is replaced on DOMContentLoaded, as
-// project-window.js does: while the page is open, a session shown from
-// elsewhere opens "normally", in its project's Session tab.
+// project-window.js does: while the page is open, or another page covers it on
+// the Sessions tab, a session shown from elsewhere opens "normally", in its
+// project's Session tab. Settings, Folder settings and the Task Manager close
+// back onto the page they covered (reopenCoveredOverview, one guarded line in
+// settings-panel.js closeSettingsViewer and process-viewer.js
+// closeProcessViewer).
 //
 // Never in a project window or a session window: there the page does not open,
 // showSession stays as it is and onAppRestored does nothing.
@@ -90,6 +94,7 @@ const ovState = {
   bornHere: new WeakSet(), // entries whose terminal was made while the page was open
   newIds: new Set(), // sessions launched while the page is open, until the render that puts them on top
   exit: null, // { id, shown } while openSessionNormally opens the Projects tab
+  covered: false, // another page closed this one on the Sessions tab (reopenCoveredOverview)
   layout: null, // what the last render drew, for the layout pass
   results: null, // what the last render counted, for the search's results bar (overviewLastResults)
   originalShowSession: null,
@@ -127,6 +132,27 @@ function openSessionOverview() {
 /** `reason`: 'page' (another page took the main area), 'session' (a session opens normally). */
 function closeSessionOverview(reason) {
   overviewLifecycle?.close(reason);
+}
+
+/** The Sessions tab is on screen and this page is its own: the start is over, and this is the main window. */
+function overviewOwnsSessionsTab() {
+  return sessionOverviewReady && activeTab === 'sessions' && !sessionOverviewUnavailable();
+}
+
+/**
+ * Settings, Folder settings and the Task Manager open over the page, which
+ * closes ('page'), and on Close restore what they think they covered: the
+ * active session's terminal, which the page took. On the Sessions tab the page
+ * comes back instead. True when it is open again: the viewer has nothing more
+ * to restore. A task's log shown on the tab stays (the viewer restores it).
+ */
+function reopenCoveredOverview() {
+  const covered = ovState.covered;
+  ovState.covered = false;
+  if (!covered || isSessionOverviewOpen() || !overviewOwnsSessionsTab()) return false;
+  if (typeof activeTaskView !== 'undefined' && activeTaskView) return false;
+  openSessionOverview();
+  return isSessionOverviewOpen();
 }
 
 /** Cmd/Ctrl+Shift+G and the old grid's button: open the focused session normally, or come to the page. */
@@ -233,6 +259,7 @@ function mergeOverviewPrefs(prefs, patch) {
 // ---- Mount and unmount ----
 
 function mountSessionOverview() {
+  ovState.covered = false;
   if (typeof leaveTaskLogView === 'function') leaveTaskLogView();
   // Reaches closeSessionOverview('page') through hideViewerPanels: ignored while mounting.
   hideAllViewers();
@@ -302,7 +329,9 @@ function mountSessionOverview() {
   }
 }
 
-function unmountSessionOverview() {
+/** `reason`: closeSessionOverview's. Another page that closes it on the Sessions tab covers it. */
+function unmountSessionOverview(reason) {
+  ovState.covered = reason === 'page' && activeTab === 'sessions';
   window.removeEventListener('keydown', onOverviewKeydown, true);
   clearInterval(ovState.timer);
   ovState.timer = null;
@@ -565,6 +594,9 @@ function drawOverviewCards(shown, { grouped, carousels, prefs }) {
     across ? 'ov-flow-across' : 'ov-flow-down',
   ].filter(Boolean).join(' ');
 
+  // What has the keys: a card's terminal (or a closed card) keeps them through the moves below.
+  const focused = document.activeElement;
+  const hadFocus = !!focused && focused !== cardsEl && cardsEl.contains(focused);
   const used = new Set();
   const groupEls = [];
   for (const { group, cards, collapsed } of shown) {
@@ -574,18 +606,21 @@ function drawOverviewCards(shown, { grouped, carousels, prefs }) {
     const els = cards.map(card => (card.live ? ensureOverviewCard(card, prefs) : drawOverviewClosedCard(card, prefs)));
     // The cards that left go first, so the ones that stay are not moved past
     // them: a resumed session's live card takes its closed card's place.
-    for (const child of [...list.children]) if (!els.includes(child)) child.remove();
+    const kept = new Set(els);
+    for (const child of [...list.children]) if (!kept.has(child)) child.remove();
     els.forEach((cardEl, i) => {
       used.add(cardEl);
-      if (list.children[i] !== cardEl) list.insertBefore(cardEl, list.children[i] || null);
+      if (list.children[i] !== cardEl) placeOverviewNode(list, cardEl, list.children[i] || null);
     });
     ovState.cardsObserver?.observe(list, { childList: true });
   }
-  // Groups in order, and the ones gone off the page removed.
+  // Groups in order. The ones gone off the page go first, as cards do: the
+  // groups after them are not moved.
+  const keptGroups = new Set(groupEls);
+  for (const child of [...cardsEl.children]) if (!keptGroups.has(child)) child.remove();
   groupEls.forEach((groupEl, i) => {
-    if (cardsEl.children[i] !== groupEl) cardsEl.insertBefore(groupEl, cardsEl.children[i] || null);
+    if (cardsEl.children[i] !== groupEl) placeOverviewNode(cardsEl, groupEl, cardsEl.children[i] || null);
   });
-  for (const child of [...cardsEl.children]) if (!groupEls.includes(child)) child.remove();
   for (const [key, groupEl] of ovState.groupEls) if (!groupEl.isConnected) ovState.groupEls.delete(key);
   if (shown.length === 0) {
     const empty = document.createElement('div');
@@ -607,8 +642,27 @@ function drawOverviewCards(shown, { grouped, carousels, prefs }) {
   }
   if (typeof pruneOverviewClosedCards === 'function') pruneOverviewClosedCards(used);
   if (ovState.maximized && !ovState.cards.has(ovState.maximized)) ovState.maximized = null;
-  const focused = overviewCurrentCard();
-  for (const card of ovState.cards.values()) card.classList.toggle('focused', card === focused);
+  // Where moveBefore is missing, a moved card lost the keys: they go back to it, if it is still on the page.
+  if (hadFocus && cardsEl.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  const current = overviewCurrentCard();
+  for (const card of ovState.cards.values()) card.classList.toggle('focused', card === current);
+}
+
+/**
+ * Puts `node` before `ref` in `parent`. A node already on the page moves with
+ * moveBefore, which keeps the keyboard focus inside it; insertBefore blurs it,
+ * and what the user types into a card's terminal would go nowhere.
+ */
+function placeOverviewNode(parent, node, ref) {
+  if (typeof parent.moveBefore === 'function' && node.isConnected && parent.isConnected) {
+    try {
+      parent.moveBefore(node, ref);
+      return;
+    } catch {
+      // Not movable that way (another document, say): insertBefore does it.
+    }
+  }
+  parent.insertBefore(node, ref);
 }
 
 /** The card the keys move from: the one holding the keyboard focus (a closed card can), else the session in focus's. */
@@ -1059,7 +1113,10 @@ if (typeof document !== 'undefined') {
         exit.shown = true;
         return original(sessionId, ...rest);
       }
-      if (!isSessionOverviewOpen()) return original(sessionId, ...rest);
+      if (!isSessionOverviewOpen()) {
+        // Another page covers it on the Sessions tab (the Task Manager, Settings): the same way out.
+        return sessionId && overviewOwnsSessionsTab() ? openSessionNormally(sessionId) : original(sessionId, ...rest);
+      }
       // A session resumed from the page, or just started while it is open, stays
       // on it. (Plain terminals stay pending for good: only one made just now counts.)
       const entry = sessionId ? openSessions.get(sessionId) : null;

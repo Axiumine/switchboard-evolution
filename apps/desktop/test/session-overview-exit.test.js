@@ -201,3 +201,67 @@ test('closing onto a page with no session leaves no session header behind', () =
   assert.equal(context.placeholder.style.display, '');
   assert.equal(context.terminalHeader.style.display, 'none');
 });
+
+// Settings, Folder settings and the Task Manager close the page ('page') when
+// they open over it, and on Close restore what they think they covered: on the
+// Sessions tab that is the page, not the empty terminal area under a stale
+// header (settings-panel.js closeSettingsViewer, process-viewer.js
+// closeProcessViewer call reopenCoveredOverview first).
+test('closing a page that covered the overview on the Sessions tab opens the overview again', () => {
+  const { context, run } = harness({ realUnmount: true });
+  run('sessionOverviewReady = true');
+  run("closeSessionOverview('page')");
+  assert.equal(run('isSessionOverviewOpen()'), false);
+  assert.equal(run('reopenCoveredOverview()'), true, 'the viewer has nothing more to restore');
+  assert.equal(run('isSessionOverviewOpen()'), true);
+  // Open, it is covered by nothing: a viewer closing now restores what it covered.
+  assert.equal(run('reopenCoveredOverview()'), false);
+
+  // Covered on the Sessions tab, closed after the user went to another tab: that tab stays.
+  run("closeSessionOverview('page')");
+  context.activeTab = 'projects';
+  assert.equal(run('reopenCoveredOverview()'), false);
+  assert.equal(run('isSessionOverviewOpen()'), false);
+  context.activeTab = 'sessions';
+  assert.equal(run('reopenCoveredOverview()'), false, 'asked once');
+
+  // Left for a session, the page was not covered.
+  run('openSessionOverview()');
+  run('openSessionNormally("a")');
+  context.activeTab = 'sessions';
+  assert.equal(run('reopenCoveredOverview()'), false);
+
+  // A task's log shown in the Sessions tab stays when a viewer over it closes.
+  run('openSessionOverview()');
+  run("closeSessionOverview('page')");
+  context.activeTaskView = { projectPath: '/Users/demo/app', label: 'build' };
+  assert.equal(run('reopenCoveredOverview()'), false);
+});
+
+test('a session shown from outside while another page covers the overview opens in the Projects tab', () => {
+  const { context, calls, run } = harness({ realUnmount: true });
+  run('sessionOverviewReady = true');
+  // The Task Manager covers the page; a session is picked in it.
+  run("closeSessionOverview('page')");
+  run('showSession("a")');
+  assert.equal(context.activeTab, 'projects');
+  assert.deepEqual(calls.shown, ['a']);
+  assert.deepEqual(calls.cleared, ['a']);
+  assert.equal(context.projectsUi.selectedProjectId, 'p');
+  assert.deepEqual({ ...run('projectNavigation("p")') }, { tab: 'session', sessionId: 'a' });
+  assert.equal(run('isSessionOverviewOpen()'), false);
+
+  // On the Projects tab, a session shows as it always did.
+  run('showSession("c")');
+  assert.deepEqual(calls.shown, ['a', 'c']);
+  assert.equal(context.activeTab, 'projects');
+});
+
+test('during a start the Sessions tab shows a session as it always did', () => {
+  const { context, calls, run } = harness({ realUnmount: true });
+  run("closeSessionOverview('page')");
+  // onAppRestored has not run yet: the start's own showSession.
+  run('showSession("a")');
+  assert.deepEqual(calls.shown, ['a']);
+  assert.equal(context.activeTab, 'sessions');
+});

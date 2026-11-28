@@ -675,6 +675,7 @@
     clearTimeout(timer);
     timer = null;
     viewer.style.display = 'none';
+    if (typeof reopenCoveredOverview === 'function' && reopenCoveredOverview()) return;
     const terminalArea = document.getElementById('terminal-area');
     const terminalHeader = document.getElementById('terminal-header');
     if (activeSessionId && openSessions.has(activeSessionId)) {

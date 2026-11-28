@@ -42,6 +42,21 @@ test('the overview hooks are in place', () => {
   assert.ok(app.includes("localStorage.removeItem('gridViewActive');"));
 });
 
+test('Settings and the Task Manager close back onto the overview they covered', () => {
+  const hook = "if (typeof reopenCoveredOverview === 'function' && reopenCoveredOverview()) return;";
+  const settings = read('settings-panel.js');
+  const closeSettings = settings.slice(settings.indexOf('function closeSettingsViewer() {'));
+  const tasks = read('process-viewer.js');
+  const closeTasks = tasks.slice(tasks.indexOf('function closeProcessViewer() {'));
+  for (const [name, close, viewer] of [['settings', closeSettings, 'settingsViewer'], ['tasks', closeTasks, 'viewer']]) {
+    const at = close.indexOf(hook);
+    assert.ok(at !== -1, name);
+    // After the viewer is hidden, before it restores the terminal area.
+    assert.ok(close.indexOf(`${viewer}.style.display = 'none';`) < at, name);
+    assert.ok(at < close.indexOf("terminalArea.style.display = '';"), name);
+  }
+});
+
 test('the overview opens once the active session is restored', () => {
   const app = read('app.js');
   const start = app.indexOf('loadProjects().then(async () => {');
