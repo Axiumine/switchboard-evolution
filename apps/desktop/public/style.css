@@ -9420,6 +9420,13 @@ body.project-window #sidebar-resize-handle,
 body.project-window #terminal-area,
 body.project-window #status-bar,
 body.project-window #update-toast { display: none !important; }
+/* A session in a window of its own (session-window.js): its terminal area alone, the whole window. */
+body.session-window #sidebar,
+body.session-window #sidebar-resize-handle,
+body.session-window #project-viewer,
+body.session-window #status-bar,
+body.session-window #update-toast { display: none !important; }
+body.session-window #main.project-working #terminal-area { top: 0; }
 .ws-header--window { padding: 12px 20px; }
 .ws-header--window .ws-title { font-size: 15px; }
 .ws-header--window .ws-title-line { min-width: 0; }

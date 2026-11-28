@@ -33,7 +33,8 @@
 // rekeyLaunchSpec (session-split.js); sessionTitle, sessionMenuItems,
 // showContextMenu, projectForSession, rememberProjectSession, saveProjectsUi,
 // refreshProjectDrawers (projects-view.js); isSessionOverviewOpen
-// (session-overview.js); popOutSession (a later task); ICONS (icons.js).
+// (session-overview.js); popOutSession (session-window-host.js); SESSION_WINDOW
+// (session-window.js); ICONS (icons.js).
 // All are looked up when called.
 
 const TILE_GAP = 3; // px between a pane and the divider beside it
@@ -299,7 +300,7 @@ function tilePaneFor(id) {
   const existing = tileState.panes.get(id);
   if (existing) return existing;
   const pane = createTilePane(id, {
-    split: paneId => runTileAction('Split', () => splitSession(paneId)),
+    split: paneId => runTileAction('Split', () => splitSession(paneId, { scope: tileState.scope })),
     maximize: toggleTileZoom,
     remove: removeFromSplit,
     menu: tilePaneMenuItems,
@@ -745,7 +746,7 @@ function installTileHeaderButtons() {
     return el;
   };
   tileState.headerSplit = button('terminal-split-btn', 'Split', TILE_ICONS.split(15), () => {
-    if (tileHeaderSession()) runTileAction('Split', () => splitSession(activeSessionId));
+    if (tileHeaderSession()) runTileAction('Split', () => splitSession(activeSessionId, { scope: tileState.scope }));
   });
   tileState.headerPopOut = button('terminal-popout-btn', 'Open in new window', typeof ICONS !== 'undefined' ? ICONS.popOut(15) : '', () => {
     if (tileHeaderSession() && typeof popOutSession === 'function') popOutSession(activeSessionId);
@@ -769,7 +770,9 @@ function refreshTileHeaderButtons() {
   if (!tileState.headerSplit) return;
   const session = tileHeaderSession();
   tileState.headerSplit.hidden = !session || !!session.archived;
-  tileState.headerPopOut.hidden = !session || typeof popOutSession !== 'function';
+  // A session window shows its sessions in a window already (session-window.js).
+  tileState.headerPopOut.hidden = !session || !!session.archived || typeof popOutSession !== 'function'
+    || (typeof SESSION_WINDOW !== 'undefined' && !!SESSION_WINDOW);
 }
 
 // ---- Events: re-keys, exits, busy ----

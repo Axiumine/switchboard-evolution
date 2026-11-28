@@ -70,15 +70,17 @@ window._openSessions = openSessions;
 // terminal after the Electron process itself restarts.
 const ACTIVE_SESSION_KEY = 'activeSessionId';
 // A project window (project-window.js) has no terminals: it starts on none.
-let activeSessionId = PROJECT_WINDOW ? null : sessionStorage.getItem(ACTIVE_SESSION_KEY) || localStorage.getItem(ACTIVE_SESSION_KEY) || null;
+// A session window (session-window.js) starts on its own session.
+let activeSessionId = (PROJECT_WINDOW || SESSION_WINDOW) ? null : sessionStorage.getItem(ACTIVE_SESSION_KEY) || localStorage.getItem(ACTIVE_SESSION_KEY) || null;
 function setActiveSession(id) {
   activeSessionId = id;
-  // The main window's session to restore is the main window's.
+  // The main window's session to restore is the main window's: a session
+  // window's file panel and buttons follow its session, nothing is saved.
   if (PROJECT_WINDOW) return;
-  if (id) {
+  if (id && !SESSION_WINDOW) {
     sessionStorage.setItem(ACTIVE_SESSION_KEY, id);
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
-  } else {
+  } else if (!SESSION_WINDOW) {
     sessionStorage.removeItem(ACTIVE_SESSION_KEY);
     localStorage.removeItem(ACTIVE_SESSION_KEY);
   }
@@ -203,7 +205,7 @@ function sessionNotices() {
 }
 function saveSessionNotices() {
   // The marks belong to the main window, which has the sessions.
-  if (PROJECT_WINDOW) return;
+  if (PROJECT_WINDOW || SESSION_WINDOW) return;
   const notices = sessionNotices();
   try {
     localStorage.setItem(SESSION_NOTICES_KEY, JSON.stringify(notices));
@@ -216,7 +218,7 @@ try {
   for (const id of saved?.ready || []) responseReadySessions.add(id);
   for (const id of saved?.attention || []) attentionSessions.add(id);
 } catch {}
-if (!PROJECT_WINDOW) window.api.publishSessionNotices(sessionNotices());
+if (!PROJECT_WINDOW && !SESSION_WINDOW) window.api.publishSessionNotices(sessionNotices());
 
 // Some CLIs (notably Codex) start under a temporary ID and are re-keyed once
 // their transcript appears. Activity often begins before that detection, so it
@@ -1325,6 +1327,7 @@ async function openSession(session, customOptions) {
   // trusts the hint for sessions it has never indexed.
   if (session.runtime) resumeOptions.runtime = session.runtime;
   const result = await window.api.openTerminal(sessionId, projectPath, false, resumeOptions);
+  if (typeof endTerminalReplay === 'function') endTerminalReplay(entry, result);
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;
@@ -1636,6 +1639,7 @@ window.api.onGlobalSettingsChanged?.(({ settings, changed }) => {
 
 loadProjects().then(async () => {
   if (PROJECT_WINDOW) { showProjectWindow(); return; }
+  if (SESSION_WINDOW) { startSessionWindow(); return; }
   // Open the tab the user was last working in.
   const lastTab = rememberedTab();
   if (lastTab !== activeTab) document.querySelector(`.sidebar-tab[data-tab="${lastTab}"]`)?.click();
@@ -1681,7 +1685,7 @@ function revealActiveSessionInSidebar() {
 
 // A session a project window opens or starts: here, where the terminals are
 // (project-window.js, main.js project-window-run).
-if (!PROJECT_WINDOW) {
+if (!PROJECT_WINDOW && !SESSION_WINDOW) {
   window.api.onProjectWindowRun((name, args) => {
     const run = { openSession, showSession, launchNewSession, openRawTerminalSession }[name];
     if (typeof run === 'function' && Array.isArray(args)) run(...args);
@@ -1769,7 +1773,7 @@ function paintSessionMemory(el) {
 async function refreshResourceStatus() {
   if (document.hidden) return;
   // A project's window shows session rows too, but no status bar.
-  const showStatus = !!statusBarResources && !PROJECT_WINDOW;
+  const showStatus = !!statusBarResources && !PROJECT_WINDOW && !SESSION_WINDOW;
   try {
     const usage = await window.api.getProcessUsage();
     sessionMemoryById = UsageChart.sessionMemory(usage);
@@ -1794,7 +1798,7 @@ async function refreshResourceStatus() {
 refreshResourceStatus();
 setInterval(refreshResourceStatus, RESOURCE_STATUS_MS);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshResourceStatus(); });
-if (statusBarResources && !PROJECT_WINDOW) {
+if (statusBarResources && !PROJECT_WINDOW && !SESSION_WINDOW) {
   statusBarResources.addEventListener('click', () => openProcessViewer());
   statusBarResources.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;

@@ -17,9 +17,10 @@
 //
 // Depends on: launchNewSession, sessionMap, openSessions (app.js);
 // resolveDefaultSessionOptions, launchTerminalSession, showNewSessionDialog
-// (dialogs.js); SessionConfig (session-config.js); placeTileSplit, TILE_ICONS
-// (tile-view.js); ICONS (icons.js). The view's and the icons' are typeof
-// guarded, so the logic runs without a page (test/session-split.test.js).
+// (dialogs.js); SessionConfig (session-config.js); placeTileSplit, TILE_ICONS,
+// tileState (tile-view.js); sessionWindowMenuItems (session-window-host.js);
+// ICONS (icons.js). The view's and the icons' are typeof guarded, so the logic
+// runs without a page (test/session-split.test.js).
 
 const SESSION_LAUNCH_SPECS_KEY = 'sessionLaunchSpecs.v1';
 const SESSION_LAUNCH_SPECS_MAX = 200;
@@ -156,27 +157,32 @@ async function splitSessionWithConfiguration(id, { direction = 'auto', scope = '
 
 /**
  * Split, Split right, Split down and New split session with configuration…, for
- * a session's menu. Each item (its separator too) is marked `splitItem`: the
- * Session Overview puts its own in their place (session-overview-dock.js).
+ * a session's menu, then Open in new window. Each item (its separator too) is
+ * marked `splitItem`: the Session Overview puts its own in their place
+ * (session-overview-dock.js, session-overview.js).
  */
 function splitMenuItems(session) {
   if (!session?.sessionId || session.archived) return [];
   if (typeof PROJECT_WINDOW !== 'undefined' && PROJECT_WINDOW) return [];
   const id = session.sessionId;
+  // The layouts of the window the menu is in: the main window's, or a session window's own.
+  const scope = typeof tileState !== 'undefined' ? tileState.scope : 'main';
   const icon = (name, size = 14) => (typeof TILE_ICONS !== 'undefined' && TILE_ICONS[name] ? TILE_ICONS[name](size) : '');
   const run = (label, start) => () => Promise.resolve().then(start)
     .catch(err => console.warn(`[split] ${label} failed:`, err));
   const items = [
-    { label: 'Split', icon: icon('split'), onClick: run('Split', () => splitSession(id)) },
-    { label: 'Split right', icon: icon('splitRight'), onClick: run('Split right', () => splitSession(id, { direction: 'right' })) },
-    { label: 'Split down', icon: icon('splitDown'), onClick: run('Split down', () => splitSession(id, { direction: 'down' })) },
+    { label: 'Split', icon: icon('split'), onClick: run('Split', () => splitSession(id, { scope })) },
+    { label: 'Split right', icon: icon('splitRight'), onClick: run('Split right', () => splitSession(id, { direction: 'right', scope })) },
+    { label: 'Split down', icon: icon('splitDown'), onClick: run('Split down', () => splitSession(id, { direction: 'down', scope })) },
   ];
   if (session.type !== 'terminal') {
     items.push({
       label: 'New split session with configuration…',
       icon: typeof ICONS !== 'undefined' ? ICONS.launchConfig(14) : '',
-      onClick: run('Split with configuration', () => splitSessionWithConfiguration(id)),
+      onClick: run('Split with configuration', () => splitSessionWithConfiguration(id, { scope })),
     });
   }
+  // Open in new window, or Show window and Bring back (session-window-host.js).
+  if (typeof sessionWindowMenuItems === 'function') items.push(...sessionWindowMenuItems(session));
   return [...items, { sep: true }].map(item => ({ ...item, splitItem: true }));
 }

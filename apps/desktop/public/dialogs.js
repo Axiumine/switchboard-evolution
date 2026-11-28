@@ -112,6 +112,7 @@ async function openRawTerminalSession(session, { show = true } = {}) {
     projectId: session.projectId || null,
     trackId: session.trackId || null,
   });
+  if (typeof endTerminalReplay === 'function') endTerminalReplay(entry, result);
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;

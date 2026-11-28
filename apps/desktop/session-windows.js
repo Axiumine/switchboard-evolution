@@ -13,7 +13,11 @@
 //   schedule-due (the schedule would run twice), the updater or remote-*.
 // - Whichever window reattaches a session (open-terminal) takes it, and the
 //   replay goes to that window in the same step, so no output comes in
-//   between. A remote call (no window) leaves the owner as it is.
+//   between. A remote call (no window) leaves the owner as it is. The replay
+//   ends with `terminal-replayed (sessionId)`, on the same path as its chunks:
+//   open-terminal's answer can come before them, and the window holds its
+//   terminal's replies to the queries in the replay until it has read them all
+//   (public/session-window.js).
 // - Only the owner resizes or detaches the PTY; a remote call still may.
 // - A closed session window leaves its sessions RETURNING: their output goes
 //   to nobody until the main window reattaches them, and that replay brings it.
@@ -165,6 +169,7 @@ function createSessionWindows({ createPageWindow, getMainWindow, activeSessions,
     // Hide cursor after buffer replay — the live PTY stream or resize nudge
     // will re-show it at the correct position, avoiding a stale cursor artifact
     if (!session.isPlainTerminal) target.send('terminal-data', sessionId, '\x1b[?25l');
+    target.send('terminal-replayed', sessionId);
     return target;
   }
 

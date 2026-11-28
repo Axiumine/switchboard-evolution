@@ -564,6 +564,7 @@ function createTerminalEntry(session) {
     } catch {}
     return true;
   });
+  if (typeof beginTerminalReplay === 'function') beginTerminalReplay(entry);
   openSessions.set(sessionId, entry);
   terminal.loadAddon(createTerminalZoomAddon(entry, { mac: isMac, onWheel: linkHandler.leave }));
   // OSC 8 and web links retain precedence over detected filesystem paths.
@@ -597,6 +598,7 @@ function createTerminalEntry(session) {
   setupTerminalKeyBindings(terminal, container, () => entry.session.sessionId, { onFind: openSearchBar });
   setupDragAndDrop(container, () => entry.session.sessionId);
   terminal.onResize(({ cols, rows }) => {
+    if (entry.shadow) return;
     window.api.resizeTerminal(entry.session.sessionId, cols, rows);
   });
   terminal.onTitleChange(title => {

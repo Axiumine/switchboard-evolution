@@ -62,6 +62,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('move-session-to-window', (_event, sessionId) => callback(sessionId));
   },
   setSessionWindowViewing: (sessionId) => ipcRenderer.send('session-window-viewing', sessionId),
+  // The end of a reattach's replay, after its terminal-data (public/session-window.js).
+  onTerminalReplayed: (callback) => {
+    ipcRenderer.on('terminal-replayed', (_event, sessionId) => callback(sessionId));
+  },
   getWindowOnTop: () => ipcRenderer.invoke('get-window-on-top'),
   setWindowOnTop: (onTop) => ipcRenderer.invoke('set-window-on-top', onTop),
   openInMainWindow: (owner) => ipcRenderer.invoke('task-manager-open-owner', owner),

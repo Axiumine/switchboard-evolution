@@ -162,3 +162,23 @@
 }
 #terminal-split-btn[hidden],
 #terminal-popout-btn[hidden] { display: none; }
+
+/* ---- A session shown in a window of its own (session-window-host.js) ----
+   Its terminal here is a shadow under the placeholder, wherever the terminal
+   is: the single view, a pane, an overview card or a pane docked beside them. */
+.terminal-container.popped-out > .xterm,
+.terminal-container.popped-out > .terminal-search-bar { visibility: hidden; }
+.session-popout-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: inherit;
+  font-size: 13px;
+  color: #a0a0b8;
+}
+.session-popout-actions { display: flex; gap: 8px; font-size: 12px; }

@@ -28,6 +28,7 @@ const pruneTiles = (...args) => fn('pruneTiles')(...args);
 const parseTileTree = (...args) => fn('parseTileTree')(...args);
 const parseTileDock = (...args) => fn('parseTileDock')(...args);
 const rekeyTileTree = (...args) => fn('rekeyTileTree')(...args);
+const graftTile = (...args) => fn('graftTile')(...args);
 
 const leaf = id => ({ session: id });
 const CARDS = { cards: true };
@@ -286,6 +287,26 @@ test('the overview dock reads as a tree with the cards and one session at least'
   assert.deepEqual(plain(parseTileDock(dock, id => id === 'B')), split('col', leaf('B'), CARDS));
   assert.equal(parseTileDock(dock, () => false), null);
   assert.deepEqual(plain(parseTileDock(dock, () => true)), dock);
+});
+
+test('a closed window\'s layout takes the place of its session\'s pane', () => {
+  const away = split('col', leaf('X'), leaf('Y'));
+  const home = split('row', leaf('A'), leaf('X'));
+  assert.deepEqual(plain(graftTile(home, 'X', away)), split('row', leaf('A'), split('col', leaf('X'), leaf('Y'))));
+  // In the overview's dock, beside the cards.
+  assert.deepEqual(plain(graftTile(split('row', leaf('X'), CARDS), 'X', away)), split('row', split('col', leaf('X'), leaf('Y')), CARDS));
+  // A session of the window's layout already in the tree moves into it: an id is never in a tree twice.
+  assert.deepEqual(
+    plain(graftTile(split('row', leaf('Y'), split('col', leaf('A'), leaf('X'))), 'X', away)),
+    split('col', leaf('A'), split('col', leaf('X'), leaf('Y'))),
+  );
+  // A pane not in the tree, or a layout without it, changes nothing.
+  assert.deepEqual(plain(graftTile(home, 'Z', away)), plain(home));
+  assert.deepEqual(plain(graftTile(home, 'A', away)), plain(home));
+  assert.equal(graftTile(null, 'X', away), null);
+  // The trees given are left as they were.
+  assert.deepEqual(plain(home), split('row', leaf('A'), leaf('X')));
+  assert.deepEqual(plain(away), split('col', leaf('X'), leaf('Y')));
 });
 
 test('a re-keyed session keeps its place, or leaves when the new id is there already', () => {

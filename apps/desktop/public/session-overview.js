@@ -810,7 +810,8 @@ function buildOverviewCard(entry) {
  * session's pane (with Remove from split); during a search a card's ends with
  * "Leave out of this search" (a docked session is no result). The Session
  * tab's splits are not the page's: its own take their place (a card's Split
- * docks it, session-overview-dock.js).
+ * docks it, session-overview-dock.js). Open in new window, or Show window and
+ * Bring back, are session-window-host.js's.
  */
 function overviewCardMenuItems(session) {
   const id = session?.sessionId;
@@ -820,6 +821,7 @@ function overviewCardMenuItems(session) {
   return [
     { label: 'Open in project', icon: OV_ICONS.openInProject, onClick: () => openSessionNormally(id) },
     { label: 'Maximize', icon: OV_ICONS.maximize, onClick: () => toggleOverviewMaximize(id) },
+    ...(typeof sessionWindowMenuItems === 'function' ? sessionWindowMenuItems(session) : []),
     ...dockItems,
     { sep: true },
     ...(typeof overviewSplitMenuItems === 'function' ? overviewSplitMenuItems(session) : []),

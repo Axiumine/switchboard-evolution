@@ -133,8 +133,9 @@
   }
 
   function maybeShowProjectViewAnnouncement() {
-    // Shown in the main window, not over a project's tab in a window of its own.
+    // Shown in the main window, not over a project's tab or a session in a window of its own.
     if (typeof PROJECT_WINDOW !== 'undefined' && PROJECT_WINDOW) return;
+    if (typeof SESSION_WINDOW !== 'undefined' && SESSION_WINDOW) return;
     if (!shouldShowAnnouncement(window.localStorage)) return;
     window.setTimeout(showProjectViewAnnouncement, 250);
   }

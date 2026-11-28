@@ -69,8 +69,9 @@
   }
 
   // The time of use is the main window's, while it is not minimized. A
-  // project window has no sidebar and does not count.
-  const mainWindow = typeof PROJECT_WINDOW === 'undefined' || !PROJECT_WINDOW;
+  // project window or a session window has no sidebar and does not count.
+  const mainWindow = (typeof PROJECT_WINDOW === 'undefined' || !PROJECT_WINDOW)
+    && (typeof SESSION_WINDOW === 'undefined' || !SESSION_WINDOW);
   if (mainWindow) {
     let last = Date.now();
     setInterval(() => {

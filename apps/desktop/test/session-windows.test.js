@@ -149,6 +149,8 @@ test('a reattach from the window takes ownership and replays to it once', async 
     ['terminal-data', 's1', 'b'],
     ['terminal-data', 's1', '\x1b[?25l'],
   ]);
+  // The end of the replay, after it on the same path: the window answers the terminal again from there.
+  assert.deepEqual(win.webContents.sent.at(-1), ['terminal-replayed', 's1']);
   assert.deepEqual(data(main), [], 'the main window gets no replay');
   // Each window hears whether the session is its own now.
   assert.deepEqual(take(main), [['session-owner-changed', 's1', 'window', false]]);
@@ -166,6 +168,7 @@ test('a reattach from the window takes ownership and replays to it once', async 
     ['terminal-data', 's1', 'a'],
     ['terminal-data', 's1', 'b'],
     ['terminal-data', 's1', '\x1b[?25l'],
+    ['terminal-replayed', 's1'],
   ], 'one replay, and no session-owner-changed');
   assert.deepEqual(take(main), []);
 
@@ -179,6 +182,7 @@ test('a reattach from the window takes ownership and replays to it once', async 
     ['terminal-data', 's1', 'a'],
     ['terminal-data', 's1', 'b'],
     ['terminal-data', 's1', '\x1b[?25l'],
+    ['terminal-replayed', 's1'],
   ]);
   assert.deepEqual(take(win.webContents), [['session-owner-changed', 's1', 'main', false]]);
   assert.equal(win.closed, true);
@@ -266,6 +270,7 @@ test('closing the window holds output until the main window reattaches', async (
     ['terminal-data', 's1', 'before'],
     ['terminal-data', 's1', 'during'],
     ['terminal-data', 's1', '\x1b[?25l'],
+    ['terminal-replayed', 's1'],
   ]);
   output('s1', s1, 'after');
   assert.deepEqual(data(main), [['terminal-data', 's1', 'after']]);

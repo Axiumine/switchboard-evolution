@@ -2663,7 +2663,8 @@ ipcMain.handle('set-window-on-top', (event, onTop) => {
   if (!win) return false;
   const value = !!onTop;
   win.setAlwaysOnTop(value, 'floating');
-  saveToolWindowSettings(kind, { onTop: value });
+  // A session's window keeps its pin to itself (session-windows.js): the next one opens unpinned.
+  if (kind !== 'session') saveToolWindowSettings(kind, { onTop: value });
   return value;
 });
 

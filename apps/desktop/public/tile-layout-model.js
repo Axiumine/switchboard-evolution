@@ -131,6 +131,18 @@ function rekeyTileTree(tree, oldId, newId) {
   return tileHasSession(tree, newId) ? removeTile(tree, oldId) : replaceTileId(tree, oldId, newId);
 }
 
+// Puts `subtree` in the place of the pane `id`, which it holds: a session's own
+// window closed, and its panes come back where its placeholder was. The other
+// sessions of `subtree` leave the tree first (an id is never in a tree twice).
+// A pane that is not in the tree, or a subtree without it, changes nothing.
+function graftTile(tree, id, subtree) {
+  if (!tree) return null;
+  if (!subtree || !tileHasSession(tree, id) || !tileHasSession(subtree, id)) return tileCopy(tree);
+  const incoming = new Set(tileIds(subtree));
+  const kept = pruneTiles(tree, sid => sid === id || !incoming.has(sid));
+  return tileReplaceLeaf(kept, node => node.session === id, () => tileCopy(subtree), null);
+}
+
 // Sets the ratio of the split at `path`, held within TILE_RATIO_LIMITS. A path
 // that does not end on a split, or a ratio that is not a number, changes nothing.
 function setTileRatio(tree, path, ratio) {
