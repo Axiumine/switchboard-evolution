@@ -10,6 +10,7 @@ import {
   createPlanEditor, createReadOnlyViewer, createEditableViewer, createMergeViewer, createUnifiedMergeViewer,
 } from './editor/core.mjs';
 import { highlightCodeLines } from './editor/languages.mjs';
+import { setEditorChangeBase } from './editor/change-marks.mjs';
 import { openSearch, openGotoLine, findNext, findPrevious, runEditorKeys, createPreviewFind } from './editor/find.mjs';
 import { openSymbolPicker } from './editor/symbols.mjs';
 import { detectEol, normalizeEol } from './editor/indentation.mjs';
@@ -73,6 +74,8 @@ window.cmCreatePreviewFind = createPreviewFind;
 // The text with its file's line breaks, and a file read again put in place.
 window.cmGetText = editorText;
 window.cmSetText = setEditorText;
+// What the gutter's change marks are measured from.
+window.cmSetChangeBase = setEditorChangeBase;
 window.cmDetectEol = detectEol;
 window.cmNormalizeEol = normalizeEol;
 // The language servers' switch is the main process's: this window follows it.

@@ -737,3 +737,35 @@ test('a section link scrolls the preview to its heading', () => {
   assert.equal(panel.previewEl.scrollTop, 420);
   assert.deepEqual(calls, []);
 });
+
+test('change marks are measured from the staged copy, else from the text as first opened', async () => {
+  const { panel, api, context } = setup();
+  const bases = [];
+  context.window.cmSetChangeBase = (_view, base) => bases.push(base);
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  let staged = 'staged';
+  api.getFileChangeBase = async () => ({ base: staged });
+  panel.open('Code', '/app.js', 'opened');
+  await settle();
+  assert.equal(bases.at(-1), 'staged');
+  staged = null;
+  panel.open('Code', '/app.js', 'opened again');
+  await settle();
+  assert.equal(bases.at(-1), 'opened', 'the same file keeps the text it was first opened with');
+  await panel._save();
+  await settle();
+  assert.equal(bases.at(-1), 'opened', 'a save does not take the marks away');
+  panel.open('Other', '/other.js', 'other');
+  await settle();
+  assert.equal(bases.at(-1), 'other');
+});
+
+test('an autosaving pad has no change marks', async () => {
+  const { panel, api, context } = setup({ autosaveMs: 1000 });
+  const bases = [];
+  context.window.cmSetChangeBase = (_view, base) => bases.push(base);
+  api.getFileChangeBase = async () => ({ base: 'staged' });
+  panel.open('Note', '/note.md', 'text');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(bases, []);
+});

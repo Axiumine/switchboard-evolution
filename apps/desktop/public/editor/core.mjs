@@ -31,6 +31,7 @@ import {
 import { loadAddon, loadedAddon } from './addons.mjs';
 import { multipleCursors } from './cursors.mjs';
 import { findSupport, findKeymap, frameKeys } from './find.mjs';
+import { changeMarks } from './change-marks.mjs';
 import { symbolKeymap } from './symbols.mjs';
 import { textCommandsKeymap, foldChordsKeymap } from './text-commands.mjs';
 import {
@@ -134,6 +135,7 @@ async function mergedCompletions(context) {
 function editorExtensions({
   filename = '', language = 'auto', doc = '', readOnly = false, wrap = false, onChange = null,
   statusBar: withStatusBar = true, merge = false, compact = !withStatusBar, file = null, hooks = null,
+    changeMarks: withChangeMarks = false,
 } = {}) {
   const markdownOnly = language === 'markdown';
   const name = markdownOnly ? 'Markdown' : languageName(filename);
@@ -144,6 +146,8 @@ function editorExtensions({
     firstPrefExtensions(context),
     vimMode,
     lineNumbers(),
+    // Right after the line numbers: the new, edited and removed lines.
+    withChangeMarks && !readOnly && !merge ? changeMarks() : [],
     highlightActiveLineGutter(),
     highlightSpecialChars(),
     foldGutter(),

@@ -400,6 +400,7 @@ contextBridge.exposeInMainWorld('api', {
   mcpDiffResponse: (sessionId, diffId, action, editedContent) =>
     ipcRenderer.invoke('mcp-diff-response', sessionId, diffId, action, editedContent),
   readFileForPanel: (filePath) => ipcRenderer.invoke('read-file-for-panel', filePath),
+  getFileChangeBase: (filePath) => ipcRenderer.invoke('get-file-change-base', filePath),
   // The editor's language servers (lsp/manager.js): one session per window, folder and server.
   lspOpen: (filePath) => ipcRenderer.invoke('lsp-open', filePath),
   lspSend: (sessionId, message) => ipcRenderer.send('lsp-send', sessionId, message),

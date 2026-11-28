@@ -31,6 +31,12 @@
  * while there are none reloads the text in place, keeping the cursor; with
  * unsaved changes it asks (Reload, Keep Mine, Compare) instead of losing them.
  *
+ * In a file that can be saved (not an autosaving pad) the gutter marks the new,
+ * edited and removed lines (editor/change-marks.mjs), measured from git's
+ * staged copy of the file or, when git has none, from the text as opened. The
+ * staged copy is read again after a save, a change on disk, and when the window
+ * or the editor gets the focus.
+ *
  * Unsaved text is never held by the editor alone: a moment after the typing
  * pauses, and when the window closes, it goes into the file's draft
  * (file-drafts.js), which any viewer opening the file puts back, after a
@@ -138,6 +144,10 @@ function bindViewerEvents() {
     for (const panel of [...viewerPanels]) panel._draftChangedElsewhere(change);
     window.dispatchEvent(new CustomEvent(VIEWER_DRAFTS_EVENT, { detail: change }));
   });
+  // Back from a terminal or another app: something may have been staged or committed.
+  window.addEventListener('focus', () => {
+    for (const panel of viewerPanels) if (panel.isShown()) panel._refreshChangeBase();
+  });
   // What is typed goes into the drafts before the window does. One that cannot
   // be written holds the window until main has asked (will-prevent-unload).
   window.addEventListener('beforeunload', (event) => {
@@ -208,6 +218,11 @@ class ViewerPanel {
     // The text as last read from or written to disk: what an edit differs from.
     this._savedContent = null;
     this._autosaveTimer = null;
+    // The file's text as first opened here, and the latest read of git's copy
+    // of it: what the change marks are measured from.
+    this._openedContent = null;
+    this._changeBaseRequest = 0;
+    this._changeBaseAt = 0;
     this.previewType = 'text';
     this._objectUrl = null;
     this._openVersion = 0;
@@ -272,7 +287,11 @@ class ViewerPanel {
 
     // The editor's keys from the toolbar and the preview; this panel as the last one used.
     container.addEventListener('keydown', (e) => this._onKeyDown(e));
-    container.addEventListener('focusin', () => { lastViewerPanel = this; });
+    container.addEventListener('focusin', () => {
+      lastViewerPanel = this;
+      // Moving between the editor and its bars asks git once, not every time.
+      if (Date.now() - this._changeBaseAt > 2000) this._refreshChangeBase();
+    });
     viewerPanels.add(this);
 
     bindViewerEvents();
@@ -433,6 +452,8 @@ class ViewerPanel {
       this.toolbar.previewBtn.setAttribute('aria-pressed', 'false');
     }
 
+    if (previousPath !== filePath) this._openedContent = null;
+
     // Recreate when changing files so language, undo history and search state
     // cannot leak from the previous file into this one.
     if (this.editorView && (previousPath !== filePath || isMedia)) {
@@ -462,8 +483,10 @@ class ViewerPanel {
     // "changed" before anything is typed.
     this._savedContent = this.getContent();
     this._base = this._savedContent;
+    this._openedContent ??= this._savedContent;
     this._updateDirty();
     if (!preview.fresh) this._restoreDraft();
+    this._refreshChangeBase();
     if (this._missing) this._showNotice('This file is no longer on disk. Save writes it again.');
 
     // Set wrap default based on file type
@@ -651,6 +674,7 @@ class ViewerPanel {
         language: this.opts.language === 'auto' ? 'auto' : 'markdown',
         wrap: this.wrapMode,
         onChange,
+        changeMarks: this._marksChanges(),
         // A file on disk: its language server and Go to Definition, which opens other files here.
         file: /^(\/|[A-Za-z]:[\\/])/.test(filePath || '') ? filePath : null,
         hooks: this._editorHooks(),
@@ -667,6 +691,25 @@ class ViewerPanel {
         });
       }
     }
+  }
+
+  /** Whether this viewer's editor marks changed lines: a file to save, not an autosaving pad. */
+  _marksChanges() {
+    return !!this.opts.onSave && !this.opts.autosaveMs;
+  }
+
+  /** The change marks are measured from git's staged copy of the file, else from the text as opened. */
+  async _refreshChangeBase() {
+    const view = this.editorView;
+    if (!view || !this.filePath || !this._marksChanges() || !window.cmSetChangeBase || this._isMedia()) return;
+    const version = this._openVersion;
+    const request = ++this._changeBaseRequest;
+    this._changeBaseAt = Date.now();
+    let staged = null;
+    try { staged = (await window.api.getFileChangeBase?.(this.filePath))?.base; } catch {}
+    // Another file, or a later read, since.
+    if (request !== this._changeBaseRequest || version !== this._openVersion || view !== this.editorView) return;
+    window.cmSetChangeBase(view, typeof staged === 'string' ? staged : this._openedContent);
   }
 
   /** The text differs from what is on disk. */
@@ -1095,6 +1138,7 @@ class ViewerPanel {
         }
         this._updateDirty();
         this._settleDraft(filePath, kept);
+        if (this.filePath === filePath) this._refreshChangeBase();
         // An autosave says nothing: the button flashing every few seconds would only distract.
         if (!quiet) this.toolbar.flashSave();
       }
@@ -1191,6 +1235,7 @@ class ViewerPanel {
     clearTimeout(this._autosaveTimer);
     this._hideConflict();
     this._savedContent = null;
+    this._openedContent = null;
     this._openVersion++;
     this._destroyEditor();
     this._clearPreview();
@@ -1247,6 +1292,7 @@ class ViewerPanel {
       return;
     }
 
+    this._refreshChangeBase();
     const newContent = result.content;
     const wasMissing = this._missing;
     this._missing = false;

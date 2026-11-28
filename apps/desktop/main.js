@@ -89,6 +89,7 @@ const { scanSchedules } = require('./schedule-runner');
 const shellEnv = require('./shell-env');
 const { encodeProjectPath } = require('./encode-project-path');
 const { resolveEffectiveSettings } = require('./resolve-effective-settings');
+const { stagedVersion } = require('./git');
 const { listProjectDirectory, readProjectFile, readPreviewFile, openFileExternally, resolveProjectEntry, isViewableFile, previewType } = require('./project-files');
 const openedFiles = require('./opened-files');
 const { manageProjectEntry, trashProjectEntries, revealFile, shareFile, createProjectEntry, duplicateProjectEntry, pasteProjectEntry } = require('./file-management');
@@ -1160,6 +1161,9 @@ ipcMain.handle('read-file-for-panel', async (_event, filePath) => {
     return { ok: false, error: err.message, code: err.code };
   }
 });
+
+// What the file editor marks changed lines against: git's staged copy, or null.
+ipcMain.handle('get-file-change-base', async (_event, filePath) => ({ base: await stagedVersion(filePath) }));
 
 ipcMain.handle('list-project-directory', async (_event, projectPath, relativePath) => {
   try {

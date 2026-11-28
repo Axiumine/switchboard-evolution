@@ -828,6 +828,23 @@ async function readEditableFile(dir, filePath) {
 }
 
 /**
+ * What the file editor marks a file's changed lines against: the staged copy
+ * of `filePath` (an absolute path) as checkout would write it, or null when git
+ * has none to give (not in a repository, untracked, in conflict, too big).
+ */
+async function stagedVersion(filePath) {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || filePath.includes('\0')) return null;
+  try {
+    const abs = await fs.promises.realpath(filePath);
+    const top = await repoRoot(path.dirname(abs));
+    const relative = path.relative(await fs.promises.realpath(top), abs).split(path.sep).join('/');
+    return await runRaw(['cat-file', '--filters', `:0:${relative}`], top);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Write an edited file to the working tree; the index is left as it is, so
  * the edit shows as a change to stage. With `expectedVersion` (from
  * readEditableFile) a file changed on disk since is not overwritten: the
@@ -1154,7 +1171,7 @@ module.exports = {
   parseWorktreeList, worktreeList, worktreeLock, worktreeUnlock, worktreeMove, worktreePrune, worktreeRepair,
   deleteBranch, isUnmergedBranchError, isValidBranchName, listBranches, mergedBranches, defaultBranch, lastCommit,
   worktreeAdd, worktreeRemove, isDirtyWorktreeError, gitCommonDir, status, unpushedCommits, parseLogWithStat,
-  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths, isIgnored, excludeLocally, readEditableFile, saveEditedFile,
+  parsePorcelain, snapshot, fileDiff, sideDiff, stageFiles, stageLines, discardFiles, ignorePaths, isIgnored, excludeLocally, readEditableFile, saveEditedFile, stagedVersion,
   tagExists, toGitPath, safeRelativePath,
   logWithParents, forEachRef, stashList, remoteList, configListIncludes,
   blobAtRevision, isShallowRepo, rootCommitHashes, userDetails,
