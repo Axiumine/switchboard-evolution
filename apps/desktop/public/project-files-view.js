@@ -124,8 +124,8 @@ function inProjectWindow() {
 }
 
 /** Each project remembers its own open files; its window apart from the main one. */
-function projectEditorStorageKey(projectId) {
-  return `editorTabs:${inProjectWindow() ? 'project-window' : 'project'}:${projectId}`;
+function projectEditorStorageKey(projectId, projectWindow = inProjectWindow()) {
+  return `editorTabs:${projectWindow ? 'project-window' : 'project'}:${projectId}`;
 }
 
 function ensureProjectEditor(projectId) {

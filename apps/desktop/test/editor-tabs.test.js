@@ -331,3 +331,29 @@ test('a rename and a trash reach the tabs of a project not shown since the start
   assert.deepEqual(pathsOf('b'), ['/w/b/z.js']);
   assert.equal(editor('a'), undefined);
 });
+
+test('a file closed from the list leaves every editor, those not made yet too', async () => {
+  const stored = new Map([
+    ['other', JSON.stringify({ files: [{ path: '/a.js', data: {}, used: 1 }, { path: '/b.js', data: {}, used: 2 }] })],
+    ['only', JSON.stringify({ files: [{ path: '/a.js', data: {}, used: 1 }] })],
+  ]);
+  const { context } = setup({ stored });
+  const tabs = new context.EditorTabs(context.document.createElement(), {
+    storageKey: 'here', createPanel: (el, _tab, shared) => new context.ViewerPanel(el, shared),
+  });
+  const a = tabs.add('/a.js');
+  tabs.fill(a, 'a');
+  tabs.activate(a);
+  a.panel.type('typed');
+
+  // Kept open at the question: nothing changes anywhere.
+  a.panel.answer = 'cancel';
+  assert.equal(await context.closeFileInEditors('/a.js', ['here', 'other', 'only']), false);
+  assert.equal(context.storedEditorTabs('only').length, 1);
+
+  a.panel.answer = 'discard';
+  assert.equal(await context.closeFileInEditors('/a.js', ['here', 'other', 'only']), true);
+  assert.equal(tabs.tabs.length, 0);
+  assert.deepEqual(Array.from(context.storedEditorTabs('other'), file => file.path), ['/b.js']);
+  assert.equal(stored.has('only'), false);
+});

@@ -6,7 +6,8 @@
 //
 // Used by the project page's Files tab (project-files-view.js), the sidebar's
 // Files tab (files-view.js) and a session's file panel (file-panel.js). The
-// host reads the files; this keeps the tabs.
+// host reads the files; this keeps the tabs. The sidebar's Files tab lists
+// what every editor has open, from what they remember, and closes it there.
 //
 // Depends on globals: viewer-panel.js, fileIconHtml (file-icons.js),
 // bindScrollingTabs (projects-view.js), cachedProjectTreeAll (app.js).
@@ -78,6 +79,42 @@ function editorFileName(filePath) {
   return String(filePath || '').split(/[\\/]/).pop() || String(filePath || '');
 }
 
+/** The files remembered under `storageKey`: [{ path, data, used }]. */
+function storedEditorTabs(storageKey) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    return (Array.isArray(saved?.files) ? saved.files : []).filter(file => typeof file?.path === 'string' && file.path);
+  } catch { return []; }
+}
+
+/** Told to the window when what an editor has open changes (files-view.js). */
+function announceEditorTabs() {
+  if (typeof window.dispatchEvent === 'function') window.dispatchEvent(new CustomEvent('editor-tabs-changed'));
+}
+
+/**
+ * Close `filePath` wherever it has a tab: in every editor of this window, after
+ * Save / Don't Save / Cancel when it has unsaved changes, and in what the
+ * editors not made yet, or in another window, remember under `storageKeys`.
+ * False when the user keeps it open.
+ */
+async function closeFileInEditors(filePath, storageKeys) {
+  for (const tabs of [...editorTabsInstances]) {
+    const tab = tabs.find(filePath);
+    if (tab && !(await tabs.close(tab))) return false;
+  }
+  const here = new Set([...editorTabsInstances].map(tabs => tabs.storageKey));
+  for (const key of storageKeys) {
+    const files = storedEditorTabs(key);
+    const kept = files.filter(file => file.path !== filePath);
+    if (here.has(key) || kept.length === files.length) continue;
+    if (kept.length) localStorage.setItem(key, JSON.stringify({ files: kept }));
+    else localStorage.removeItem(key);
+  }
+  announceEditorTabs();
+  return true;
+}
+
 const editorTabsInstances = new Set();
 let editorTabsCount = 0;
 let editorTabsDraftsBound = false;
@@ -86,6 +123,16 @@ let editorTabsDraftsBound = false;
 function bindEditorTabsDrafts() {
   if (editorTabsDraftsBound) return;
   editorTabsDraftsBound = true;
+  // A project window's file closed from the main window's list: its tab goes
+  // too, unless it holds unsaved changes.
+  window.addEventListener('storage', (event) => {
+    if (!event.key?.startsWith('editorTabs:project-window:')) return;
+    for (const tabs of editorTabsInstances) {
+      if (tabs.storageKey !== event.key) continue;
+      const kept = new Set(storedEditorTabs(event.key).map(file => file.path));
+      for (const tab of [...tabs.tabs]) if (!kept.has(tab.path) && !tabs.isDirty(tab)) tabs.remove(tab);
+    }
+  });
   window.addEventListener('viewer-drafts-changed', (event) => {
     const { filePath, state } = event.detail || {};
     for (const tabs of editorTabsInstances) {
@@ -360,14 +407,13 @@ class EditorTabs {
       if (!this.tabs.length) localStorage.removeItem(this.storageKey);
       else localStorage.setItem(this.storageKey, JSON.stringify({ files: this.tabs.map(({ path, data, used }) => ({ path, data, used })) }));
     } catch {}
+    announceEditorTabs();
   }
 
   _restore() {
     if (!this.storageKey) return;
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(this.storageKey) || 'null'); } catch {}
-    for (const file of Array.isArray(saved?.files) ? saved.files : []) {
-      if (typeof file?.path !== 'string' || !file.path || this.find(file.path)) continue;
+    for (const file of storedEditorTabs(this.storageKey)) {
+      if (this.find(file.path)) continue;
       const used = Number(file.used) || 0;
       this._used = Math.max(this._used, used);
       this.tabs.push({
@@ -380,3 +426,5 @@ class EditorTabs {
 
 window.EditorTabs = EditorTabs;
 window.editorTabLabels = editorTabLabels;
+window.storedEditorTabs = storedEditorTabs;
+window.closeFileInEditors = closeFileInEditors;

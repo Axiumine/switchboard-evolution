@@ -9881,12 +9881,26 @@ body.project-window .ws-body:has(> .note-window-body) { padding: 0; overflow: hi
 .memory-item.is-missing .session-id { opacity: 0.5; }
 .memory-item.is-missing .session-meta { color: #c98a5e; }
 
-/* Pin and remove on a row; a pinned row's pin stays lit. */
-.files-pin-btn.on { color: color-mix(in srgb, var(--accent) 70%, white); }
+/* Pin and remove on a row; a pinned row's star stays lit, as in the Projects tab. */
+.files-pin-btn.on { color: #f5be3c; }
+/* The project a row under Opened is in, before the file's name. */
+.files-row-project {
+  display: inline-block;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  color: #8a8aa3;
+}
+.files-row-project-separator { color: #8a8aa3; }
 .files-remove-btn:hover { color: #ff7b8a; background: rgba(255,90,110,0.1); }
 
 /* Pinned rows are moved by dragging them: a line shows where one would go. */
-.files-pinned-group .memory-item[draggable="true"] { cursor: grab; }
+.memory-item.is-pinned[draggable="true"] { cursor: grab; }
+/* A pinned file's star shows without hovering; the other buttons wait for it. */
+.memory-item.is-pinned .session-actions { opacity: 1; }
+.memory-item.is-pinned:not(:hover):not(:focus-within) .session-actions { background: none; }
+.memory-item.is-pinned:not(:hover):not(:focus-within) .session-actions > :not(.files-pin-btn) { visibility: hidden; }
 .memory-item.is-dragging { opacity: 0.4; }
 /* Ordered by dragging (projects-view.js bindOrderDrag): the Starred section and a drawer's Pinned group. */
 [data-order-group].is-dragging { opacity: 0.4; }
@@ -9894,6 +9908,46 @@ body.project-window .ws-body:has(> .note-window-body) { padding: 0; overflow: hi
 [data-order-group].drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 .memory-item.drop-before .session-row { box-shadow: 0 -2px 0 0 var(--accent); }
 .memory-item.drop-after .session-row { box-shadow: 0 2px 0 0 var(--accent); }
+
+/* A project's group: its pin shows on hover, and stays lit when pinned. */
+.files-project-pin { visibility: hidden; padding: 2px; }
+.project-header:hover .files-project-pin,
+.files-project-pin:focus-visible,
+.files-project-pin.on { visibility: visible; }
+.files-pinned-project .project-header { cursor: grab; }
+.files-pinned-project.is-dragging { opacity: 0.4; }
+.files-pinned-project.drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.files-pinned-project.drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+
+/* Rows selected to be opened together, and the bar that opens them. */
+.memory-item { user-select: none; }
+.memory-item.is-selected .session-row { background: rgb(from var(--accent) r g b / 0.16); border-radius: 6px; }
+.files-selection-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px 6px;
+  padding: 6px 10px;
+  border: 1px solid rgb(from var(--accent) r g b / 0.4);
+  border-radius: 8px;
+  background: #1c1c28;
+  color: #c0c0d8;
+  font-size: 12px;
+}
+.files-selection-bar span { flex: 1; }
+.files-selection-bar button {
+  padding: 3px 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.files-selection-bar button:hover { border-color: var(--accent); color: #e6e6f4; }
 
 /* A file dragged over the sidebar from outside the app: two halves, open here
    or in a window of its own. Fixed over the sidebar's box (files-drop.js). */
