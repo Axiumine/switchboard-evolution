@@ -1,0 +1,164 @@
+/* Split panes (tile-view.js): a layout of panes, in the Session tab inside
+   #terminals, and wherever else mountTileTree draws one. */
+
+.tile-root {
+  position: absolute;
+  inset: 0;
+}
+/* In the Session tab the layout takes the place of a terminal, and is on
+   screen while one of its terminals is: every path that hides the terminals
+   (another session, a task log, a project's other tab) hides it too. */
+#terminals > .tile-root {
+  inset: 2px 20px 0 2px;
+  display: none;
+}
+#terminals > .tile-root:has(.terminal-container.visible) { display: block; }
+
+.tile-leaf {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+}
+.tile-root > [hidden] { display: none; }
+
+/* ---- Dividers: the gap between two panes, dragged to resize them ---- */
+.tile-divider {
+  position: absolute;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.tile-divider-col { cursor: row-resize; }
+.tile-divider::after {
+  content: '';
+  position: absolute;
+  background: transparent;
+  transition: background 0.15s;
+}
+.tile-divider-row::after { top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; }
+.tile-divider-col::after { left: 0; right: 0; top: calc(50% - 1px); height: 2px; }
+.tile-divider:hover::after,
+.tile-root.tile-dragging .tile-divider::after { background: rgb(from var(--accent) r g b / 0.35); }
+.tile-root.tile-dragging { user-select: none; }
+.tile-root.tile-dragging-row { cursor: col-resize; }
+.tile-root.tile-dragging-col { cursor: row-resize; }
+/* The terminals under the pointer do not take the drag. */
+.tile-root.tile-dragging .tile-leaf { pointer-events: none; }
+
+/* ---- Panes ---- */
+.tile-pane {
+  display: flex;
+  flex-direction: column;
+  background: #111118;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tile-pane.focused { border-color: rgb(from var(--accent) r g b / 0.5); }
+
+.tile-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px 0 10px;
+  background: #18181f;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  flex-shrink: 0;
+  cursor: default;
+  user-select: none;
+}
+.tile-pane-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: #8a8aa0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile-pane.focused .tile-pane-name { color: #d0d0e0; }
+.tile-pane-spacer { flex: 1; }
+
+.tile-btn {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 3px;
+  line-height: 1;
+  color: #7a7a90;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+}
+.tile-pane:hover .tile-btn,
+.tile-pane.focused .tile-btn,
+.tile-btn.active,
+.tile-btn:focus-visible { opacity: 1; }
+.tile-btn:hover,
+.tile-btn.active {
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  background: rgb(from var(--accent) r g b / 0.1);
+}
+.tile-btn-remove:hover { color: #e05070; background: rgba(224,80,112,0.1); }
+
+.tile-pane-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+/* The session's own terminal, moved into the pane. */
+.tile-pane-body > .terminal-container.tile-mode {
+  display: block;
+  position: absolute;
+  inset: 0;
+}
+
+/* A session with no live terminal: "Stopped · Resume". */
+.tile-pane-stopped {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #7a7a90;
+}
+.tile-resume-btn {
+  cursor: pointer;
+  font: inherit;
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  background: rgb(from var(--accent) r g b / 0.1);
+  border: 1px solid rgb(from var(--accent) r g b / 0.3);
+  border-radius: 5px;
+  padding: 3px 10px;
+}
+.tile-resume-btn:hover { background: rgb(from var(--accent) r g b / 0.18); }
+.tile-resume-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- #terminal-header: Split and Open in new window ---- */
+#terminal-split-btn,
+#terminal-popout-btn {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px;
+  line-height: 1;
+  color: #7a7a90;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+#terminal-split-btn:hover,
+#terminal-popout-btn:hover {
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  background: rgb(from var(--accent) r g b / 0.1);
+}
+#terminal-split-btn[hidden],
+#terminal-popout-btn[hidden] { display: none; }

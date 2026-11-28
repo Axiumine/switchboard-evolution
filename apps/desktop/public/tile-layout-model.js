@@ -1,7 +1,8 @@
 // The split layout model: a binary tree of panes, tiled the way Hyprland and
 // bspwm do it (dwindle): each split halves the touched pane along its longer
-// side. Pure functions with no DOM and no storage; the view and the store are
-// built on top of it.
+// side. Pure functions with no DOM; the view (tile-view.js) is built on top of
+// them, and createTileStore, at the end, keeps the layouts in the storage it is
+// given.
 //
 // A tree is `{ split: 'row' | 'col', ratio, a, b }` with leaves `{ session: id }`
 // and, for the Session Overview, one `{ cards: true }` leaf that stands for the
@@ -245,4 +246,91 @@ function parseTileTree(value) {
     return { session: node.session };
   };
   return read(value, 0);
+}
+
+// ---- The saved layouts ----
+
+// The Session tab's layouts (and, later, those of a session's own window):
+// { v, layouts: { id: { tree, scope, updatedAt } } }, with `scope` 'main' or
+// 'window:<id>'. The overview's dock is not kept here.
+const TILE_LAYOUTS_KEY = 'tileLayouts.v1';
+
+// A layout holds two sessions at least: a set, a re-key or a forget that leaves
+// it with fewer drops it. A session is in one layout per scope at most: a set
+// takes its sessions out of the scope's other layouts. Every call reads the
+// storage again (another window may have written it), and a storage that throws
+// or holds something unreadable counts as empty.
+function createTileStore(storage) {
+  const isId = id => typeof id === 'string' && id !== '';
+  const read = () => {
+    let saved;
+    try { saved = JSON.parse(storage.getItem(TILE_LAYOUTS_KEY) || 'null'); } catch { return {}; }
+    const layouts = saved && typeof saved === 'object' && saved.layouts;
+    if (!layouts || typeof layouts !== 'object' || Array.isArray(layouts)) return {};
+    const valid = {};
+    for (const [id, layout] of Object.entries(layouts)) {
+      const tree = parseTileTree(layout?.tree);
+      if (!tree || tileIds(tree).length < 2 || !isId(layout.scope)) continue;
+      valid[id] = { tree, scope: layout.scope, updatedAt: Number(layout.updatedAt) || 0 };
+    }
+    return valid;
+  };
+  const write = layouts => {
+    try { storage.setItem(TILE_LAYOUTS_KEY, JSON.stringify({ v: 1, layouts })); } catch {}
+  };
+  // A layout given a new tree: kept with two sessions or more, dropped below.
+  const put = (layouts, id, tree, scope) => {
+    const valid = parseTileTree(tree);
+    if (valid && tileIds(valid).length >= 2) layouts[id] = { tree: valid, scope, updatedAt: Date.now() };
+    else delete layouts[id];
+  };
+  const entry = (id, layout) => ({ id, tree: tileCopy(layout.tree), scope: layout.scope, updatedAt: layout.updatedAt });
+  // Applies `change(tree)` to every layout that holds `id`, and saves when one changed.
+  const each = (id, change) => {
+    const layouts = read();
+    const touched = Object.entries(layouts).filter(([, layout]) => tileHasSession(layout.tree, id));
+    for (const [layoutId, layout] of touched) put(layouts, layoutId, change(layout.tree), layout.scope);
+    if (touched.length) write(layouts);
+  };
+
+  return {
+    /** The layout of `scope` that holds session `id`: { id, tree, scope, updatedAt }, or null. */
+    layoutOf(id, scope = 'main') {
+      if (!isId(id)) return null;
+      const found = Object.entries(read()).find(([, layout]) => layout.scope === scope && tileHasSession(layout.tree, id));
+      return found ? entry(...found) : null;
+    },
+    /** Saves a layout's tree; its sessions leave the scope's other layouts. */
+    set(layoutId, tree, scope = 'main') {
+      if (!isId(layoutId) || !isId(scope)) return;
+      const layouts = read();
+      const valid = parseTileTree(tree);
+      const ids = new Set(valid ? tileIds(valid) : []);
+      for (const [id, layout] of Object.entries(layouts)) {
+        if (id === layoutId || layout.scope !== scope || !tileIds(layout.tree).some(sid => ids.has(sid))) continue;
+        put(layouts, id, pruneTiles(layout.tree, sid => !ids.has(sid)), scope);
+      }
+      put(layouts, layoutId, valid, scope);
+      write(layouts);
+    },
+    drop(layoutId) {
+      const layouts = read();
+      if (!Object.prototype.hasOwnProperty.call(layouts, layoutId)) return;
+      delete layouts[layoutId];
+      write(layouts);
+    },
+    /** A session that changed id keeps its places; a layout that holds both ids keeps the new one only. */
+    rekey(oldId, newId) {
+      if (!isId(oldId) || !isId(newId) || oldId === newId) return;
+      each(oldId, tree => (tileHasSession(tree, newId) ? removeTile(tree, oldId) : replaceTileId(tree, oldId, newId)));
+    },
+    /** Takes a session out of every layout. */
+    forget(id) {
+      if (isId(id)) each(id, tree => removeTile(tree, id));
+    },
+    /** Every saved layout, as layoutOf gives one. */
+    all() {
+      return Object.entries(read()).map(([id, layout]) => entry(id, layout));
+    },
+  };
 }

@@ -3830,6 +3830,7 @@ function sessionMenuItems(session) {
     session.type !== 'terminal' ? { label: 'View messages', icon: PICONS.messages(14), onClick: () => showJsonlViewer(session) } : null,
   ].filter(Boolean);
   const stateActions = [
+    ...(typeof splitMenuItems === 'function' ? splitMenuItems(session) : []),
     { label: session.starred ? 'Unstar session' : 'Star session', icon: starIconSvg(!session.starred, 14), onClick: () => toggleSessionStar(session) },
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameSessionFlow(session) },
     { label: 'Copy session ID', onClick: () => window.api.writeClipboard(session.sessionId) },

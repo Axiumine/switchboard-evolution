@@ -1202,6 +1202,7 @@ async function launchNewSession(project, sessionOptions, { focus = true } = {}) 
     session.scheduleId = options.scheduleId;
     session.scheduledAt = new Date().toISOString();
   }
+  if (typeof rememberLaunchSpec === 'function') rememberLaunchSpec(sessionId, project, options);
 
   // Track as pending (no .jsonl yet)
   const folder = encodeProjectPath(projectPath);

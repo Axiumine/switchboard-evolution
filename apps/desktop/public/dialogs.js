@@ -123,7 +123,7 @@ async function openRawTerminalSession(session, { show = true } = {}) {
   return result;
 }
 
-async function launchTerminalSession(project) {
+async function launchTerminalSession(project, { show = true } = {}) {
   const session = {
     sessionId: crypto.randomUUID(),
     summary: 'Terminal',
@@ -162,15 +162,16 @@ async function launchTerminalSession(project) {
   if (typeof injectPendingIntoTree === 'function') injectPendingIntoTree(session);
   refreshSidebar();
 
-  await openRawTerminalSession(session);
+  const result = await openRawTerminalSession(session, { show });
   pollActiveSessions();
+  return result?.ok ? sessionId : undefined;
 }
 
 function runtimeLabel(runtime) {
   return harnessLabel(runtime);
 }
 
-async function showNewSessionDialog(project, runtime = 'claude') {
+async function showNewSessionDialog(project, runtime = 'claude', { overrides, onStart } = {}) {
   const effective = await window.api.getEffectiveSettings(project.projectPath);
   const overlay = document.createElement('div');
   overlay.className = 'new-session-overlay';
@@ -186,7 +187,7 @@ async function showNewSessionDialog(project, runtime = 'claude') {
       <button type="button" class="new-session-cancel-btn">Cancel</button>
       <button type="button" class="new-session-start-btn">Start</button>
     </div>`;
-  const form = SessionConfigForm.mount(dialog.querySelector('.session-config-fields'), { runtime, defaults: effective });
+  const form = SessionConfigForm.mount(dialog.querySelector('.session-config-fields'), { runtime, defaults: effective, overrides });
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
   function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
@@ -198,7 +199,8 @@ async function showNewSessionDialog(project, runtime = 'claude') {
       return;
     }
     close();
-    launchNewSession(project, { ...options, runtime });
+    if (onStart) onStart({ ...options, runtime });
+    else launchNewSession(project, { ...options, runtime });
   }
   dialog.querySelector('.new-session-cancel-btn').onclick = close;
   dialog.querySelector('.new-session-start-btn').onclick = start;

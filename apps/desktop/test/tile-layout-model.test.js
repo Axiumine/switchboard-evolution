@@ -272,3 +272,97 @@ test('a split that targets an unknown or repeated id changes nothing', () => {
   assert.deepEqual(plain(dockBesideCards(tree, 'C', WIDE)), plain(tree));
   assert.deepEqual(plain(dockBesideCards(split('row', leaf('A'), CARDS), 'A', WIDE)), split('row', leaf('A'), CARDS));
 });
+
+// ---- The store of the Session tab's layouts (tileLayouts.v1) ----
+
+/** A localStorage stand-in; `fail` makes every read and write throw. */
+function memoryStorage(initial = {}, { fail = false } = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    getItem: key => { if (fail) throw new Error('storage off'); return data.has(key) ? data.get(key) : null; },
+    setItem: (key, value) => { if (fail) throw new Error('storage off'); data.set(key, String(value)); },
+    removeItem: key => { if (fail) throw new Error('storage off'); data.delete(key); },
+  };
+}
+const createTileStore = storage => fn('createTileStore')(storage);
+const idsOf = layout => layout && plain(tileIds(layout.tree));
+
+test('a session belongs to one layout per scope and follows a re-key', () => {
+  assert.equal(constant('TILE_LAYOUTS_KEY'), 'tileLayouts.v1');
+  const storage = memoryStorage();
+  const store = createTileStore(storage);
+  store.set('L1', split('row', leaf('A'), leaf('B')), 'main');
+  assert.equal(store.layoutOf('A', 'main').id, 'L1');
+  // The scope is 'main' unless said.
+  assert.deepEqual(idsOf(store.layoutOf('B')), ['A', 'B']);
+  assert.equal(store.layoutOf('A', 'window:w1'), null);
+  // No id is in no layout, not even the cards' (whose leaf has no session).
+  assert.equal(store.layoutOf(undefined), null);
+  assert.equal(store.layoutOf(''), null);
+
+  // A second main layout that takes B takes it out of L1, which is left with
+  // one session and goes: a layout holds two sessions at least.
+  store.set('L2', split('col', leaf('B'), leaf('C')), 'main');
+  assert.equal(store.layoutOf('B', 'main').id, 'L2');
+  assert.equal(store.layoutOf('A', 'main'), null);
+  // A layout in another scope keeps its own copy of B.
+  store.set('W1', split('row', leaf('B'), leaf('D')), 'window:w1');
+  assert.equal(store.layoutOf('B', 'main').id, 'L2');
+  assert.equal(store.layoutOf('B', 'window:w1').id, 'W1');
+
+  // A re-key (Codex's real id, a fork) replaces the id in every layout, and is saved.
+  store.rekey('B', 'B2');
+  const again = createTileStore(storage);
+  assert.deepEqual(plain(again.layoutOf('B2', 'main').tree), split('col', leaf('B2'), leaf('C')));
+  assert.equal(again.layoutOf('B', 'main'), null);
+  assert.deepEqual(idsOf(again.layoutOf('B2', 'window:w1')), ['B2', 'D']);
+  // A layout that already holds the new id just loses the old one.
+  again.set('L3', split('row', leaf('E'), split('col', leaf('F'), leaf('G'))), 'main');
+  again.rekey('F', 'G');
+  assert.deepEqual(plain(again.layoutOf('G', 'main').tree), split('row', leaf('E'), leaf('G')));
+
+  // forget takes a session out everywhere; a layout left with one session goes.
+  again.forget('C');
+  assert.equal(again.layoutOf('B2', 'main'), null);
+  assert.deepEqual(plain(again.all().map(l => l.id).sort()), ['L3', 'W1']);
+  const w1 = again.all().find(l => l.id === 'W1');
+  assert.equal(w1.scope, 'window:w1');
+  assert.equal(typeof w1.updatedAt, 'number');
+  // set with less than two sessions drops the layout.
+  again.set('L3', leaf('E'), 'main');
+  again.drop('W1');
+  assert.deepEqual(plain(again.all()), []);
+
+  // The saved shape: { v, layouts: { id: { tree, scope, updatedAt } } }.
+  again.set('L4', split('row', leaf('A'), leaf('B')), 'main');
+  const saved = JSON.parse(storage.getItem('tileLayouts.v1'));
+  assert.equal(saved.v, 1);
+  assert.deepEqual(Object.keys(saved.layouts), ['L4']);
+  assert.deepEqual(saved.layouts.L4.tree, split('row', leaf('A'), leaf('B')));
+  assert.equal(saved.layouts.L4.scope, 'main');
+});
+
+test('unreadable, invalid or unavailable saved layouts read as none', () => {
+  const bad = ratio => JSON.stringify({ v: 1, layouts: { X: { tree: split('row', leaf('A'), leaf('B'), ratio), scope: 'main', updatedAt: 1 } } });
+  for (const raw of ['{nope', 'null', '[]', '{"v":1,"layouts":[]}', bad(0.95), JSON.stringify({ v: 1, layouts: { X: { tree: leaf('A'), scope: 'main' } } })]) {
+    const store = createTileStore(memoryStorage({ 'tileLayouts.v1': raw }));
+    assert.deepEqual(plain(store.all()), [], raw);
+    assert.equal(store.layoutOf('A'), null, raw);
+  }
+  // A good layout next to a bad one is kept.
+  const mixed = JSON.stringify({ v: 1, layouts: {
+    X: { tree: split('row', leaf('A'), leaf('B'), 0.95), scope: 'main', updatedAt: 1 },
+    Y: { tree: split('row', leaf('C'), leaf('D'), 0.6), scope: 'main', updatedAt: 2 },
+    Z: { tree: split('row', leaf('E'), leaf('F')), scope: '', updatedAt: 3 },
+  } });
+  assert.deepEqual(plain(createTileStore(memoryStorage({ 'tileLayouts.v1': mixed })).all().map(l => l.id)), ['Y']);
+  // Storage that throws: nothing is kept and nothing throws.
+  const off = createTileStore(memoryStorage({}, { fail: true }));
+  off.set('L', split('row', leaf('A'), leaf('B')), 'main');
+  off.rekey('A', 'A2');
+  off.forget('B');
+  off.drop('L');
+  assert.equal(off.layoutOf('A'), null);
+  assert.deepEqual(plain(off.all()), []);
+});

@@ -689,6 +689,7 @@ function showSession(sessionId) {
       entry.element.classList.add('visible');
       entry.terminal.focus();
       fitAndScroll(entry);
+      if (typeof syncTileLayout === 'function') syncTileLayout(sessionId);
     }
   }
   // The Projects and Sessions tabs keep a project's session under its project's header and tabs (projects-view.js).
