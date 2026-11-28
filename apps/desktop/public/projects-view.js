@@ -2006,7 +2006,7 @@ function renderOverview() {
       tab.onclick = () => showProjectTab(project, tab.dataset.tab);
     });
     projectViewer.querySelectorAll('.ws-tab-window').forEach(btn => {
-      btn.onclick = () => window.api.openProjectWindow(project.id, btn.dataset.windowTab);
+      btn.onclick = () => openProjectTabWindow(project, btn.dataset.windowTab);
     });
     projectViewer.querySelector('#ws-new').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);
     projectViewer.querySelector('#ws-more').onclick = (e) => showContextMenu(projectMenuItems(project, { fromPage: true }), { anchor: e.currentTarget });
@@ -2044,6 +2044,12 @@ async function switchProjectWindowTab(project, tab) {
   } catch {}
   setProjectTab(project, tab);
   renderOverview();
+}
+
+/** A tab of the project in a window of its own; the Files one shows what this page shows (project-files-view.js). */
+function openProjectTabWindow(project, tab) {
+  if (tab === 'files' && typeof leaveFilesViewForWindow === 'function') leaveFilesViewForWindow(project);
+  return window.api.openProjectWindow(project.id, tab);
 }
 
 /** A tab of the strip with the button beside it that opens the tab in a window of its own. */
@@ -2184,7 +2190,7 @@ function showProjectWindow() {
   }
   projectsUi.selectedProjectId = project.id;
   setProjectTab(project, PROJECT_WINDOW_TAB_LABELS[PROJECT_WINDOW.tab] ? PROJECT_WINDOW.tab : 'overview');
-  showProjectOverview();
+  drawWithFilesViewFromMain(project, showProjectOverview);
 }
 
 /** The notes after the Plan and Todos tabs: phases done of all, and the open todos. */
@@ -3715,7 +3721,7 @@ function projectTabMenuItem(project, tab, icon) {
       icon: ICONS.popOut(12),
       title: `Open ${label} in a window of its own`,
       always: true,
-      onClick: () => window.api.openProjectWindow(project.id, tab),
+      onClick: () => openProjectTabWindow(project, tab),
     },
   };
 }

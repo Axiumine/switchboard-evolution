@@ -123,7 +123,7 @@ function inProjectWindow() {
   return typeof PROJECT_WINDOW !== 'undefined' && !!PROJECT_WINDOW;
 }
 
-/** Each project remembers its own open files; its window apart from the main one. */
+/** Each project remembers its own open files; its window apart from the main one, whose view it is given. */
 function projectEditorStorageKey(projectId, projectWindow = inProjectWindow()) {
   return `editorTabs:${projectWindow ? 'project-window' : 'project'}:${projectId}`;
 }
@@ -420,6 +420,78 @@ function closeDiffView({ restore = true } = {}) {
   const ed = projectEditors.get(diff.projectId);
   if (ed?.tabs.tabs.length) host.replaceChildren(ed.host);
   else host.innerHTML = '<div class="ws-editor-empty">Pick a file to read or edit it here.</div>';
+}
+
+// --- The same view in the project's window ---
+//
+// The Files window opened from the main window shows what the project's page
+// shows there: the folder's tab, each tree's open folders and selected file,
+// and the open files. The main window leaves them in localStorage, which the
+// app's windows share; the project's window takes them as it loads, or at once
+// when it is already open.
+
+// Older than this, it was left for a window that never opened.
+const FILES_VIEW_MAX_AGE_MS = 60 * 1000;
+
+function filesViewKey(projectId) {
+  return `projectWindowFiles:${projectId}`;
+}
+
+/** In the main window, before the project's Files tab opens in its window. */
+function leaveFilesViewForWindow(project) {
+  // The window reads unsaved text from the drafts.
+  if (typeof flushViewerDrafts === 'function') flushViewerDrafts();
+  let files = [];
+  try { files = JSON.parse(localStorage.getItem(projectEditorStorageKey(project.id)) || 'null')?.files || []; } catch {}
+  const side = projectSideEditor;
+  const root = currentFilesRoot(project);
+  const view = {
+    at: Date.now(),
+    root,
+    trees: [...filesUi(project).roots.values()].map(tree => ({ root: tree.root, expanded: [...tree.expanded], selected: tree.selected })),
+    files,
+    side: side?.projectId === project.id && side.panel.filePath ? { root: side.root, rel: side.rel } : null,
+  };
+  try { localStorage.setItem(filesViewKey(project.id), JSON.stringify(view)); } catch {}
+}
+
+/** In the project's Files window: take over what the main window left for it. Null when it left nothing. */
+function takeFilesViewFromMain(project) {
+  if (!inProjectWindow() || PROJECT_WINDOW.tab !== 'files') return null;
+  const key = filesViewKey(project.id);
+  let view = null;
+  try {
+    view = JSON.parse(localStorage.getItem(key) || 'null');
+    localStorage.removeItem(key);
+  } catch {}
+  if (!view || !(Date.now() - view.at < FILES_VIEW_MAX_AGE_MS)) return null;
+  const ui = filesUi(project);
+  ui.root = view.root;
+  ui.view = 'explorer';
+  for (const tree of view.trees) {
+    const state = filesState(project, tree.root);
+    state.expanded = new Set(tree.expanded);
+    state.selected = tree.selected;
+  }
+  if (projectDiffView?.projectId === project.id) closeDiffView({ restore: false });
+  ensureProjectEditor(project.id).tabs.mirror(view.files);
+  return view;
+}
+
+/** Draw a project window's page with `draw`, on the main window's view when it left one. */
+function drawWithFilesViewFromMain(project, draw) {
+  const view = takeFilesViewFromMain(project);
+  draw();
+  if (view?.side) openFileToSide(project, view.side.root, view.side.rel);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener?.('storage', (event) => {
+    if (!inProjectWindow() || PROJECT_WINDOW.tab !== 'files') return;
+    if (!event.newValue || event.key !== filesViewKey(PROJECT_WINDOW.projectId)) return;
+    const project = findTreeProject(PROJECT_WINDOW.projectId);
+    if (project) drawWithFilesViewFromMain(project, renderOverview);
+  });
 }
 
 // --- The tree ---

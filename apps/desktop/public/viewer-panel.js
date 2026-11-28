@@ -114,6 +114,13 @@ function sameViewerText(a, b) {
   return window.cmNormalizeEol ? window.cmNormalizeEol(a, '\n') === window.cmNormalizeEol(b, '\n') : a === b;
 }
 
+/** What is typed in every viewer goes into the drafts now. False when one could not be written. */
+function flushViewerDrafts() {
+  let kept = true;
+  for (const panel of viewerPanels) if (!panel._flushDraft()) kept = false;
+  return kept;
+}
+
 // One subscription for every viewer of this window: a file changed on disk, its
 // unsaved text changed in another window, and the window closing.
 let viewerEventsBound = false;
@@ -131,9 +138,7 @@ function bindViewerEvents() {
   // What is typed goes into the drafts before the window does. One that cannot
   // be written holds the window until main has asked (will-prevent-unload).
   window.addEventListener('beforeunload', (event) => {
-    let kept = true;
-    for (const panel of viewerPanels) if (!panel._flushDraft()) kept = false;
-    if (kept) return;
+    if (flushViewerDrafts()) return;
     event.preventDefault();
     event.returnValue = false;
   });

@@ -10,7 +10,7 @@ const labels = between('const PROJECT_WINDOW_TAB_LABELS', '/** A tab of the stri
 const menu = between('/**\n * A row of the project menu that opens', 'function trackMenuItems(');
 
 function projectMenu(project, opts) {
-  const calls = { selected: [], windows: [], starred: [] };
+  const calls = { selected: [], windows: [], starred: [], left: [] };
   const icon = name => () => `<${name}>`;
   const context = vm.createContext({
     window: { api: {
@@ -18,6 +18,8 @@ function projectMenu(project, opts) {
       openPath: () => {},
     } },
     selectProject: (id, options) => calls.selected.push([id, options.tab]),
+    // Before the window opens: what the page shows of the Files tab.
+    leaveFilesViewForWindow: project => calls.left.push([project.id, calls.windows.length]),
     ICONS: { gear: icon('gear'), popOut: icon('popOut'), folderOpen: icon('folderOpen') },
     PICONS: new Proxy({}, { get: (_t, name) => icon(name) }),
     newSessionItems: () => [],
@@ -52,6 +54,7 @@ test('Files, Git and Settings open their tab on the project page, or in a window
     selected: [['p1', 'files'], ['p1', 'git'], ['p1', 'settings']],
     windows: [['p1', 'files'], ['p1', 'git'], ['p1', 'settings']],
     starred: [],
+    left: [['p1', 0]],
   });
 });
 
