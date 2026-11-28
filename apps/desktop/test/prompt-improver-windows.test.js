@@ -93,3 +93,23 @@ test('no main window, or no answer in time, is an error', async () => {
   const { windows } = setup({ timeoutMs: 20 });
   assert.match((await windows.apply({ how: 'insert', sessionId: 's1', text: 'x' })).error, /did not answer/);
 });
+
+test('Insert goes to the window that has the session\'s terminal, its own window when it is in one', async () => {
+  const toMain = [];
+  const toOwn = [];
+  const asked = [];
+  const mainWin = { isDestroyed: () => false, webContents: { send: (channel, payload) => toMain.push(payload) } };
+  const ownWin = { isDestroyed: () => false, webContents: { send: (channel, payload) => toOwn.push(payload) } };
+  const windows = createPromptImproverWindows({
+    openWindow: () => fakeWindow(),
+    mainWindow: (sessionId) => { asked.push(sessionId); return sessionId === 'popped' ? ownWin : mainWin; },
+    randomId: () => 'r1',
+    timeoutMs: 1000,
+  });
+  const pending = windows.apply({ how: 'insert', sessionId: 'popped', text: 'Fix the login.' });
+  assert.deepEqual(asked, ['popped']);
+  assert.deepEqual(toOwn.map(p => p.sessionId), ['popped']);
+  assert.deepEqual(toMain, []);
+  windows.applied('r1', { ok: true });
+  assert.deepEqual(await pending, { ok: true });
+});

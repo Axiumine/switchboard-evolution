@@ -44,6 +44,24 @@ contextBridge.exposeInMainWorld('api', {
   onProjectWindowRun: (callback) => {
     ipcRenderer.on('project-window-run', (_event, name, args) => callback(name, args));
   },
+  // A session in a window of its own (session-windows.js). ownerKind is 'main',
+  // 'window' or 'returning' (its window closed: the main window takes it back);
+  // `mine` says whether the window that hears it shows the session now.
+  openSessionWindow: (sessionId) => ipcRenderer.invoke('open-session-window', sessionId),
+  focusSessionWindow: (sessionId) => ipcRenderer.invoke('focus-session-window', sessionId),
+  closeSessionWindow: (sessionId) => ipcRenderer.invoke('close-session-window', sessionId),
+  onSessionOwnerChanged: (callback) => {
+    ipcRenderer.on('session-owner-changed', (_event, sessionId, ownerKind, mine) => callback(sessionId, ownerKind, mine));
+  },
+  sessionWindowRun: (name, args) => ipcRenderer.invoke('session-window-run', name, args),
+  onSessionWindowRun: (callback) => {
+    ipcRenderer.on('session-window-run', (_event, name, args, windowId) => callback(name, args, windowId));
+  },
+  moveSessionToWindow: (sessionId, windowId) => ipcRenderer.invoke('move-session-to-window', sessionId, windowId),
+  onMoveSessionToWindow: (callback) => {
+    ipcRenderer.on('move-session-to-window', (_event, sessionId) => callback(sessionId));
+  },
+  setSessionWindowViewing: (sessionId) => ipcRenderer.send('session-window-viewing', sessionId),
   getWindowOnTop: () => ipcRenderer.invoke('get-window-on-top'),
   setWindowOnTop: (onTop) => ipcRenderer.invoke('set-window-on-top', onTop),
   openInMainWindow: (owner) => ipcRenderer.invoke('task-manager-open-owner', owner),

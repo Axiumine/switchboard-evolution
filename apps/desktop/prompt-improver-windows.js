@@ -7,9 +7,10 @@
 // the terminal, the improved one, the context), handed over once by a token.
 //
 // The session's terminal, and so the reading of its input box that Replace
-// checks, is in the main window: Insert and Replace go there as a request
+// checks, is in the main window, or in the session's own window
+// (session-windows.js): Insert and Replace go there as a request
 // (prompt-improver-apply-request) and its answer comes back
-// (prompt-improver-applied); main then brings the main window forward.
+// (prompt-improver-applied); main then brings that window forward.
 
 const crypto = require('crypto');
 const { MAX_PROMPT } = require('./public/prompt-improver-model');
@@ -42,7 +43,7 @@ function cleanState(state) {
  * deps:
  *   openWindow({ token, title, sessionId }) → a BrowserWindow-like ({ on, isDestroyed })
  *   bringForward(win)                       shows an open window again
- *   mainWindow()                            the main window, or null
+ *   mainWindow(sessionId)                   the window with the session's terminal, or null
  *   randomId()                              ids for tokens and requests
  */
 function createPromptImproverWindows(deps) {
@@ -83,8 +84,8 @@ function createPromptImproverWindows(deps) {
   }
 
   /**
-   * Insert or Replace from a window: asks the main window, which has the
-   * session's terminal, to do it. Resolves its answer, `{ ok, error? }`.
+   * Insert or Replace from a window: asks the window that has the session's
+   * terminal to do it. Resolves its answer, `{ ok, error? }`.
    */
   function apply(request) {
     const r = request && typeof request === 'object' ? request : {};
@@ -92,7 +93,7 @@ function createPromptImproverWindows(deps) {
     const sessionId = line(r.sessionId, 200);
     const value = text(r.text, MAX_PROMPT * 2);
     if (!how || !sessionId || !value.trim()) return Promise.resolve({ ok: false, error: 'Nothing to put in the session.' });
-    const win = mainWindow();
+    const win = mainWindow(sessionId);
     if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'The main window is not open.' });
     const id = randomId();
     return new Promise((resolve) => {

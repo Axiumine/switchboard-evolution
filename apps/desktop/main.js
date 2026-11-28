@@ -24,6 +24,7 @@ const { markBusy, markIdle, applyStatusReport, takeStatusRecords } = require('./
 const { createTerminalFanout } = require('./terminal-fanout');
 const { createSessionLauncher } = require('./remote-launch');
 const { createSessionNotices } = require('./session-notices');
+const { createSessionWindows } = require('./session-windows');
 const { listFolders, createFolder, createPhoneFiles } = require('./remote-files');
 const { planLineText } = require('./remote-plan');
 const { createRemoteTasks } = require('./remote-tasks');
@@ -164,7 +165,10 @@ const activeSessions = new Map();
 let mainWindow = null;
 // The desktop window receives every event; see broadcast.js.
 addSink((channel, args) => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Not the output of a session shown in a window of its own (session-windows.js).
+  if (sessionWindows.routesAway(channel, args)) return;
+  mainWindow.webContents.send(channel, ...args);
 });
 let appIsQuitting = false;
 
@@ -316,6 +320,7 @@ function createWindow() {
     // They close with the main window, and open again with the next one.
     freezeOpenWindows();
     for (const win of [...toolWindows.values(), ...projectWindows.values(), ...compareWindows, ...fileWindows, ...viewerFileWindows, ...webWindows.keys(), ...commandsWindows.values()]) if (!win.isDestroyed()) win.close();
+    sessionWindows.closeAll();
     mainWindow = null;
   });
 }
@@ -2520,8 +2525,9 @@ function openCommandsWindow(info) {
 ipcMain.handle('open-commands-window', (_event, info) => openCommandsWindow(info));
 
 // The Improve prompt window in a window of its own, for the session it was
-// opened for (prompt-improver-windows.js). Insert and Replace go to the main
-// window, which has the session's terminal, and bring it forward.
+// opened for (prompt-improver-windows.js). Insert and Replace go to the window
+// that has the session's terminal (the main window, or the session's own
+// window: session-windows.js), and bring it forward.
 const PROMPT_IMPROVER_WINDOW_SPEC = { title: 'Improve prompt', width: 780, height: 660, minWidth: 460, minHeight: 360, onTop: false };
 const promptImproverWindows = createPromptImproverWindows({
   openWindow: ({ token, title }) => {
@@ -2530,14 +2536,15 @@ const promptImproverWindows = createPromptImproverWindows({
     return win;
   },
   bringForward,
-  mainWindow: () => mainWindow,
+  mainWindow: (sessionId) => sessionWindows.ownerWindow(sessionId) || mainWindow,
 });
 
 ipcMain.handle('open-prompt-improver-window', (_event, state) => promptImproverWindows.open(state));
 ipcMain.handle('get-prompt-improver-window-state', (_event, token) => promptImproverWindows.take(token));
 ipcMain.handle('apply-prompt-improvement', async (_event, request) => {
   const result = await promptImproverWindows.apply(request);
-  if (result.ok && mainWindow && !mainWindow.isDestroyed()) bringForward(mainWindow);
+  const win = sessionWindows.ownerWindow(request?.sessionId) || mainWindow;
+  if (result.ok && win && !win.isDestroyed()) bringForward(win);
   return result;
 });
 ipcMain.on('prompt-improver-applied', (_event, id, result) => { promptImproverWindows.applied(id, result); });
@@ -2599,6 +2606,7 @@ function toolWindowKindOf(webContents) {
   for (const win of fileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'git-file';
   for (const win of viewerFileWindows) if (!win.isDestroyed() && win.webContents === webContents) return 'file';
   for (const win of webWindows.keys()) if (!win.isDestroyed() && win.webContents === webContents) return 'web-page';
+  if (sessionWindows.isSessionWindow(webContents)) return 'session';
   return null;
 }
 
@@ -2845,6 +2853,20 @@ function releaseRemoteFit(session, client) {
 const sessionNotices = createSessionNotices({ emit });
 addSink(sessionNotices.eventSink);
 ipcMain.on('session-notices', (_event, notices) => sessionNotices.publish(notices));
+
+// --- A session in a window of its own (session-windows.js) ---
+// index.html?sessionWindow=<id>, opened from the main window, at its size.
+// The window that shows a session gets its terminal output; a split in the
+// window is started by the main window, which then moves the session to it.
+// They close with the main window.
+const sessionWindows = createSessionWindows({ createPageWindow, getMainWindow: () => mainWindow, activeSessions, sessionNotices, emit, bringForward });
+addSink(sessionWindows.windowSink);
+ipcMain.handle('open-session-window', (_event, sessionId) => sessionWindows.open(sessionId));
+ipcMain.handle('focus-session-window', (_event, sessionId) => sessionWindows.focus(sessionId));
+ipcMain.handle('close-session-window', (_event, sessionId) => sessionWindows.close(sessionId));
+ipcMain.handle('session-window-run', (event, name, args) => sessionWindows.run(event?.sender, name, args));
+ipcMain.handle('move-session-to-window', (event, sessionId, windowId) => sessionWindows.move(event?.sender, sessionId, windowId));
+ipcMain.on('session-window-viewing', (event, sessionId) => sessionWindows.viewing(event?.sender, sessionId));
 
 // A phone's change to a line of the plan, only if the line still holds the
 // text the phone saw there (remote-plan.js).
@@ -3416,21 +3438,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
     // The replay answers this window's request, so it goes to the window
     // only; a broadcast would repeat the backlog in every other client.
-    // If TUI is in alternate screen mode, send escape to switch into it
-    if (session.altScreen && !session.isPlainTerminal) {
-      mainWindow.webContents.send('terminal-data', sessionId, '\x1b[?1049h');
-    }
-
-    // Send buffered output for reattach
-    for (const chunk of session.outputBuffer) {
-      mainWindow.webContents.send('terminal-data', sessionId, chunk);
-    }
-
-    if (!session.isPlainTerminal) {
-      // Hide cursor after buffer replay — the live PTY stream or resize nudge
-      // will re-show it at the correct position, avoiding a stale cursor artifact
-      mainWindow.webContents.send('terminal-data', sessionId, '\x1b[?25l');
-    }
+    // The window that asks takes the session, and gets the replay in the same
+    // step (session-windows.js); a remote call leaves the owner as it is.
+    sessionWindows.reattach(sessionId, session, _event?.sender || null);
 
     return { ok: true, reattached: true, mcpActive: !!session.mcpServer, ideLost: !!session.ideLost };
   }
@@ -3745,6 +3755,8 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     mcpServer, _openedAt: Date.now(),
   };
   activeSessions.set(sessionId, session);
+  // Started from a session window: its output goes there (session-windows.js).
+  sessionWindows.takeOwnership(session, _event?.sender || null);
   if (session.activity) startTerminalActivitySweep();
   // In herdr-core, what a later start needs to pick this session up again.
   if (ptyProcess.relabel) {
@@ -3806,6 +3818,8 @@ ipcMain.on('terminal-input', (_event, sessionId, data) => {
 // --- IPC: terminal-resize (fire-and-forget) ---
 ipcMain.on('terminal-resize', (_event, sessionId, cols, rows) => {
   const session = activeSessions.get(sessionId);
+  // Only the window that shows it sizes the PTY (session-windows.js).
+  if (session && !sessionWindows.mayControl(session, _event?.sender || null)) return;
   if (session && !session.exited) {
     // The window's size, given back when a phone stops fitting the PTY to its own.
     session.desktopSize = { cols, rows };
@@ -3838,6 +3852,8 @@ ipcMain.on('terminal-resize', (_event, sessionId, cols, rows) => {
 // --- IPC: close-terminal ---
 ipcMain.on('close-terminal', (_event, sessionId) => {
   const session = activeSessions.get(sessionId);
+  // Only the window that shows it detaches it (session-windows.js).
+  if (session && !sessionWindows.mayControl(session, _event?.sender || null)) return;
   if (session) {
     session.rendererAttached = false;
     if (session.exited) {
