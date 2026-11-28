@@ -5,7 +5,7 @@
 // Groups of the other kinds (CLI, kind, pinned, status, period, "No project",
 // and the single group of no grouping) get neither.
 //
-//   folder (a worktree too)  + the New session popover of the folder
+//   folder (a worktree too)  + the New session popover of the folder (on screen)
 //                            ⋯ New session… (the same popover), Run project
 //                              task / Set up project tasks (the task popover,
 //                              under the ⋯), the folder's scheduled tasks or
@@ -23,8 +23,8 @@
 // group's header, through a typeof guard.
 //
 // Depends on: overviewHeaderButton, OV_WORKTREE_PATH (session-overview.js);
-// overviewFolderFor (session-overview-panel.js); findProject, showTaskPopover,
-// runningTaskCount (task-runner.js); showNewSessionPopover (dialogs.js);
+// overviewFolderFor, showOverviewNewSessionPopover (session-overview-panel.js);
+// findProject, showTaskPopover, runningTaskCount (task-runner.js);
 // archiveFolderSessions, hideWorktree (sidebar.js); schedulesForFolder,
 // scheduleMenuItems, showScheduleDialog (schedules.js); findTreeProject,
 // newSessionItems, projectMenuItems, showContextMenu, PICONS (projects-view.js);
@@ -46,28 +46,11 @@ function overviewGroupFolder(group) {
   return (typeof findProject === 'function' && findProject(group.path)) || overviewFolderFor(group.path);
 }
 
-/**
- * A folder's New session popover (dialogs.js), kept on screen: it hangs from
- * its anchor's left edge, and a header's + and ⋯ are at the page's right edge.
- * It is laid out again once main has listed the CLIs, so it is watched.
- */
-function showOverviewGroupPopover(folder, anchor) {
-  showNewSessionPopover(folder, anchor);
-  const popover = typeof document !== 'undefined' ? document.querySelector('.new-session-popover') : null;
-  if (!popover) return;
-  const keepOnScreen = () => {
-    const max = window.innerWidth - popover.offsetWidth - 8;
-    if (parseFloat(popover.style.left) > max) popover.style.left = `${Math.max(8, max)}px`;
-  };
-  keepOnScreen();
-  new MutationObserver(keepOnScreen).observe(popover, { childList: true, attributes: true, attributeFilter: ['style'] });
-}
-
 /** The + of a group: a new session in its folder, or in its project. */
 function overviewGroupNew(group, anchor) {
   if (!overviewGroupHasActions(group)) return;
   if (group.kind === 'folder') {
-    showOverviewGroupPopover(overviewGroupFolder(group), anchor);
+    showOverviewNewSessionPopover(overviewGroupFolder(group), anchor);
     return;
   }
   const project = findTreeProject(group.projectId);
@@ -86,7 +69,7 @@ function overviewGroupMenuItems(group, anchor) {
   const tasksRunning = typeof runningTaskCount === 'function' ? runningTaskCount(folder) : 0;
   const schedules = schedulesForFolder(path);
   const items = [
-    { label: 'New session…', icon: PICONS.plus(14), onClick: () => showOverviewGroupPopover(folder, anchor) },
+    { label: 'New session…', icon: PICONS.plus(14), onClick: () => showOverviewNewSessionPopover(folder, anchor) },
     {
       label: folder.hasTaskFile || folder.taskError ? 'Run project task' : 'Set up project tasks',
       icon: PICONS.play(14),

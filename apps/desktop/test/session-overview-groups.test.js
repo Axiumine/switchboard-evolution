@@ -49,7 +49,7 @@ function groups({ folders = {}, schedules = [], running = 0 } = {}) {
     findTreeProject: id => (id === PROJECT.id ? PROJECT : null),
     newSessionItems: project => [{ label: `new in ${project.name}` }],
     projectMenuItems: project => [{ label: `menu of ${project.name}` }],
-    showNewSessionPopover: call('showNewSessionPopover'),
+    showOverviewNewSessionPopover: call('showOverviewNewSessionPopover'),
     showTaskPopover: call('showTaskPopover'),
     showScheduleDialog: call('showScheduleDialog'),
     openSettingsViewer: call('openSettingsViewer'),
@@ -76,7 +76,7 @@ test("a folder's ⋯ has New session…, its tasks, its schedules, Folder settin
   for (const item of items) item.onClick?.();
   const folder = { projectPath: FOLDER, sessions: [], madeUp: true };
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-    ['showNewSessionPopover', folder, anchor],
+    ['showOverviewNewSessionPopover', folder, anchor],
     ['showTaskPopover', folder, anchor],
     ['showScheduleDialog', { cwd: FOLDER }],
     ['openSettingsViewer', 'project', FOLDER],
@@ -107,7 +107,7 @@ test("a folder's + is its New session popover", () => {
   const anchor = {};
   context.overviewGroupNew({ key: FOLDER, kind: 'folder', path: FOLDER }, anchor);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], 'showNewSessionPopover');
+  assert.equal(calls[0][0], 'showOverviewNewSessionPopover');
   assert.equal(calls[0][1].projectPath, FOLDER);
   assert.equal(calls[0][2], anchor);
 });

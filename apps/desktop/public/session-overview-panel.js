@@ -357,7 +357,7 @@ function buildOverviewPanel(el) {
   const addButton = q('.ovp-add');
   addButton.addEventListener('click', () => showAddProjectDialog({
     // A folder with no session would not show on the page: go on to start one.
-    onAdded: projectPath => showNewSessionPopover(overviewFolderFor(projectPath), addButton),
+    onAdded: projectPath => showOverviewNewSessionPopover(overviewFolderFor(projectPath), addButton),
   }));
   q('.ovp-resort').addEventListener('click', () => refreshSessionOverview({ resort: true }));
 
@@ -605,6 +605,24 @@ function overviewFolderFor(projectPath) {
     || { projectPath, folder: encodeProjectPath(projectPath), sessions: [] };
 }
 
+/**
+ * A folder's New session popover (dialogs.js), kept inside the window. It hangs
+ * from its anchor's left edge, and the overview's buttons that open it (the
+ * page header's "+ New session", a group's + and ⋯) are at the page's right
+ * edge. It is laid out again once main has listed the CLIs, so it is watched.
+ */
+function showOverviewNewSessionPopover(folder, anchor) {
+  showNewSessionPopover(folder, anchor);
+  const popover = typeof document !== 'undefined' ? document.querySelector('.new-session-popover') : null;
+  if (!popover) return;
+  const keepInside = () => {
+    const max = window.innerWidth - popover.offsetWidth - 8;
+    if (parseFloat(popover.style.left) > max) popover.style.left = `${Math.max(8, max)}px`;
+  };
+  keepInside();
+  new MutationObserver(keepInside).observe(popover, { childList: true, attributes: true, attributeFilter: ['style'] });
+}
+
 /** The projects of the menu: not done, starred first, then the busiest. */
 function overviewMenuProjects() {
   const projects = cachedProjectTree?.projects || [];
@@ -639,14 +657,14 @@ function showOverviewNewSession(anchor) {
     if (items.length) items.push({ sep: true });
     items.push({ head: 'Recent folders' });
     for (const folder of folders) {
-      items.push({ label: overviewFolderLabel(folder.projectPath), icon: PICONS.folder(13), onClick: () => showNewSessionPopover(folder, anchor) });
+      items.push({ label: overviewFolderLabel(folder.projectPath), icon: PICONS.folder(13), onClick: () => showOverviewNewSessionPopover(folder, anchor) });
     }
   }
   if (items.length) items.push({ sep: true });
   items.push({
     label: 'Choose folder…',
     icon: PICONS.plus(13),
-    onClick: () => showAddProjectDialog({ onAdded: projectPath => showNewSessionPopover(overviewFolderFor(projectPath), anchor) }),
+    onClick: () => showAddProjectDialog({ onAdded: projectPath => showOverviewNewSessionPopover(overviewFolderFor(projectPath), anchor) }),
   });
   showContextMenu(items, { anchor });
 }

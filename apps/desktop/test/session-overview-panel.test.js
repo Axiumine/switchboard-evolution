@@ -407,3 +407,45 @@ test('Add folder can go on to the new folder', () => {
   assert.ok(dialog.startsWith('function showAddProjectDialog({ onAdded } = {}) {'), dialog.slice(0, 80));
   assert.match(dialog, /await loadProjects\(\);\n\s+if \(typeof onAdded === 'function'\) onAdded\(result\.projectPath \|\| projectPath\);/);
 });
+
+test("the overview's New session popover stays inside the window", () => {
+  const shown = [];
+  const observers = [];
+  const popover = { style: { left: '1500px' }, offsetWidth: 200 };
+  const context = vm.createContext({
+    document: { querySelector: selector => (selector === '.new-session-popover' ? popover : null) },
+    showNewSessionPopover: (folder, anchor) => shown.push([folder, anchor]),
+    MutationObserver: class { constructor(callback) { observers.push(callback); } observe() {} },
+  });
+  context.window = { innerWidth: 1592 };
+  vm.runInContext(body(panelSource, 'function showOverviewNewSessionPopover('), context);
+  const folder = { projectPath: '/Users/demo/app' };
+  const anchor = {};
+  context.showOverviewNewSessionPopover(folder, anchor);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0][0], folder);
+  assert.equal(shown[0][1], anchor);
+  // Past the right edge: moved in, 8px from it.
+  assert.equal(popover.style.left, '1384px');
+  // Laid out again (main listed the CLIs): moved in again.
+  popover.style.left = '1500px';
+  popover.offsetWidth = 230;
+  observers[0]();
+  assert.equal(popover.style.left, '1354px');
+  // One that fits stays where it is; in a window narrower than it, at 8px.
+  popover.style.left = '400px';
+  observers[0]();
+  assert.equal(popover.style.left, '400px');
+  context.window.innerWidth = 200;
+  observers[0]();
+  assert.equal(popover.style.left, '8px');
+
+  // Every folder popover the overview opens goes through it.
+  for (const header of ['function showOverviewNewSession(', 'function buildOverviewPanel(']) {
+    const source = body(panelSource, header);
+    assert.ok(!source.includes('showNewSessionPopover('), header);
+    assert.ok(source.includes('showOverviewNewSessionPopover('), header);
+  }
+  const groups = read('session-overview-groups.js');
+  assert.ok(!groups.includes('showNewSessionPopover('));
+});
