@@ -97,7 +97,7 @@ const { createDraftStore } = require('./file-drafts');
 const fileTimeline = require('./file-timeline');
 const projectSearch = require('./project-search');
 const { readPlans, linkPlans, projectResolver } = require('./plans-source');
-const { resolveTerminalFiles } = require('./terminal-file-links');
+const { resolveTerminalFiles, resolveDocumentLink } = require('./terminal-file-links');
 const { createCommandCatalog } = require('./command-catalog');
 const { createDocsRefresher } = require('./command-docs-refresh');
 const { scanClaudeLocal } = require('./claude-local-commands');
@@ -1131,6 +1131,7 @@ ipcMain.handle('mcp-diff-response', (_event, sessionId, diffId, action, editedCo
   resolvePendingDiff(sessionId, diffId, action, editedContent));
 
 ipcMain.handle('resolve-terminal-files', (_event, references, context) => resolveTerminalFiles(references, context));
+ipcMain.handle('resolve-document-link', (_event, reference, fromFile) => resolveDocumentLink(reference, fromFile));
 
 ipcMain.handle('open-file-externally', async (_event, filePath, projectRoot) => {
   try {

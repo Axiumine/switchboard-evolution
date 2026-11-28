@@ -17,6 +17,9 @@ const planPanel = new ViewerPanel(planViewer, {
   copyPath: true, copyContent: true,
   language: 'markdown', storageKey: 'markdownPreviewMode',
   onSave: (filePath, content) => window.api.savePlan(filePath, content),
+  // This viewer saves plans only: a linked file opens as a click in the Files
+  // tab would, in a tab there, whose panel shows the section.
+  openLinked: (filePath, { line, column }) => openFileHere(filePath, { line, column }),
 });
 
 // currentPlanContent, currentPlanFilePath, currentPlanFilename → plans-memory-view.js

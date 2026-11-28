@@ -37,7 +37,10 @@
  * restart too. Viewers of the same file, in this window or another, show the
  * same unsaved text. A save, or Don't Save, drops the draft.
  *
- * Depends on: viewer-toolbar.js, codemirror-bundle.js
+ * A link of a Markdown preview never moves the window: a section is scrolled
+ * to, a web address goes to the browser, a file opens in the app.
+ *
+ * Depends on: viewer-toolbar.js, codemirror-bundle.js, markdown-links.js
  */
 
 // The text size of every editor and Markdown preview, as steps of one pixel
@@ -169,6 +172,9 @@ class ViewerPanel {
    * @param {Function}  opts.openFile     - async (filePath, { line, column }) => false | ViewerPanel | void, how
    *                                        the host opens another file (Go to Definition): the panel it opened it
    *                                        in when not this one; false (or none) and this viewer opens it
+   * @param {Function}  opts.openLinked   - async (filePath, { line, column, anchor }) => ViewerPanel | void, how
+   *                                        the host opens the file a Markdown link names, when not as `openFile`
+   *                                        does: the panel it opened it in when not this one
    * @param {Object}    opts.history      - { back: [], forward: [] }, Go Back's places, shared by a host's tabs
    * @param {Function}  opts.onDirtyChange - (dirty) => void, as unsaved changes come and go
    */
@@ -246,6 +252,7 @@ class ViewerPanel {
     this.previewEl.style.display = 'none';
     // A click in the preview gives it the focus, so that its keys (Cmd/Ctrl+F) reach this panel.
     this.previewEl.tabIndex = -1;
+    this.previewEl.addEventListener('click', (e) => this._onPreviewClick(e));
     container.appendChild(this.previewEl);
 
     // Wire toolbar events
@@ -386,7 +393,10 @@ class ViewerPanel {
 
     const previousPath = this.filePath;
     this.filePath = filePath;
-    if (previousPath !== filePath) this._jsonState = { open: null };
+    if (previousPath !== filePath) {
+      this._jsonState = { open: null };
+      this.previewEl.scrollTop = 0;
+    }
     this.previewUrl = preview.previewUrl || '';
     this.previewType = preview.previewType || (/\.html?$/i.test(filePath) ? 'html' : 'text');
     this.toolbar.setTitle(title);
@@ -551,6 +561,64 @@ class ViewerPanel {
     this.open(filePath.split(/[\\/]/).pop(), filePath, result.content, { line, column });
     this.editorView?.focus();
     return this.editorView;
+  }
+
+  // ── Links of a Markdown preview ─────────────────────────────────────
+
+  _onPreviewClick(e) {
+    if (!this._isMarkdown(this.filePath)) return;
+    const link = e.target.closest?.('a[href]');
+    if (!link) return;
+    e.preventDefault();
+    this.openLink(link.getAttribute('href')).catch((err) => alert(err.message || 'Could not open the link.'));
+  }
+
+  /**
+   * What the link `href` of the shown file does. A file with no preview is
+   * shown in the file manager, never launched: a Markdown file may be
+   * somebody else's text.
+   */
+  async openLink(href) {
+    const link = window.MarkdownLinks.parseMarkdownLink(href);
+    if (link.kind === 'anchor') { this.showAnchor(link.anchor); return; }
+    // The main process opens web addresses only.
+    if (link.kind === 'external') { await window.api.openExternal(link.url); return; }
+    if (link.kind !== 'file') return;
+    const from = this.filePath;
+    const target = await window.api.resolveDocumentLink(link.path, from);
+    if (this.filePath !== from) return;
+    if (!target) { alert(`${link.path} was not found`); return; }
+    if (target.directory) { await window.api.openPath(target.filePath); return; }
+    if (!target.viewable) { await window.api.revealFile(target.filePath); return; }
+    const { filePath, line, column } = target;
+    if (filePath === from) {
+      if (line) this.goToLocation(line, column);
+      else this.showAnchor(link.anchor);
+      return;
+    }
+    // The host's way for links, else as Go to Definition opens a file: in a
+    // tab of the host's (the panel it answers with), else here.
+    let opened = false;
+    if (this.opts.openLinked) opened = await this.opts.openLinked(filePath, { line, column, anchor: link.anchor });
+    else if (this.opts.openFile) opened = await this.opts.openFile(filePath, { line, column });
+    if (opened === false) {
+      await this.openHere(filePath, { line, column });
+      opened = this;
+    }
+    const panel = opened?.filePath !== undefined ? opened : this;
+    if (panel.filePath === filePath) panel.showAnchor(link.anchor);
+  }
+
+  /** Scroll the Markdown preview to the section `anchor` names, as GitHub names headings. */
+  showAnchor(anchor) {
+    if (!anchor || !this.previewMode) return;
+    const headings = [...this.previewEl.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+    const slugs = window.MarkdownLinks.headingSlugs(headings.map(h => h.textContent));
+    const found = headings[slugs.indexOf(anchor.toLowerCase())]
+      // An anchor written in the file as HTML.
+      || [...this.previewEl.querySelectorAll('[id], a[name]')].find(el => el.id === anchor || el.getAttribute('name') === anchor);
+    // Only the preview scrolls (scrollIntoView would move the boxes around it too).
+    if (found) this.previewEl.scrollTop += found.getBoundingClientRect().top - this.previewEl.getBoundingClientRect().top;
   }
 
   goToLocation(line, column = 1) {

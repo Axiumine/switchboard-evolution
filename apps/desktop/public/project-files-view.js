@@ -234,6 +234,7 @@ function ensureSideEditor() {
     copyPath: true, copyContent: true, language: 'auto', storageKey: 'markdownPreviewMode',
     onSave: (filePath, content, options) => saveProjectEditorFile(projectSideEditor, filePath, content, options),
     onClose: () => closeSideEditor(),
+    openLinked: (filePath, at) => openSideEditorLink(projectSideEditor, filePath, at),
   });
   projectSideEditor = { host, panel, projectId: null, root: null, rel: null };
   return projectSideEditor;
@@ -356,6 +357,19 @@ async function openProjectEditorLocation(ed, filePath, { line, column } = {}) {
   if (!tab.loaded) return null;
   if (line) tab.panel.goToLocation(line, column);
   return tab.panel;
+}
+
+/** A link in the side editor: a file of its folder opens there, any other in a window of its own. */
+async function openSideEditorLink(side, filePath, { line, column } = {}) {
+  const project = selectedProject();
+  const root = side.root;
+  const sep = root && root.includes('\\') && !root.includes('/') ? '\\' : '/';
+  if (!project || project.id !== side.projectId || !root || !filePath.startsWith(root + sep)) {
+    openFileInWindow(filePath);
+    return;
+  }
+  await openFileToSide(project, root, filePath.slice(root.length + 1).split(sep).join('/'));
+  if (side.panel.filePath === filePath && line) side.panel.goToLocation(line, column);
 }
 
 /** "Open to the Side": the file in a second editor beside the first. */
