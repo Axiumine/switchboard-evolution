@@ -350,7 +350,7 @@ function tabs({ tab = 'projects' } = {}) {
     resetSearchExclusions() {}, updateSearchActions() {}, leaveProjectViews() {},
     restoreTerminalArea: () => { calls.restored++; },
     showOverviewTab: () => { calls.overviewTab++; overviewPanel.hidden = false; },
-    renderProjectList() {}, showProjectHome() {}, loadPlans() {}, loadFiles() {}, showStatsPage() {},
+    renderProjectList() {}, showProjectHome() {}, loadPlans() {}, loadFiles() {}, restoreFilesEditor() {}, showStatsPage() {},
     loadProjects: () => { calls.loaded++; return Promise.resolve(); },
   });
   const app = read('app.js');
