@@ -226,13 +226,23 @@ function overviewCreatedTime(session) {
 /**
  * Put cards in order. With `resort`, or no earlier order (`previousIds`), by
  * `sort` ({ by, dir }; `asc` reverses the order each `by` has by default: newest
- * first, A to Z, the order of the buckets). Else as orderRenderItems puts rows:
- * they keep their places and new ones go on top.
+ * first, A to Z, the order of the buckets). Else the cards keep their places
+ * and new live ones go on top, newest first, as orderRenderItems puts rows;
+ * closed ones not placed before (a search or a filter brought them in) go
+ * after them, in the sort's order: they are not new sessions.
  */
 function orderCards(cards, { sort, resort, previousIds }) {
   const items = cards.map(card => ({ sortTime: card.sortTime, pinned: card.pinned, running: card.running, element: { id: card.id }, card }));
   const kept = items.length > 0 && !resort && previousIds;
-  if (kept) return orderRenderItems(items, { order: 'recent', resort, previousIds }).map(item => item.card);
+  if (kept) {
+    const known = new Set(previousIds);
+    const placed = items.filter(item => item.card.live || known.has(item.card.id));
+    const broughtIn = cards.filter(card => !card.live && !known.has(card.id));
+    return [
+      ...orderRenderItems(placed, { order: 'recent', resort, previousIds }).map(item => item.card),
+      ...orderCards(broughtIn, { sort, resort: true }),
+    ];
+  }
   const by = sort.by;
   let ordered;
   if (by === 'activity' || by === 'priority') {

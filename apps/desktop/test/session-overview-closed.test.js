@@ -189,11 +189,62 @@ test('closed or archived sessions switched on take their places by the sort', ()
   context.overviewPrefs = { includeClosed: false, showArchived: false, group: { by: 'none' }, layout: { mode: 'grid-fit' } };
   vm.runInContext(body('function setOverviewPrefs(') + body('function mergeOverviewPrefs('), context);
   const set = patch => vm.runInContext(`setOverviewPrefs(${JSON.stringify(patch)})`, context);
-  // On: they are not new cards to put on top, so the page re-sorts. Off, or anything else: places kept.
+  // On: the page changes as a whole and re-sorts. Off, or anything else: places kept.
   set({ includeClosed: true });
   set({ showArchived: true });
   set({ includeClosed: false });
   set({ showArchived: false });
   set({ layout: { mode: 'rows' } });
   assert.deepEqual(refreshed, [true, true, false, false, false]);
+});
+
+test('a preview call that fails is logged, and asked again only after the retry time', async () => {
+  const warns = [];
+  let calls = 0;
+  let clock = 1000;
+  class FakeDate extends Date { static now() { return clock; } }
+  const api = { getSessionPreviews: () => { calls++; return Promise.reject(new Error('no handler')); } };
+  const { context, run } = closedModule({ api, Date: FakeDate, console: { warn: (...args) => warns.push(args.map(String).join(' ')) } });
+  const session = { sessionId: 'f', modified: 'm' };
+  context.wantClosedPreview(session);
+  await context.flushClosedPreviews();
+  assert.equal(calls, 1);
+  assert.equal(warns.length, 1);
+  assert.match(warns[0], /^\[overview\] Could not read session previews: Error: no handler/);
+  assert.equal(context.closedPreviewText(run('ovClosed.previews'), session), null);
+  // A render or the card coming back into view does not ask again at once...
+  clock += run('OVC_EMPTY_RETRY_MS') - 1;
+  context.wantClosedPreview(session);
+  assert.equal(run('ovClosed.queue.size'), 0);
+  // ...only once the retry time has passed.
+  clock += 1;
+  context.wantClosedPreview(session);
+  await context.flushClosedPreviews();
+  assert.equal(calls, 2);
+  assert.equal(warns.length, 2);
+});
+
+test('a Resume that fails is logged, and the card can be resumed again', async () => {
+  const warns = [];
+  const adopted = new Set();
+  const opened = [];
+  const { context, run } = closedModule({
+    console: { warn: (...args) => warns.push(args.map(String).join(' ')) },
+    sessionMap: new Map([['r', { sessionId: 'r' }]]),
+    isSessionOverviewOpen: () => true,
+    overviewAdopt: id => adopted.add(id),
+    ovState: { adopted },
+    openSession: session => { opened.push(session.sessionId); throw new Error('spawn failed'); },
+  });
+  context.resumeOverviewSession('r');
+  assert.equal(run('ovClosed.resuming.has("r")'), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, ['r']);
+  assert.equal(warns.length, 1);
+  assert.match(warns[0], /^\[overview\] Could not resume the session r: Error: spawn failed/);
+  assert.equal(adopted.has('r'), false);
+  assert.equal(run('ovClosed.resuming.has("r")'), false);
+  context.resumeOverviewSession('r');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, ['r', 'r']);
 });

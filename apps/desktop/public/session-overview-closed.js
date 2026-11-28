@@ -21,7 +21,8 @@
 // The last message comes from window.api.getSessionPreviews, asked only for the
 // cards in view (an IntersectionObserver), a batch at a time, and kept until the
 // session's `modified` changes. An empty text means the index has not read the
-// session yet: the card shows no preview and asks again a while later.
+// session yet: the card shows no preview and asks again a while later. A call
+// that fails is logged and counts the same, so it is retried at that pace too.
 //
 // session-overview.js calls drawOverviewClosedCard and pruneOverviewClosedCards
 // while it draws, overviewClosedCardOf and focusOverviewClosedCard for the keys,
@@ -114,7 +115,12 @@ async function flushClosedPreviews() {
   for (let i = 0; i < asked.length; i += OVC_PREVIEW_BATCH) {
     const batch = asked.slice(i, i + OVC_PREVIEW_BATCH);
     let answer = null;
-    try { answer = await api.getSessionPreviews(batch.map(item => item.id)); } catch {}
+    try {
+      answer = await api.getSessionPreviews(batch.map(item => item.id));
+    } catch (err) {
+      // Kept as "none yet": asked again after OVC_EMPTY_RETRY_MS, when the card is in view.
+      console.warn('[overview] Could not read session previews:', err);
+    }
     keepClosedPreviews(ovClosed.previews, batch, answer, Date.now());
     for (const { id } of batch) {
       ovClosed.asking.delete(id);
@@ -320,13 +326,16 @@ function resumeOverviewSession(id) {
   ovClosed.resuming.add(id);
   ovClosed.cards.get(id)?.el.querySelector('.ov-resume-btn')?.setAttribute('disabled', '');
   overviewAdopt(id);
-  Promise.resolve(openSession(session)).catch(() => {}).finally(() => {
-    // Shown by now if it opened; not opened (an archived one left archived), it must not stay adopted.
-    ovState.adopted.delete(id);
-    ovClosed.resuming.delete(id);
-    const button = ovClosed.cards.get(id)?.el.querySelector('.ov-resume-btn');
-    if (button) button.disabled = false;
-  });
+  Promise.resolve()
+    .then(() => openSession(session))
+    .catch(err => console.warn(`[overview] Could not resume the session ${id}:`, err))
+    .finally(() => {
+      // Shown by now if it opened; not opened (an archived one left archived), it must not stay adopted.
+      ovState.adopted.delete(id);
+      ovClosed.resuming.delete(id);
+      const button = ovClosed.cards.get(id)?.el.querySelector('.ov-resume-btn');
+      if (button) button.disabled = false;
+    });
 }
 
 /** The menu of a closed card (⋯ and right click): Resume, then the session's own. */

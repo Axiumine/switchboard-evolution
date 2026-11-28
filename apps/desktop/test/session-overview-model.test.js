@@ -405,6 +405,29 @@ test('a resumed session keeps its place', () => {
   assert.deepEqual(groups.map(g => g.key), previousGroups);
 });
 
+test('closed sessions a search brings in go after the live ones, and a new live card still goes on top', () => {
+  // The closed ones are the most recent: by time alone they would come first.
+  const live = [s('live1', { days: 2 }), s('live2', { days: 3 })];
+  const closed = [s('c0', { days: 0.1 }), s('c1', { days: 0.2 }), s('c2', { days: 0.3 })];
+  const open = new Set(['live1', 'live2']);
+  const ctx = { isOpen: id => open.has(id) };
+  const first = build(live, {}, ctx);
+  assert.deepEqual(cardIds(first.groups[0]), ['live1', 'live2']);
+  const previousOrder = new Map([[first.groups[0].key, ['live1', 'live2']]]);
+
+  // A search brings in c0..c2: after the known cards, in the sort's order.
+  const searchIds = new Set(['live1', 'live2', 'c0', 'c1', 'c2']);
+  const found = build([...live, ...closed], {}, { ...ctx, previousOrder, searchIds });
+  assert.deepEqual(cardIds(found.groups[0]), ['live1', 'live2', 'c0', 'c1', 'c2']);
+  const reversed = build([...live, ...closed], { sort: { dir: 'asc' } }, { ...ctx, previousOrder, searchIds });
+  assert.deepEqual(cardIds(reversed.groups[0]), ['live1', 'live2', 'c2', 'c1', 'c0']);
+
+  // A new live card still goes on top, however old.
+  open.add('new');
+  const withNew = build([...live, ...closed, s('new', { days: 5 })], {}, { ...ctx, previousOrder, searchIds: new Set([...searchIds, 'new']) });
+  assert.deepEqual(cardIds(withNew.groups[0]), ['new', 'live1', 'live2', 'c0', 'c1', 'c2']);
+});
+
 test('held-back and earlier sessions keep their places from one render to the next', () => {
   // overviewPlaces is what the page passes back as previousOrder.
   const places = result => fn('overviewPlaces')(result.groups);

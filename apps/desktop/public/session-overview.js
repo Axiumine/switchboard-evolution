@@ -187,8 +187,9 @@ function overviewLastResults() {
 
 /**
  * Change some choices: they are normalized, saved and drawn. A new sort or
- * grouping puts the cards in its order, and so do closed or archived sessions
- * switched on: they take their places by the sort, not all on top as new cards.
+ * grouping puts the cards in its order, and so does switching closed or
+ * archived sessions on: the page changes as a whole, and is drawn in the sort's
+ * order (kept places would leave every closed card after the live ones).
  */
 function setOverviewPrefs(patch) {
   const before = ensureOverviewPrefs();
