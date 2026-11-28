@@ -23,12 +23,14 @@
 // cachedAllProjects, cachedProjectTreeAll, activePtyIds, attentionSessions,
 // responseReadySessions, sessionBusyState, sessionEventTime, activeSessionId,
 // activeTab, visibleSessionCount, sessionMaxAgeDays, pendingSessions,
-// terminalsEl, terminalArea, placeholder, setActiveSession, clearNotifications,
-// confirmAndStopSession, updateRunningIndicators (app.js); gridCards,
+// projectsChangedWhileAway, terminalsEl, terminalArea, placeholder,
+// setActiveSession, clearNotifications, confirmAndStopSession,
+// updateRunningIndicators, loadProjects (app.js); gridCards,
 // isTextEditingTarget (grid-view.js); fitAndScroll, isMac (terminal-manager.js);
 // isSessionRunning (sidebar.js); projectForSession, projectRootLabel,
-// sessionTitle, sessionMenuItems, showContextMenu, showProjectHome, PICONS
-// (projects-view.js); hideAllViewers (plans-memory-view.js); ICONS (icons.js).
+// sessionTitle, sessionMenuItems, showContextMenu, showProjectHome, projectsUi,
+// rememberProjectSession, saveProjectsUi, PICONS (projects-view.js);
+// hideAllViewers (plans-memory-view.js); ICONS (icons.js).
 
 const OV_GAP = 14; // the cards' gap, as in session-overview.css and layoutGeometry
 const OV_GROUP_GAP = 8; // between a group's header and its cards, as in session-overview.css
@@ -65,6 +67,7 @@ const ovState = {
   maximized: null, // the entry whose card fills the page
   adopted: new Set(), // ids whose next showSession focuses them here (overviewAdopt)
   bornHere: new WeakSet(), // entries whose terminal was made while the page was open
+  exit: null, // { id, shown } while openSessionNormally opens the Projects tab
   layout: null, // what the last render drew, for the layout pass
   originalShowSession: null,
   terminalsObserver: null,
@@ -117,13 +120,41 @@ function toggleSessionOverview() {
 /**
  * Leave the page the way every session opens from outside it: the Projects
  * tab, on the session's project and its Session tab. A session with no project
- * opens on its own, as it always did.
+ * opens on its own, as it always did. Without a session, the tab's own page.
+ *
+ * Opening the tab shows what it remembers (showProjectHome), so it is pointed at
+ * this session first, and no other session is shown on the way: showing one
+ * would mark it seen and clear what it had to say.
  */
 function openSessionNormally(id) {
   closeSessionOverview('session');
-  document.querySelector('.sidebar-tab[data-tab="projects"]')?.click();
-  if (id) (ovState.originalShowSession || showSession)(id);
-  else if (typeof showProjectHome === 'function') showProjectHome();
+  const projectsTab = document.querySelector('.sidebar-tab[data-tab="projects"]');
+  if (!id) {
+    const already = activeTab === 'projects';
+    projectsTab?.click();
+    if (already && typeof showProjectHome === 'function') showProjectHome();
+    return;
+  }
+  const session = sessionMap.get(id) || openSessions.get(id)?.session;
+  const project = session ? overviewProjectOf(session) : null;
+  if (project) {
+    projectsUi.selectedProjectId = project.id;
+    rememberProjectSession(project.id, id);
+    saveProjectsUi();
+  }
+  // The tab would catch up on changes seen while away and show its page later,
+  // past the guard below: catch up here instead.
+  const away = typeof projectsChangedWhileAway !== 'undefined' && projectsChangedWhileAway;
+  if (away) projectsChangedWhileAway = false;
+  const exit = { id, shown: false };
+  ovState.exit = exit;
+  try {
+    projectsTab?.click();
+  } finally {
+    ovState.exit = null;
+  }
+  if (away && typeof loadProjects === 'function') loadProjects();
+  if (!exit.shown) (ovState.originalShowSession || showSession)(id);
 }
 
 /** The next showSession of this id focuses its card here instead of leaving (a session resumed from the page). */
@@ -875,6 +906,13 @@ if (typeof document !== 'undefined') {
     const original = window.showSession;
     ovState.originalShowSession = original;
     window.showSession = function showSessionOverOverview(sessionId, ...rest) {
+      // Leaving for a session (openSessionNormally): the Projects tab shows no other one.
+      const exit = ovState.exit;
+      if (exit) {
+        if (sessionId !== exit.id) return;
+        exit.shown = true;
+        return original(sessionId, ...rest);
+      }
       if (!isSessionOverviewOpen()) return original(sessionId, ...rest);
       // A session resumed from the page, or just started while it is open, stays
       // on it. (Plain terminals stay pending for good: only one made just now counts.)
