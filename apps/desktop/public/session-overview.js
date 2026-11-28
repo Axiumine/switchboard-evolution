@@ -29,7 +29,9 @@
 // The + and ⋯ of a folder's or a project's group header are
 // session-overview-groups.js's (decorateOverviewGroupHeader, typeof guarded), and
 // a card's "Leave out of this search" is session-overview-panel.js's
-// (overviewLeaveOutItems, the same).
+// (overviewLeaveOutItems, the same), as are a session started during a search
+// joining its results (keepInOverviewSearch) and the results bar after each
+// render (refreshOverviewResults).
 //
 // The sessions docked beside the cards are session-overview-dock.js's, reached
 // through typeof guards: the body is its tile layout (mountOverviewDock,
@@ -365,7 +367,9 @@ function unmountSessionOverview(reason) {
  * Terminals made while the page is open (createTerminalEntry adds them to
  * #terminals); true when there are some. One made for a session launched just
  * now (pending, no PTY yet: not a resumed one, nor a terminal from an earlier
- * run) is new: the next render puts it on top of its group (newIds).
+ * run) is new: the next render puts it on top of its group (newIds), and while
+ * a search is on it is one of the results (keepInOverviewSearch,
+ * session-overview-panel.js), or it would get no card.
  */
 function noteNewTerminals(records) {
   const added = records.flatMap(r => [...r.addedNodes]).filter(n => n.classList?.contains('terminal-container'));
@@ -374,7 +378,10 @@ function noteNewTerminals(records) {
     ovState.bornHere.add(entry);
     const id = entry.session?.sessionId;
     const pending = id ? pendingSessions.get(id) : null;
-    if (pending && !pending.restored && !activePtyIds.has(id)) ovState.newIds.add(id);
+    if (pending && !pending.restored && !activePtyIds.has(id)) {
+      ovState.newIds.add(id);
+      if (typeof keepInOverviewSearch === 'function') keepInOverviewSearch(id);
+    }
   }
   return added.length > 0;
 }
@@ -532,6 +539,8 @@ function renderSessionOverview({ resort = false } = {}) {
   ovState.terminalsObserver?.takeRecords();
   ovState.cardsObserver?.takeRecords();
   updateRunningIndicators();
+  // "N results" and "Stop N running" follow every render, not only the panel's own.
+  if (typeof refreshOverviewResults === 'function') refreshOverviewResults();
 }
 
 /** `counts`: the sessions on the page (`total`) and those running (`running`). */

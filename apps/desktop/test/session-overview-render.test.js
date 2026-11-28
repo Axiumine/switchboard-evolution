@@ -191,3 +191,27 @@ test('a card taken off the page does not get the keyboard back', () => {
   draw([['g', ['a']]]);
   assert.notEqual(document.activeElement, field);
 });
+
+test('a session started while a search is on joins its results', () => {
+  const { document } = harness();
+  const kept = [];
+  const context = vm.createContext({
+    console, Map, Set, WeakSet, JSON, document,
+    pendingSessions: new Map([['n1', {}], ['old', { restored: true }]]),
+    activePtyIds: new Set(),
+    keepInOverviewSearch: id => kept.push(id),
+  });
+  context.window = context;
+  vm.runInContext(source, context);
+  const terminal = id => {
+    const element = document.createElement('div');
+    element.className = 'terminal-container';
+    return { session: { sessionId: id }, element };
+  };
+  const entries = ['n1', 'old', 'live'].map(terminal);
+  context.activePtyIds.add('live');
+  context.openSessions = new Map(entries.map(entry => [entry.session.sessionId, entry]));
+  context.noteNewTerminals([{ addedNodes: entries.map(entry => entry.element) }]);
+  // Only the session launched just now: not one resumed from an earlier run, nor one already running.
+  assert.deepEqual(kept, ['n1']);
+});

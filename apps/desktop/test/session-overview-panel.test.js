@@ -210,6 +210,103 @@ test('the results bar counts what the page counts, also when closed sessions sha
   assert.equal(bar.hidden, true);
 });
 
+test('the results bar follows every render of the page, not only the panel\'s', () => {
+  const overview = read('session-overview.js');
+  const now = Date.now();
+  const sessions = ['a', 'b', 'c'].map((id, i) => ({
+    sessionId: id, name: `Alpha ${id}`, projectPath: '/Users/demo/app', modified: new Date(now - i * 60000).toISOString(),
+  }));
+  const parts = { '.ovp-results-count': fakeElement(), '.ovp-restore': fakeElement(), '.ovp-stop': fakeElement() };
+  const bar = fakeElement(parts);
+  const panelEl = fakeElement({ '.ovp-results': bar });
+  const context = vm.createContext({
+    console, Map, Set, WeakSet, Promise, JSON, Date, Math, Number, Object, Array, String,
+    setTimeout, clearTimeout, clearInterval() {}, cancelAnimationFrame() {}, removeEventListener() {},
+    document: { addEventListener() {}, getElementById: id => (id === 'overview-panel' ? panelEl : null), querySelector: () => null },
+    localStorage: { getItem: () => null, setItem() {} },
+    cachedAllProjects: [{ projectPath: '/Users/demo/app', sessions }],
+    sessionMap: new Map(sessions.map(session => [session.sessionId, session])),
+    openSessions: new Map(sessions.map(session => [session.sessionId, { session, element: {} }])),
+    isSessionRunning: () => true,
+    attentionSessions: new Set(), responseReadySessions: new Set(), sessionBusyState: new Map(),
+    sessionEventTime: session => Date.parse(session.modified),
+    visibleSessionCount: 10, sessionMaxAgeDays: 3,
+    terminalsEl: {}, terminalHeader: { style: {} },
+    updateRunningIndicators() {},
+  });
+  context.window = context;
+  vm.runInContext([searchResults, model, overview, panelSource].join('\n'), context);
+  const run = code => vm.runInContext(code, context);
+  context.drawOverviewHeader = () => {};
+  context.drawOverviewCards = () => {};
+  context.layoutSessionOverview = () => {};
+  run('ovPanel').el = panelEl;
+  run('ovState.root = { remove() {} }; overviewSearch = { query: "alpha", ids: new Set(["a", "b", "c"]) };');
+  // The 30 s timer's render, an observer's, a page turn: not the panel's own.
+  run('renderSessionOverview()');
+  assert.equal(parts['.ovp-results-count'].textContent, '3 results');
+  assert.equal(parts['.ovp-stop'].textContent, 'Stop 3 running');
+  context.isSessionRunning = id => id === 'a';
+  run('renderSessionOverview()');
+  assert.equal(parts['.ovp-stop'].textContent, 'Stop 1 running');
+  // Out of sight, the bar is left alone.
+  panelEl.hidden = true;
+  context.isSessionRunning = () => false;
+  run('renderSessionOverview()');
+  assert.equal(parts['.ovp-stop'].textContent, 'Stop 1 running');
+});
+
+test('emptying the box, then changing a search control, ends the search', async () => {
+  const { context, run } = panel();
+  await run('runOverviewSearch("alpha")');
+  assert.ok(run('overviewSearch'));
+  // The box was just emptied: its debounce, which would have ended the search, is pending.
+  const input = { value: '' };
+  run('ovPanel').el = { querySelector: selector => (selector === '.ovp-search-input' ? input : null) };
+  context.setTimeout(() => {}, 0);
+  await run('rerunOverviewSearch()');
+  assert.equal(run('overviewSearch'), null);
+});
+
+test('a session started from the page during a search is one of its results, and a result keeps its place through a re-key', async () => {
+  const listeners = {};
+  let ready = null;
+  const { context, run, ids } = panel();
+  context.document.addEventListener = (type, fn) => { if (type === 'DOMContentLoaded') ready = fn; };
+  context.activeTab = 'projects';
+  context.api.onSessionDetected = fn => { listeners.detected = fn; };
+  context.api.onSessionForked = fn => { listeners.forked = fn; };
+  vm.runInContext(panelSource.slice(panelSource.lastIndexOf('if (typeof document !== \'undefined\') {')), context);
+  ready();
+
+  // Nothing to keep without a search.
+  run('keepInOverviewSearch("n1")');
+  assert.equal(run('overviewSearch'), null);
+
+  await run('runOverviewSearch("alpha")');
+  run('keepInOverviewSearch("n1")');
+  assert.deepEqual(ids(), ['folder', 'message', 'n1', 'title']);
+  // The same query again ("Search in messages" changed, a trailing space): it is still a result.
+  await run('runOverviewSearch("alpha ")');
+  assert.deepEqual(ids(), ['folder', 'message', 'n1', 'title']);
+
+  // Codex's real id, a fork: the result follows; the earlier id of a fork is still the session it was.
+  listeners.detected('n1', 'r1');
+  listeners.forked('title', 'f1');
+  assert.deepEqual(ids(), ['f1', 'folder', 'message', 'n1', 'r1', 'title']);
+  await run('runOverviewSearch("alpha")');
+  assert.ok(ids().includes('r1'), 'kept through the same query again');
+
+  // Left out under its old id, it stays left out under its new one.
+  run('overviewLeftOut.add("folder")');
+  listeners.forked('folder', 'f2');
+  assert.ok(run('overviewLeftOut').has('f2'));
+
+  // A new query is a new set of results.
+  await run('runOverviewSearch("refactor")');
+  assert.deepEqual(ids(), ['folder']);
+});
+
 test('the CLI filter offers the switched-on CLIs, Terminal, and any already chosen', () => {
   const { run } = panel();
   const choices = (enabled, chosen) => [...run(`overviewCliChoices(${JSON.stringify(enabled)}, ${JSON.stringify(chosen)})`)];

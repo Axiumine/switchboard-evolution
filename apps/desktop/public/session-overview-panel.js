@@ -10,7 +10,11 @@
 // and with "Search in messages" by what their messages say, from 3 characters
 // (window.api.searchSessions). The page shows what it found (overviewSearch),
 // minus what was left out of this search (overviewLeftOut, which the cards'
-// menus fill through overviewLeaveOutItems).
+// menus fill through overviewLeaveOutItems). The results are a snapshot of
+// ids, so a session started from the page during the search joins them
+// (keepInOverviewSearch, from session-overview.js noteNewTerminals), and a
+// result, or a session left out, keeps that under its new id when its session
+// changes id (session-detected, session-forked).
 //
 // The files shared with upstream reach it through one-line hooks guarded with
 // typeof: the tab handler (app.js) calls showOverviewTab for the Sessions tab
@@ -46,6 +50,8 @@ const OVP_MENU_FOLDERS = 6;
 let overviewSearch = null;
 // Sessions left out of this search; a new query starts with none.
 const overviewLeftOut = new Set();
+// Sessions started from the page during this search: results whatever they are called. A new query starts with none.
+const overviewSearchKept = new Set();
 
 const ovPanel = {
   el: null, // #overview-panel once built
@@ -98,6 +104,11 @@ function refreshOverviewPanel() {
   if (overviewPanelShown()) renderOverviewPanel();
 }
 
+/** The results bar alone, after any render of the page (its timer's, an observer's, a page turn), when it is in sight. */
+function refreshOverviewResults() {
+  if (ovPanel.el && overviewPanelShown()) syncOverviewResults();
+}
+
 function loadOverviewClis() {
   const api = typeof window !== 'undefined' ? window.api : null;
   if (typeof api?.getHarnesses !== 'function') return;
@@ -148,17 +159,45 @@ async function runOverviewSearch(query) {
 }
 
 function setOverviewSearch(next) {
-  // A new query starts with nothing left out; the same query keeps what was.
-  if ((next?.query ?? null) !== (overviewSearch?.query ?? null)) overviewLeftOut.clear();
+  // A new query starts with nothing left out and nothing kept; the same query keeps what was.
+  if ((next?.query ?? null) !== (overviewSearch?.query ?? null)) {
+    overviewLeftOut.clear();
+    overviewSearchKept.clear();
+  } else if (next) {
+    for (const id of overviewSearchKept) next.ids.add(id);
+  }
   overviewSearch = next;
   refreshOverviewTab();
 }
 
-/** The search again, now: "Search in messages", First / Last / All or N changed. */
+/**
+ * A session started from the page while a search is on is one of its results:
+ * it would get no card otherwise. It stays one when the same query runs again.
+ */
+function keepInOverviewSearch(id) {
+  if (!overviewSearch || !id) return;
+  overviewSearch.ids.add(id);
+  overviewSearchKept.add(id);
+}
+
+/**
+ * A session changed id (Codex's real id, a fork, a plan accepted): a result
+ * is still one, and a session left out is still left out, under the new id.
+ * The old id stays: a fork's earlier session is still the one it was.
+ */
+function followOverviewSearchRekey(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  if (overviewSearch?.ids.has(oldId)) overviewSearch.ids.add(newId);
+  if (overviewSearchKept.has(oldId)) overviewSearchKept.add(newId);
+  if (overviewLeftOut.has(oldId)) overviewLeftOut.add(newId);
+}
+
+/** The search again, now: "Search in messages", First / Last / All or N changed. A box just emptied ends it. */
 function rerunOverviewSearch() {
   clearTimeout(ovPanel.timer);
   const input = ovPanel.el?.querySelector('.ovp-search-input');
-  if (input && input.value.trim()) runOverviewSearch(input.value);
+  if (input) return runOverviewSearch(input.value);
+  return undefined;
 }
 
 /**
@@ -677,6 +716,9 @@ if (typeof document !== 'undefined') {
     // nothing once it is gone.
     const main = document.getElementById('main');
     if (main) new MutationObserver(() => refreshOverviewPanel()).observe(main, { childList: true });
+    // A result keeps its card when its session changes id, as app.js moves its terminal.
+    window.api?.onSessionDetected?.((oldId, newId) => followOverviewSearchRekey(oldId, newId));
+    window.api?.onSessionForked?.((oldId, newId) => followOverviewSearchRekey(oldId, newId));
     // A start opens on the Sessions tab until app.js clicks the remembered one.
     if (activeTab === 'sessions') showOverviewSidebar();
   }, { once: true });
