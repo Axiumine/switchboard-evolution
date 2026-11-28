@@ -15,24 +15,33 @@ const { createSessionNotices } = require('../session-notices');
 
 /** A webContents as main sees one: what it was sent, and whether it is gone. */
 function contents(id) {
+  const handlers = {};
   return {
     id, destroyed: false, sent: [],
     isDestroyed() { return this.destroyed; },
     send(channel, ...args) { this.sent.push([channel, ...args]); },
+    once(event, fn) { (handlers[event] ||= []).push(fn); },
+    /** Its page goes, as Electron destroys it: 'destroyed', once. */
+    destroy() {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      for (const fn of handlers.destroyed || []) fn();
+    },
   };
 }
 
-function fakeWindow(webContents, bounds) {
+/** `load` stands for loadFile's promise: a page that loads, or one that fails. */
+function fakeWindow(webContents, bounds, load) {
   const handlers = {};
   return {
     webContents, bounds, loaded: null, closed: false,
     on(event, fn) { (handlers[event] ||= []).push(fn); },
     isDestroyed() { return this.closed; },
-    loadFile(file, options) { this.loaded = { file, options }; return Promise.resolve(); },
+    loadFile(file, options) { this.loaded = { file, options }; return load(this); },
     close() {
       if (this.closed) return;
       this.closed = true;
-      webContents.destroyed = true;
+      webContents.destroy();
       for (const fn of handlers.closed || []) fn();
     },
   };
@@ -44,6 +53,9 @@ function setup() {
   const activeSessions = new Map();
   const created = [];
   const forward = [];
+  const logged = [];
+  // Whether the next window's page loads: windows.open() awaits it.
+  let load = () => Promise.resolve();
   let nextId = 2;
   // The broadcast: the main window's sink, as main.js adds it, then the session windows'.
   const sinks = [];
@@ -51,7 +63,7 @@ function setup() {
   const sessionNotices = createSessionNotices({ emit });
   const windows = createSessionWindows({
     createPageWindow: (kind, spec, options) => {
-      const win = fakeWindow(contents(nextId++), options.bounds);
+      const win = fakeWindow(contents(nextId++), options.bounds, (w) => load(w));
       created.push({ kind, spec, options, win });
       return win;
     },
@@ -60,6 +72,7 @@ function setup() {
     sessionNotices,
     emit,
     bringForward: (win) => forward.push(win),
+    log: { error: (...args) => logged.push(args.join(' ')) },
   });
   sinks.push((channel, args) => { if (!windows.routesAway(channel, args)) main.send(channel, ...args); });
   sinks.push(windows.windowSink);
@@ -81,7 +94,8 @@ function setup() {
   }
   const take = (wc) => wc.sent.splice(0);
   const data = (wc) => wc.sent.filter(([channel]) => channel === 'terminal-data');
-  return { windows, main, mainWindow, activeSessions, sessionNotices, created, forward, emit, session, output, popOut, take, data };
+  const loadWith = (fn) => { load = fn; };
+  return { windows, main, mainWindow, activeSessions, sessionNotices, created, forward, logged, loadWith, emit, session, output, popOut, take, data };
 }
 
 test('output of a popped-out session goes only to its window', async () => {
@@ -141,6 +155,18 @@ test('a reattach from the window takes ownership and replays to it once', async 
   assert.deepEqual(take(win.webContents).filter(([channel]) => channel === 'session-owner-changed'), [['session-owner-changed', 's1', 'window', true]]);
   // Taking it again changes nothing.
   assert.equal(windows.takeOwnership(s1, win.webContents), false);
+  assert.deepEqual(take(main), []);
+
+  // A remote reattach (the phone, a schedule: no window) replays to the
+  // window that owns it, and the owner stays.
+  assert.equal(windows.reattach('s1', s1, null), win.webContents);
+  assert.equal(windows.ownerOf(s1), win.webContents);
+  assert.deepEqual(take(win.webContents), [
+    ['terminal-data', 's1', '\x1b[?1049h'],
+    ['terminal-data', 's1', 'a'],
+    ['terminal-data', 's1', 'b'],
+    ['terminal-data', 's1', '\x1b[?25l'],
+  ], 'one replay, and no session-owner-changed');
   assert.deepEqual(take(main), []);
 
   // The main window takes it back: the replay is its own, and the window,
@@ -253,6 +279,7 @@ test('a destroyed owner counts as the main window', async () => {
   windows.reattach('s1', s1, win.webContents);
   take(main);
 
+  // Gone before any of its events came (they would make it RETURNING: the next test).
   win.webContents.destroyed = true;
   assert.equal(windows.ownerOf(s1), null);
   assert.equal(windows.windowFor('s1'), null);
@@ -398,4 +425,78 @@ test('a session window relays its launches, the main window moves the new sessio
   assert.equal(windows.isSessionWindow(main), false);
   assert.equal(windows.ownerWindow('s2'), win);
   assert.equal(windows.ownerWindow('s1'), null);
+});
+
+test('a session a session window starts is that window\'s; one the main window or a phone starts changes nothing', async () => {
+  const { windows, main, session, popOut, take } = setup();
+  const s1 = session('s1');
+  const win = await popOut('s1');
+  windows.reattach('s1', s1, win.webContents);
+  take(main);
+  take(win.webContents);
+
+  // open-terminal's spawn path: a fresh session object, then takeOwnership.
+  const fromMain = session('new-main');
+  assert.equal(windows.takeOwnership(fromMain, main), false);
+  const fromPhone = session('new-phone');
+  assert.equal(windows.takeOwnership(fromPhone, null), false);
+  assert.equal(windows.ownerOf(fromMain), null);
+  assert.equal(windows.ownerOf(fromPhone), null);
+  assert.deepEqual(take(main), [], 'nothing is emitted');
+  assert.deepEqual(take(win.webContents), []);
+
+  const fromWindow = session('new-window');
+  assert.equal(windows.takeOwnership(fromWindow, win.webContents), true);
+  assert.equal(windows.ownerOf(fromWindow), win.webContents);
+  assert.deepEqual(take(main), [['session-owner-changed', 'new-window', 'window', false]]);
+  assert.deepEqual(take(win.webContents), [['session-owner-changed', 'new-window', 'window', true]]);
+});
+
+test('a window whose page is gone holds its sessions at once, before its closed event', async () => {
+  const { windows, main, session, output, popOut, take, data } = setup();
+  const s1 = session('s1');
+  const win = await popOut('s1');
+  windows.reattach('s1', s1, win.webContents);
+  take(main);
+
+  // Electron destroys the webContents; the window's closed event has not come yet.
+  win.webContents.destroy();
+  assert.equal(win.closed, false);
+  assert.equal(windows.ownerOf(s1), RETURNING);
+  assert.deepEqual(take(main), [['session-owner-changed', 's1', 'returning', false]]);
+  output('s1', s1, 'meanwhile');
+  assert.deepEqual(data(main), [], 'no output streams to the main window');
+  assert.equal(windows.mayControl(s1, main), false);
+
+  // The closed event that follows changes nothing more.
+  win.close();
+  assert.deepEqual(take(main), []);
+  assert.equal(windows.ownerOf(s1), RETURNING);
+});
+
+test('a window whose page does not load is closed and logged, and the next open makes a new one', async () => {
+  const { windows, session, created, forward, logged, loadWith } = setup();
+  session('s1');
+  loadWith(() => Promise.reject(new Error('ERR_FILE_NOT_FOUND')));
+  await windows.open('s1');
+  assert.equal(created.length, 1);
+  assert.equal(created[0].win.closed, true);
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /could not load the window of s1: ERR_FILE_NOT_FOUND/);
+  assert.equal(windows.windowFor('s1'), null);
+  assert.equal(windows.focus('s1'), false);
+
+  // Closed while its page loaded: nothing to log, nothing left behind.
+  loadWith((w) => { w.close(); return Promise.reject(new Error('ERR_ABORTED')); });
+  await windows.open('s1');
+  assert.equal(created.length, 2);
+  assert.equal(logged.length, 1);
+  assert.equal(windows.windowFor('s1'), null);
+
+  loadWith(() => Promise.resolve());
+  await windows.open('s1');
+  assert.equal(created.length, 3);
+  assert.equal(created[2].win.closed, false);
+  assert.equal(windows.windowFor('s1'), created[2].win);
+  assert.deepEqual(forward, []);
 });

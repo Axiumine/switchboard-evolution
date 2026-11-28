@@ -2859,7 +2859,7 @@ ipcMain.on('session-notices', (_event, notices) => sessionNotices.publish(notice
 // The window that shows a session gets its terminal output; a split in the
 // window is started by the main window, which then moves the session to it.
 // They close with the main window.
-const sessionWindows = createSessionWindows({ createPageWindow, getMainWindow: () => mainWindow, activeSessions, sessionNotices, emit, bringForward });
+const sessionWindows = createSessionWindows({ createPageWindow, getMainWindow: () => mainWindow, activeSessions, sessionNotices, emit, bringForward, log });
 addSink(sessionWindows.windowSink);
 ipcMain.handle('open-session-window', (_event, sessionId) => sessionWindows.open(sessionId));
 ipcMain.handle('focus-session-window', (_event, sessionId) => sessionWindows.focus(sessionId));

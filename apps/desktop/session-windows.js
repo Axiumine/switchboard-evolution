@@ -45,25 +45,17 @@ const OFFSET = 24;
 const routed = new Set(ROUTED_CHANNELS);
 const windowEvents = new Set(SESSION_WINDOW_EVENTS);
 
-function showWindow(win) {
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
-}
-
 /**
- * deps:
+ * deps, all required:
  *   createPageWindow(kind, spec, { bounds }) → a BrowserWindow (main.js)
  *   getMainWindow()                          the main window, or null
  *   activeSessions                           main's Map of live sessions
  *   sessionNotices                           session-notices.js: what a window shows counts as seen
  *   emit(channel, ...args)                   broadcast.js
- *   bringForward(win)                        shows a window again
+ *   bringForward(win)                        shows a window again (main.js)
+ *   log                                      { error }
  */
-function createSessionWindows({
-  createPageWindow, getMainWindow, activeSessions, sessionNotices,
-  emit = require('./broadcast').emit, bringForward = showWindow,
-}) {
+function createSessionWindows({ createPageWindow, getMainWindow, activeSessions, sessionNotices, emit, bringForward, log }) {
   const windows = new Map(); // webContents id → { win, sessionId (opened for), adopted }
 
   const live = (win) => !!win && !win.isDestroyed() && !win.webContents.isDestroyed();
@@ -229,6 +221,10 @@ function createSessionWindows({
     });
     const wcId = win.webContents.id;
     windows.set(wcId, { win, sessionId, adopted: false });
+    // Its sessions are on their way back as soon as its page is gone, not only
+    // at the window's closed event: no output streams to the main window in
+    // between. onClosed acts once.
+    win.webContents.once('destroyed', () => onClosed(wcId));
     win.on('closed', () => onClosed(wcId));
     const session = sessionFor(sessionId);
     const query = { sessionWindow: sessionId };
@@ -239,8 +235,13 @@ function createSessionWindows({
     }
     try {
       await win.loadFile(INDEX_PAGE, { query });
-    } catch {
-      // Closed before its page loaded.
+    } catch (err) {
+      // Closed before its page loaded: nothing to do.
+      if (win.isDestroyed()) return;
+      // Any other failure would leave a blank window that open() and focus()
+      // keep bringing forward: it goes.
+      log.error(`[session-windows] could not load the window of ${sessionId}: ${err?.message || err}`);
+      win.close();
     }
   }
 
