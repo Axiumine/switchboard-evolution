@@ -52,7 +52,7 @@ In a terminal, `-h` or `--help` lists the program's options and `-v` or `--versi
 | IDE emulation (diff review) | ✅ | — | — |
 | Plans and memory files | ✅ | — | — |
 
-Sessions from all the CLIs share one sidebar, each row marked with its CLI's logo. A fork runs on the CLI that wrote the session being forked.
+Sessions from all the CLIs show side by side: as cards in the Session Overview, which can group them by CLI, and in the Projects tab's session drawers, each row marked with its CLI's logo. A fork runs on the CLI that wrote the session being forked.
 
 OpenCode means OpenCode 2.x. It keeps its sessions in one database rather than a file each (`~/.local/share/opencode/opencode.db`, or what `OPENCODE_DB` names), which Switchboard reads without writing to it. Its working and waiting states come from the status reports its terminal interface sends.
 
@@ -60,11 +60,11 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 
 ## Features at a glance
 
-- **Session browser** — Every session from every supported CLI, organized by folder, searchable by content.
+- **Session browser** — Every session from every supported CLI, in the Session Overview (grouped by folder, project, CLI and more) and in each project's sessions drawer, searchable by content.
 - **Fork and resume** — Branch off from any point in a session's history.
 - **Built-in terminal** — Connect to running sessions or launch new ones without leaving the app. `Ctrl` + mouse wheel (or `Cmd` + wheel on macOS, or a touchpad pinch) makes the terminals' text larger or smaller, apart from the app's own zoom in the View menu.
 - **Status notifications** — In-app alerts when a session is waiting for permission approval or user input.
-- **Session overview** — A page of live terminals for all open sessions, with its own filters, sorting, groups, search in messages, and five layouts.
+- **Session Overview** — A page of live terminals for all open sessions, with its own filters, sorting, groups, search in messages, and five layouts.
 - **Split panes** — Split a session's page like tmux: the new half starts a session like the one you split.
 - **Session windows** — Any session in a window of its own, and back.
 - **Prompt improver** — A button next to Commands in a session's terminal (Cmd/Ctrl+Shift+P) reads the prompt you are typing to the CLI, has it rewritten with the commands, skills and MCP servers the session has, and puts the result back in its place (or inserts or copies it); nothing is sent. It runs the CLI you are signed in to (`claude -p`, `codex exec --ephemeral`, `opencode run`) once and out of sight, on your subscription, with no API key, and leaves no session behind. The window says which session the prompt goes into and stays tied to it: Expand it, or open it in a window of its own, and Insert or Replace still go there even after you switch to another session. The rewriting instructions are yours to edit in Settings › Prompt improver; the phone has the same button beside "/".
@@ -81,7 +81,7 @@ Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not sca
 
 ## Sessions
 
-The **Sessions** tab opens the [Session overview](#session-overview), a page with every open session's live terminal, and its sidebar holds the page's controls. The search there finds a session by its title or folder, and by what was discussed, not just when it happened. Any session can be resumed, forked from any point in its history, or read in the message viewer.
+The **Sessions** tab opens the [Session Overview](#session-overview), a page with every open session's live terminal, and its sidebar holds the page's controls. The search there finds a session by its title or folder, and by what was discussed, not just when it happened. Any session can be resumed, forked from any point in its history, or read in the message viewer.
 
 ### Launch options
 
@@ -99,7 +99,7 @@ The optional settings (model, effort, allowed tools, additional system prompt, p
 
 ### Scheduled tasks
 
-A scheduled task starts a session with a prompt on a timer: every 15 or 30 minutes, every hour, every day, on weekdays, or every week. Create one with **New scheduled task…** from a project's right-click menu, the **Schedules** button on a project's page, or the ⋯ of a folder's group in the Session overview. Each task's menu shows when it runs next and can edit it, run it now, turn it off, or delete it. Sessions a schedule started are marked with a clock.
+A scheduled task starts a session with a prompt on a timer: every 15 or 30 minutes, every hour, every day, on weekdays, or every week. Create one with **New scheduled task…** from a project's right-click menu, the **Schedules** button on a project's page, or the ⋯ of a folder's group in the Session Overview. Each task's menu shows when it runs next and can edit it, run it now, turn it off, or delete it. Sessions a schedule started are marked with a clock.
 
 Schedules use the same CLI-specific configuration form as **New Session → Configure**. Choose **Use folder defaults** to follow the current settings at each run, or **Customize** to save individual overrides. Each customized field can be reset to its folder default, and Claude and Codex choices are kept separately when switching CLIs.
 
@@ -109,7 +109,7 @@ For Project View schedules, defaults come from the track's starting folder, then
 
 ### Status notifications
 
-Switchboard watches every session in the background, whichever CLI runs it, and shows status in the sidebar so you can tell at a glance which sessions need attention while you work in a different one.
+Switchboard watches every session in the background, whichever CLI runs it, and shows its status on its card in the Session Overview and on its row in the Projects tab's drawers, so you can tell at a glance which sessions need attention while you work in a different one.
 
 ![Status Notifications](build/screenshot-notifications.png)
 
@@ -117,23 +117,23 @@ Switchboard watches every session in the background, whichever CLI runs it, and 
 - **Permission approval** — A session blocked on a permission grant or approval gets a badge immediately. Switchboard reads each CLI's own wording, so Claude's permission prompts, Codex's approval requests and OpenCode's permission and question prompts all register.
 - **Activity indicators** — See which sessions are running, idle, or finished.
 
-### Session overview
+### Session Overview
 
-Selecting the **Sessions** tab opens the **Session Overview**, a page of its own with no project header: one card for every open session (one with a live terminal), whichever CLI it runs, with the terminal live inside it. The tab's sidebar holds the page's controls instead of a list. Its first button, **Session Overview**, brings the page back when Settings, the Task Manager or Stats covered it, and Cmd/Ctrl+Shift+G opens it from anywhere.
+Selecting the **Sessions** tab opens the **Session Overview**, a page of its own with no project header: one card for every open session (one with a live terminal), whichever CLI it runs, with the terminal live inside it. The tab's sidebar holds the page's controls instead of a list. Settings, Folder settings and the Task Manager come back to the page when you close them; its first button, **Session Overview**, brings it back from any other page that covered it. Cmd/Ctrl+Shift+G toggles it from anywhere: it opens the page, or, with the page open, opens the card in focus in its project.
 
 ![Session Overview](build/screenshot-overview.png)
 
 - **Cards** — A card's header shows the state dot, the name, the folder and the project, then Commands and Improve prompt, **Open in new window**, **Split**, **Maximize**, Stop while it runs, and ⋯; its footer shows the state and the time. A click in a card gives it the keyboard without leaving the page. **Maximize** fills the page with that card; a second click, or Esc outside the terminal, puts it back. The ⋯ button and a right-click on the header open the session's menu: Open in project, Maximize, the split items, Open in new window, then star, rename, fork, move, archive and the rest.
-- **Opening a session normally** — A double click on a card's header, **Open in project**, Cmd/Ctrl+Shift+G, or a session opened from elsewhere (the Task Manager, a project window) closes the page and shows that session in the Projects tab, on its project's Session tab. A session with no project opens on its own.
-- **The page** — The header says "n sessions · m running", shows each filter that hides sessions as a chip with an ×, the pager ("‹ 1 / 3 ›") in Grid (fit), and **+ New session**, which starts a session in a project, in one of the recent folders, or in a folder you choose. A session started from the page appears on it, with the keyboard.
+- **Opening a session normally** — A double click on a card's header, **Open in project**, Cmd/Ctrl+Shift+G, or a session opened from elsewhere (the Task Manager, a project window), also while another page covers the overview on the Sessions tab, closes the page and shows that session in the Projects tab, on its project's Session tab. A session with no project opens on its own.
+- **The page** — The header says "n sessions · m running", shows each filter that hides sessions as a chip with an ×, the pager ("‹ 1 / 3 ›") in Grid (fit), and **+ New session**, which starts a session in a project, in one of the recent folders, or in a folder you choose. A session started from the page appears on it, with the keyboard, also during a search. A card keeps the keyboard when the page is drawn again and moves it (its group changes with its state).
 - **Controls** — The sidebar starts with **Session Overview**, **+ New session**, **Add folder** (then the new session menu for that folder, since a folder with no session would not show) and **Re-sort**: cards keep their places until you press it, and new ones go on top. Then come Search, Sessions, Filter, Sort, Group and Layout. All of it is remembered across restarts, and the first start carries over the Sessions list's status, pinned, order and "Group by folders" choices.
-- **Search** — The field finds sessions by title or folder name from the first letter. **Search in messages** looks in what was said, too: the **First** or **Last** N messages (1 to 20, user and agent, without tools and thinking) or **All** of them, from three characters. While a search is on, closed and archived sessions show too and none is held back, and a bar says "N results", with "Stop N running" and, after a card's "Leave out of this search", "Restore N left out".
-- **Closed sessions** — **Include closed** adds the sessions that are not open, as light cards: name, folder, project and CLI, the last message, the number of messages and the last activity, with **Resume**, which opens the session right there as a live card. **Show archived** adds the archived ones. Closed cards follow the limits in Settings: per group, pinned ones and up to Max visible sessions within the max age show, and the rest wait behind a "+ N older" card (a search or a filter shows them all). Closed sessions of one conversation show the latest, with "+n earlier" for the others.
+- **Search** — The field finds sessions by title or folder name from the first letter. **Search in messages** looks in what was said, too: the **First** or **Last** N messages (1 to 20, user and agent, without tools and thinking) or **All** of them, from three characters. While a search is on, closed and archived sessions show too and none is held back, a result stays one when its session changes id (a fork, a plan accepted), and a bar says "N results", with "Stop N running" and, after a card's "Leave out of this search", "Restore N left out".
+- **Closed sessions** — **Include closed** adds the sessions that are not open, as light cards: name, folder, project and CLI, the last message, the number of messages and the last activity, with **Resume**, which opens the session right there as a live card. **Show archived** adds the archived ones. Closed cards follow the limits in Settings: per group, pinned ones and up to **Max Visible Sessions** within **Session Max Age (days)** show, and the rest wait behind a "+ N older" card (a search or a filter shows them all). Closed sessions of one conversation show the latest, with "+n earlier" for the others.
 - **Filter and sort** — Status, Pinned, CLI, Period (of the last activity: today, yesterday, the last 3 days, week or month) and Place (a folder or a project), with Reset filters. Sort by Recent activity, Running & pinned first, Created, Name, Status, or Folder or project, either way round.
 - **Groups** — Group by Folder (a worktree is a group of its own), Project, CLI, Kind, Status, Period or Pinned, shown as **Sections** or as **Carousels** that go Across or Down and Fit their cards or Scroll. A click on a group's header folds it, and folded groups are remembered. A folder's group has a + for a new session there and a ⋯ with New session…, the folder's project tasks, its scheduled tasks, **Folder settings**, **Archive all sessions…** (after a confirmation), and Hide worktree for a worktree; a project's group has the project's own + and right-click menu.
 - **Layouts** — Grid (fit) fills the page with columns × rows of cards and puts the rest on further pages; Grid, scroll down; Grid, scroll across; Rows; Columns. Card width and height sliders size the cards where the layout lets them, and Reset view goes back to the defaults.
 - **Keys** — Cmd/Ctrl+Arrows move to the nearest card that way (past the edge, to the next page), and Cmd/Ctrl+Shift+[ and ] go through the cards in order.
-- **Many terminals** — Only the terminals on screen draw with the GPU (WebGL), and only the ten used last; the others draw without it. So many live cards never run out of graphics contexts or go black.
+- **Many terminals** — Only the terminals on screen draw with the GPU (WebGL), and only the ten used last; the others draw without it, and so does a session's place in the main window while it is in a window of its own. So many live cards never run out of graphics contexts or go black.
 
 ### Split panes
 
@@ -142,8 +142,8 @@ A session's page can hold other sessions beside it, in panes, as in tmux. **Spli
 ![Split panes](build/screenshot-split.png)
 
 - Each pane has a header with the state dot, the name, **Split**, **Maximize**, **Remove from split** (×) and ⋯. Drag a divider to resize. **Maximize** fills the page with one pane until you click it again. **Remove from split** takes the pane out, and its session keeps running. Cmd/Ctrl+Alt+Arrows move between panes.
-- The layout belongs to its sessions: showing any of them shows the whole layout, with that pane in front. Layouts are kept across restarts. An agent that stopped keeps its pane as "Stopped · Resume" (one still running but not attached says "Running · Resume"), a crash keeps its banner, and a plain terminal that ended gives its space to its neighbour.
-- In the Session overview, a card's **Split** docks its session beside the cards, in half the page, and each next one halves the space the cards have left. A docked pane's Split starts a new session beside it, and its Remove from split makes it a card again. The dock is remembered, but after a restart it keeps only the sessions the app opens again by itself: plain terminals and the session you were in. Other agent sessions leave it.
+- The layout belongs to its sessions: showing any of them shows the whole layout, with that pane in front. Layouts are kept across restarts. An agent that stopped keeps its pane as "Stopped · Resume" (one still running but not attached says "Running · Resume"), a crash keeps its banner, and a plain terminal that ended gives its space to its neighbour. A pane that ends on its own leaves the keys where they are when you are typing elsewhere, in the file panel or a field.
+- In the Session Overview, a card's **Split** docks its session beside the cards, in half the page, and each next one halves the space the cards have left. A docked pane's Split starts a new session beside it, and its Remove from split makes it a card again. The dock is remembered, but after a restart it keeps only the sessions the app opens again by itself: plain terminals and the session you were in. Other agent sessions leave it.
 
 ### Session windows
 
@@ -151,8 +151,8 @@ A session's page can hold other sessions beside it, in panes, as in tmux. **Spli
 
 ![A docked session beside the cards, and a session in its own window](build/screenshot-session-window.png)
 
-- In the main window, the session's card, pane or terminal says "In its own window", with **Bring back** and **Show window**. A session you watch in its window is not marked unread.
-- Closing the window brings its sessions back to the main window, with the layout they had in it. A session that ends in its window closes the window when it was the last one.
+- In the main window, the session's card, pane or terminal says "In its own window", with **Bring back** and **Show window**. A session you watch in its window is not marked unread. Improve prompt in the main window does not read the prompt of a session in its own window, whose place there still shows the screen it left with: improve it in its window.
+- Closing the window brings its sessions back to the main window, with the layout they had in it, at the main window's size even when they are not on screen there. A session that ends in its window closes the window when it was the last one.
 - Session windows close with the main window and are not opened again at the next start.
 
 ### IDE emulation and file preview (Claude only)
@@ -170,14 +170,14 @@ To let Claude use VS Code, Cursor, or another editor instead, uncheck **IDE Emul
 
 ## Projects
 
-The Session overview can group sessions by the folder they run in. The **Projects** tab groups them by the work they belong to.
+The Session Overview can group sessions by the folder they run in. The **Projects** tab groups them by the work they belong to.
 
 | | What it is |
 |---|---|
 | **Project** | A piece of work with a folder on disk. Everything else about it is optional. |
 | **Track** | A line of effort inside a project, with its own sessions. Optional. |
 | **Session** | A session as it is today, plus the project it belongs to. |
-| **Folder** | A path on disk, as the Session overview's folder groups show it. A project can attach any number. |
+| **Folder** | A path on disk, as the Session Overview's folder groups show it. A project can attach any number. |
 
 ![Project View overview](build/project-view-overview.png)
 
@@ -230,7 +230,7 @@ The project's **Settings** tab is a list of rows: the name, the start folder, fo
 
 ![Project View new session menu](build/project-view-new-session-menu.png)
 
-- **New project** — Name it, pick a template, and attach the folders it works in. The dialog shows what Create will make: the project folder and its files, each worktree on its branch, and the tracks the template adds. Sessions started from the project's Overview are filed under the project and still belong to their folder in the Session overview.
+- **New project** — Name it, pick a template, and attach the folders it works in. The dialog shows what Create will make: the project folder and its files, each worktree on its branch, and the tracks the template adds. Sessions started from the project's Overview are filed under the project and still belong to their folder in the Session Overview.
 - **Tracks** — Optional lines of work inside a project, each with its own sessions, start folder, and CLI. A track card's "Resume latest" reopens its most recent session. "New" starts one there.
 - **Move to project** — Any session row has a move action. Nothing is filed until you launch it from a project or move it there.
 - **Mark as done** — Done projects drop to the bottom, collapsed. Removing a project only forgets it. The folder and the sessions stay on disk.
