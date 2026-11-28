@@ -22,6 +22,11 @@
 // while drawing, overviewClosedCardOf and focusOverviewClosedCard for the keys,
 // unmountOverviewClosedCards on close, and overviewExpanded for the model.
 //
+// The + and ⋯ of a folder's or a project's group header are
+// session-overview-groups.js's (decorateOverviewGroupHeader, typeof guarded), and
+// a card's "Leave out of this search" is session-overview-panel.js's
+// (overviewLeaveOutItems, the same).
+//
 // Depends on: buildOverview, overviewPlaces, layoutGeometry, pageSlice,
 // createOverviewLifecycle, loadOverviewPrefs, saveOverviewPrefs,
 // normalizeOverviewPrefs, OVERVIEW_* (session-overview-model.js);
@@ -597,6 +602,8 @@ function ensureOverviewGroup(group, { grouped, collapsed }) {
   const count = group.cards.reduce((n, card) => n + (card.kind === 'older' ? card.count : 1), 0);
   groupEl.querySelector('.ov-group-count').textContent = String(count);
   groupEl.classList.toggle('collapsed', collapsed);
+  // A folder's or a project's + and ⋯ (session-overview-groups.js).
+  if (typeof decorateOverviewGroupHeader === 'function') decorateOverviewGroupHeader(header, group);
   return groupEl;
 }
 
@@ -759,7 +766,7 @@ function buildOverviewCard(entry) {
   return card;
 }
 
-/** The menu of a card (right click on its header, and ⋯). */
+/** The menu of a card (right click on its header, and ⋯); during a search it ends with "Leave out of this search". */
 function overviewCardMenuItems(session) {
   const id = session?.sessionId;
   if (!id) return [];
@@ -768,6 +775,7 @@ function overviewCardMenuItems(session) {
     { label: 'Maximize', icon: OV_ICONS.maximize, onClick: () => toggleOverviewMaximize(id) },
     { sep: true },
     ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []),
+    ...(typeof overviewLeaveOutItems === 'function' ? overviewLeaveOutItems([id]) : []),
   ];
 }
 

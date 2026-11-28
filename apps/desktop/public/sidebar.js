@@ -349,7 +349,7 @@ function renderProjects(projects, resort) {
 
     const settingsBtn = document.createElement('button');
     settingsBtn.className = 'project-settings-btn';
-    settingsBtn.title = 'Project settings';
+    settingsBtn.title = 'Folder settings';
     settingsBtn.innerHTML = ICONS.gear(16);
     header.appendChild(settingsBtn);
 
@@ -514,20 +514,7 @@ function rebindSidebarEvents(projects) {
     if (archiveGroupBtn) {
       archiveGroupBtn.onclick = async (e) => {
         e.stopPropagation();
-        const sessions = project.sessions.filter(s => !s.archived);
-        if (sessions.length === 0) return;
-        const shortName = shortProjectPath(project.projectPath);
-        if (!confirm(`Archive all ${sessions.length} session${sessions.length > 1 ? 's' : ''} in ${shortName}?`)) return;
-        for (const s of sessions) {
-          if (activePtyIds.has(s.sessionId)) {
-            await window.api.stopSession(s.sessionId);
-          }
-          await window.api.archiveSession(s.sessionId, 1);
-          forgetTerminalHistory(s.sessionId);
-          s.archived = 1;
-        }
-        pollActiveSessions();
-        loadProjects();
+        await archiveFolderSessions(project.projectPath, project.sessions);
       };
     }
     header.onclick = (e) => {
@@ -554,10 +541,7 @@ function rebindSidebarEvents(projects) {
     if (wtHideBtn) {
       wtHideBtn.onclick = async (e) => {
         e.stopPropagation();
-        const name = wtProject.projectPath.split('/').pop();
-        if (!confirm(`Hide worktree "${name}"?\n\nSession files are not deleted.`)) return;
-        await window.api.removeProject(wtProject.projectPath);
-        loadProjects();
+        await hideWorktree(wtProject.projectPath);
       };
     }
     wtHeader.onclick = (e) => {
@@ -567,6 +551,42 @@ function rebindSidebarEvents(projects) {
   });
 
   bindSessionListEvents(sidebarContent);
+}
+
+/**
+ * "Archive all sessions" of a folder (its header in the Sessions list, its
+ * group in the Session Overview): after a confirmation, each of its sessions
+ * not archived yet is archived, a running one stopped first. `sessions` are the
+ * ones to go through; the Sessions list passes the ones it shows, and without
+ * them they are all the folder's. Resolves to true once they are archived,
+ * false when there was none or the answer was no.
+ */
+async function archiveFolderSessions(projectPath, sessions = null) {
+  const folder = sessions ? null : [...cachedAllProjects, ...cachedProjects].find(p => p.projectPath === projectPath);
+  const toArchive = (sessions || folder?.sessions || []).filter(s => !s.archived);
+  if (toArchive.length === 0) return false;
+  const shortName = shortProjectPath(projectPath);
+  if (!confirm(`Archive all ${toArchive.length} session${toArchive.length > 1 ? 's' : ''} in ${shortName}?`)) return false;
+  for (const s of toArchive) {
+    if (activePtyIds.has(s.sessionId)) {
+      await window.api.stopSession(s.sessionId);
+    }
+    await window.api.archiveSession(s.sessionId, 1);
+    forgetTerminalHistory(s.sessionId);
+    s.archived = 1;
+  }
+  pollActiveSessions();
+  loadProjects();
+  return true;
+}
+
+/** "Hide worktree": a Claude worktree's folder leaves the lists, after a confirmation. Its session files stay. */
+async function hideWorktree(projectPath) {
+  const name = projectPath.split('/').pop();
+  if (!confirm(`Hide worktree "${name}"?\n\nSession files are not deleted.`)) return false;
+  await window.api.removeProject(projectPath);
+  loadProjects();
+  return true;
 }
 
 // Per-row handlers for every session list: slug groups, "+N older" toggles and

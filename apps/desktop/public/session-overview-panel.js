@@ -9,8 +9,8 @@
 // The search finds sessions by title and folder name from the first character,
 // and with "Search in messages" by what their messages say, from 3 characters
 // (window.api.searchSessions). The page shows what it found (overviewSearch),
-// minus what was left out of this search (overviewLeftOut, which the card menu
-// fills).
+// minus what was left out of this search (overviewLeftOut, which the cards'
+// menus fill through overviewLeaveOutItems).
 //
 // The files shared with upstream reach it through one-line hooks guarded with
 // typeof: the tab handler (app.js) calls showOverviewTab for the Sessions tab
@@ -169,6 +169,27 @@ function rerunOverviewSearch() {
 function overviewSearchSummary(results) {
   if (!results) return null;
   return { count: results.total, running: new Set(results.runningIds).size };
+}
+
+/**
+ * "Leave out of this search", for a card's menu (session-overview.js and
+ * session-overview-closed.js): while a search is on, one item that takes the
+ * card's sessions off the page until "Restore N left out" or a new query.
+ * Nothing without a search.
+ */
+function overviewLeaveOutItems(ids) {
+  const list = (ids || []).filter(Boolean);
+  if (!overviewSearch || list.length === 0) return [];
+  return [
+    { sep: true },
+    { label: 'Leave out of this search', icon: PICONS.x(14), onClick: () => leaveOutOfOverviewSearch(list) },
+  ];
+}
+
+/** The sessions go off the page for this search; the page and the panel (Restore N left out) are drawn again. */
+function leaveOutOfOverviewSearch(ids) {
+  for (const id of ids) overviewLeftOut.add(id);
+  refreshOverviewTab();
 }
 
 /** Stop every running session the search shows on the page, after one confirmation. */

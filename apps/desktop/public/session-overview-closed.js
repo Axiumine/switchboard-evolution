@@ -31,6 +31,7 @@
 //
 // Depends on: ovState, overviewAdopt, isSessionOverviewOpen,
 // refreshSessionOverview, fillOverviewCardHeader (session-overview.js);
+// overviewLeaveOutItems (session-overview-panel.js, typeof guarded);
 // OVERVIEW_CLI_LABELS, overviewCliOf (session-overview-model.js); openSession,
 // sessionMap, sessionEventTime (app.js); sessionTitle,
 // sessionMenuItems, showContextMenu, PICONS (projects-view.js); formatDate
@@ -338,14 +339,20 @@ function resumeOverviewSession(id) {
     });
 }
 
-/** The menu of a closed card (⋯ and right click): Resume, then the session's own. */
+/**
+ * The menu of a closed card (⋯ and right click): Resume, then the session's
+ * own, and during a search "Leave out of this search", which leaves out the
+ * earlier sessions the card stands for too.
+ */
 function overviewClosedMenuItems(session) {
   const id = session?.sessionId;
   if (!id) return [];
+  const earlierIds = ovClosed.cards.get(id)?.card.earlierIds || [];
   return [
     { label: 'Resume', icon: PICONS.play(13), onClick: () => resumeOverviewSession(id) },
     { sep: true },
     ...(typeof sessionMenuItems === 'function' ? sessionMenuItems(session) : []),
+    ...(typeof overviewLeaveOutItems === 'function' ? overviewLeaveOutItems([id, ...earlierIds]) : []),
   ];
 }
 
