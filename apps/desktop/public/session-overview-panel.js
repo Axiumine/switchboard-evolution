@@ -20,9 +20,9 @@
 //
 // Depends on: ensureOverviewPrefs, setOverviewPrefs, refreshSessionOverview,
 // openSessionOverview, isSessionOverviewOpen, sessionOverviewReady,
-// sessionOverviewUnavailable, overviewSessions, overviewContext,
+// sessionOverviewUnavailable, overviewSessions, overviewLastResults,
 // overviewFolderOf, overviewFolderLabel, overviewProjectOf
-// (session-overview.js); buildOverview, overviewDefaults, overviewFiltersActive,
+// (session-overview.js); overviewDefaults, overviewFiltersActive,
 // OVERVIEW_* (session-overview-model.js); SESSION_STATUS_FILTERS,
 // SESSION_PIN_FILTERS (session-list.js); sessionTitleMatches
 // (search-results.js); activeTab, sessionFilters, searchBar, sidebarContent,
@@ -161,24 +161,21 @@ function rerunOverviewSearch() {
   if (input && input.value.trim()) runOverviewSearch(input.value);
 }
 
-/** "N results" and "Stop N running": the results counted once each, and how many of them run. */
-function overviewSearchSummary(ids, isRunning) {
-  const unique = [...new Set(ids)];
-  return { count: unique.length, running: unique.filter(id => isRunning(id)).length };
+/**
+ * "N results" and "Stop N running", from what the page's last render counted
+ * (overviewLastResults): its total, as the page's header says, and its running
+ * cards once each. Null without a render (the page closed).
+ */
+function overviewSearchSummary(results) {
+  if (!results) return null;
+  return { count: results.total, running: new Set(results.runningIds).size };
 }
 
-/** What the search shows: the cards the model gives for it, through the filters, and its running probe. */
-function overviewSearchResults() {
-  const ctx = overviewContext({ resort: false });
-  const model = buildOverview(overviewSessions(), ensureOverviewPrefs(), ctx);
-  return { ids: model.groups.flatMap(group => group.cards.map(card => card.id)), isRunning: ctx.isRunning };
-}
-
-/** Stop every running session the search shows, after one confirmation. */
+/** Stop every running session the search shows on the page, after one confirmation. */
 async function stopOverviewResults() {
-  if (!overviewSearch) return;
-  const { ids, isRunning } = overviewSearchResults();
-  const sessions = [...new Set(ids)].filter(id => isRunning(id))
+  const results = overviewLastResults();
+  if (!overviewSearch || !results) return;
+  const sessions = [...new Set(results.runningIds)]
     .map(id => sessionMap.get(id) || openSessions.get(id)?.session).filter(Boolean);
   if (!sessions.length) return;
   const busy = sessions.filter(s => sessionBusyState.get(s.sessionId) === true);
@@ -558,20 +555,25 @@ function syncOverviewPlaces(place) {
   select.classList.toggle('is-on', !!place);
 }
 
-/** The bar under the search: "N results", "Restore N left out" when some are, "Stop N running" when some run. */
+/**
+ * The bar under the search: "N results" and "Stop N running" as the page's
+ * last render counted them (drawn after it: refreshOverviewTab and
+ * setOverviewPrefs draw the page first), and "Restore N left out" when some are.
+ */
 function syncOverviewResults() {
   const bar = ovPanel.el.querySelector('.ovp-results');
-  bar.hidden = !overviewSearch;
-  if (!overviewSearch) return;
-  const { ids, isRunning } = overviewSearchResults();
-  const { count, running } = overviewSearchSummary(ids, isRunning);
-  bar.querySelector('.ovp-results-count').textContent = `${count} result${count === 1 ? '' : 's'}`;
+  const summary = overviewSearch ? overviewSearchSummary(overviewLastResults()) : null;
+  bar.hidden = !overviewSearch || (!summary && overviewLeftOut.size === 0);
+  if (bar.hidden) return;
+  const count = bar.querySelector('.ovp-results-count');
+  count.hidden = !summary;
+  count.textContent = summary ? `${summary.count} result${summary.count === 1 ? '' : 's'}` : '';
   const restore = bar.querySelector('.ovp-restore');
   restore.hidden = overviewLeftOut.size === 0;
   restore.textContent = `Restore ${overviewLeftOut.size} left out`;
   const stop = bar.querySelector('.ovp-stop');
-  stop.hidden = running === 0;
-  stop.textContent = `Stop ${running} running`;
+  stop.hidden = !summary || summary.running === 0;
+  stop.textContent = `Stop ${summary?.running || 0} running`;
 }
 
 // ---- + New session ----
@@ -631,9 +633,11 @@ function showOverviewNewSession(anchor) {
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
     if (sessionOverviewUnavailable()) return;
-    // The page mounts and unmounts as a child of #main: the first button says whether it is on screen.
+    // The page mounts and unmounts as a child of #main: the first button says
+    // whether it is on screen, and the results bar counts its first render, or
+    // nothing once it is gone.
     const main = document.getElementById('main');
-    if (main) new MutationObserver(syncOverviewOpenButton).observe(main, { childList: true });
+    if (main) new MutationObserver(() => refreshOverviewPanel()).observe(main, { childList: true });
     // A start opens on the Sessions tab until app.js clicks the remembered one.
     if (activeTab === 'sessions') showOverviewSidebar();
   }, { once: true });

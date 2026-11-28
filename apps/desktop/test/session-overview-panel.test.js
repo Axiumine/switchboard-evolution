@@ -131,10 +131,74 @@ test('a new query starts with nothing left out, the same query keeps it', async 
 
 test('the result summary counts running results', () => {
   const { run } = panel();
-  const summary = (ids, running) => ({ ...run(`overviewSearchSummary(${JSON.stringify(ids)}, id => ${JSON.stringify(running)}.includes(id))`) });
-  assert.deepEqual(summary(['a', 'b', 'c', 'b'], ['b', 'z']), { count: 3, running: 1 });
-  assert.deepEqual(summary(['a', 'b'], ['a', 'b']), { count: 2, running: 2 });
-  assert.deepEqual(summary([], ['a']), { count: 0, running: 0 });
+  // The page's last render: its total, and the ids of its running cards.
+  const summary = results => run(`JSON.stringify(overviewSearchSummary(${JSON.stringify(results)}))`);
+  assert.equal(summary({ total: 3, runningIds: ['b', 'c', 'b'] }), JSON.stringify({ count: 3, running: 2 }));
+  assert.equal(summary({ total: 2, runningIds: [] }), JSON.stringify({ count: 2, running: 0 }));
+  // No render yet, or the page closed: nothing to count.
+  assert.equal(summary(null), 'null');
+});
+
+/** A stand-in element: text, hidden, and the children its querySelector finds by selector. */
+function fakeElement(children = {}) {
+  return { textContent: '', hidden: false, querySelector: selector => children[selector] || null };
+}
+
+test('the results bar counts what the page counts, also when closed sessions share a slug', () => {
+  const overview = read('session-overview.js');
+  const now = Date.now();
+  const at = minutes => new Date(now - minutes * 60000).toISOString();
+  // Two closed sessions of one conversation (one slug) and a running one, all found.
+  const sessions = [
+    { sessionId: 'old', name: 'Fix alpha', slug: 'fix-alpha', projectPath: '/Users/demo/app', modified: at(30) },
+    { sessionId: 'new', name: 'Fix alpha again', slug: 'fix-alpha', projectPath: '/Users/demo/app', modified: at(20) },
+    { sessionId: 'live', name: 'Alpha live', projectPath: '/Users/demo/app', modified: at(1) },
+  ];
+  const drawn = {};
+  const context = vm.createContext({
+    console, Map, Set, WeakSet, Promise, JSON, Date, Math, Number, Object, Array, String,
+    setTimeout, clearTimeout, clearInterval() {}, cancelAnimationFrame() {}, removeEventListener() {},
+    document: { addEventListener() {}, getElementById: () => null, querySelector: () => null },
+    localStorage: { getItem: () => null, setItem() {} },
+    cachedAllProjects: [{ projectPath: '/Users/demo/app', sessions }],
+    sessionMap: new Map(sessions.map(session => [session.sessionId, session])),
+    openSessions: new Map([['live', { session: sessions[2], element: {} }]]),
+    isSessionRunning: id => id === 'live',
+    attentionSessions: new Set(), responseReadySessions: new Set(), sessionBusyState: new Map(),
+    sessionEventTime: session => Date.parse(session.modified),
+    visibleSessionCount: 10, sessionMaxAgeDays: 3,
+    terminalsEl: {}, terminalHeader: { style: {} },
+    updateRunningIndicators() {},
+  });
+  context.window = context;
+  vm.runInContext([searchResults, model, overview, panelSource].join('\n'), context);
+  const run = code => vm.runInContext(code, context);
+  // The page as open, its drawing stubbed: the header shows the model's total.
+  context.drawOverviewHeader = page => { drawn.total = page.total; drawn.running = page.running; };
+  context.drawOverviewCards = () => {};
+  context.layoutSessionOverview = () => {};
+  run('ovState.root = { remove() {} }; overviewSearch = { query: "alpha", ids: new Set(["old", "new", "live"]) };');
+  run('renderSessionOverview()');
+  assert.deepEqual(drawn, { total: 3, running: 1 });
+
+  // The panel's bar, drawn from that render.
+  const parts = { '.ovp-results-count': fakeElement(), '.ovp-restore': fakeElement(), '.ovp-stop': fakeElement() };
+  const bar = fakeElement(parts);
+  run('ovPanel').el = fakeElement({ '.ovp-results': bar });
+  run('syncOverviewResults()');
+  assert.equal(bar.hidden, false);
+  assert.equal(parts['.ovp-results-count'].textContent, '3 results');
+  assert.equal(parts['.ovp-stop'].hidden, false);
+  assert.equal(parts['.ovp-stop'].textContent, 'Stop 1 running');
+  assert.equal(run('JSON.stringify(overviewLastResults().runningIds)'), '["live"]');
+  // The panel never builds the model itself.
+  assert.ok(!panelSource.includes('buildOverview('));
+
+  // The page closed: no count from an old render.
+  run('unmountSessionOverview()');
+  assert.equal(run('overviewLastResults()'), null);
+  run('syncOverviewResults()');
+  assert.equal(bar.hidden, true);
 });
 
 test('the CLI filter offers the switched-on CLIs, Terminal, and any already chosen', () => {

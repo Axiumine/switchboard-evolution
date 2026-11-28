@@ -69,6 +69,7 @@ const ovState = {
   bornHere: new WeakSet(), // entries whose terminal was made while the page was open
   exit: null, // { id, shown } while openSessionNormally opens the Projects tab
   layout: null, // what the last render drew, for the layout pass
+  results: null, // what the last render counted, for the search's results bar (overviewLastResults)
   originalShowSession: null,
   terminalsObserver: null,
   cardsObserver: null,
@@ -165,6 +166,16 @@ function overviewAdopt(id) {
 function refreshSessionOverview({ resort = false } = {}) {
   if (!isSessionOverviewOpen()) return;
   renderSessionOverview({ resort });
+}
+
+/**
+ * What the last render counted, for the search's results bar (the Sessions
+ * tab): `total`, the sessions through the filters as the header counts them,
+ * and `runningIds`, the running cards, which "Stop N running" stops. Null
+ * while the page is closed.
+ */
+function overviewLastResults() {
+  return ovState.results;
 }
 
 /** Change some choices: they are normalized, saved and drawn. A new sort or grouping puts the cards in its order. */
@@ -283,6 +294,7 @@ function unmountSessionOverview() {
   ovState.adopted.clear();
   ovState.bornHere = new WeakSet();
   ovState.layout = null;
+  ovState.results = null;
   document.getElementById('grid-toggle-btn')?.classList.remove('active');
 }
 
@@ -375,6 +387,10 @@ function renderSessionOverview({ resort = false } = {}) {
   // Places are kept for every card the model gave, drawn or not.
   ovState.previousOrder = new Map(model.groups.map(group => [group.key, group.cards.map(card => card.id)]));
   ovState.previousGroups = model.groups.map(group => group.key);
+  ovState.results = {
+    total: model.total,
+    runningIds: model.groups.flatMap(group => group.cards.filter(card => card.running).map(card => card.id)),
+  };
 
   const grouped = prefs.group.by !== 'none';
   const carousels = grouped && prefs.group.display === 'carousels';
