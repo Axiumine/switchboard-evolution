@@ -1,6 +1,6 @@
 # Switchboard Evolution compared with Switchboard
 
-`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.21.0 (November 2026).
+`apps/desktop` started from [Switchboard](https://github.com/doctly/switchboard) by Doctly and still contains all of it: every upstream commit up to `e594fa9` (Switchboard 0.0.37) is in, as is or adapted, and the [Upstream sync](../.github/workflows/upstream-sync.yml) workflow brings in the later ones. This page lists what Switchboard Evolution adds on top, as of version 1.21.0 (November 2026) and the work on `master` since then.
 
 ## At a glance
 
@@ -130,6 +130,9 @@ What "an app of its own" means:
 
 ### 5. Projects and sessions
 
+- The **Session Overview** in place of upstream's session grid: the Sessions tab opens a page of its own, with no project header, where every open session is a card with its live terminal, and the tab's sidebar holds the page's controls instead of the list. Five layouts (Grid (fit) with pages, Grid scrolling down or across, Rows, Columns) with card sizes; filters (status, pinned, CLI, period, place) shown as chips on the page; six sorts, kept still until Re-sort; groups by folder, project, CLI, kind, status, period or pinned, as sections or carousels, a folder's or a project's group with its own + and ⋯ (Folder settings, Archive all sessions…); Maximize; Cmd/Ctrl+Arrows between cards. Its search finds titles and folders, and with "Search in messages" the first or last N messages or all of them. "Include closed" adds the closed sessions as light cards with their last message and Resume, within the app's limits ("+ N older", "+n earlier"). A double click or "Open in project" opens the session on its project's Session tab.
+- Only the terminals on screen draw with WebGL, at most the ten used last, so many live terminals never go black for lack of graphics contexts.
+- **Split panes**, as in tmux, in the Session tab and in the overview: Split halves a pane along its longer side and starts a new session like the one split (same CLI, folder, project, track and launch options), or one set up with "New split session with configuration…"; dividers, Maximize, Remove from split, Cmd/Ctrl+Alt+Arrows. Layouts are kept across restarts. In the overview a card's Split docks the session beside the cards.
 - Each project has a drawer with its sessions, grouped by time, track or state. A **Session** tab holds a terminal, a transcript or a task log under the project header.
 - Numbers on each project row: plan done/total, open todos, tracks, sessions.
 - Search in the Projects tab finds sessions too. A "No project" row gathers sessions no project claims. An X leaves a result out of the search, and "Stop n running" stops the sessions found.
@@ -153,6 +156,7 @@ What "an app of its own" means:
 - One strip of sidebar tabs: Projects, Sessions, Plans, Files, Stats, Task Manager, Settings.
 - Stats and the Task Manager open in windows of their own, with a pin that keeps them on top.
 - Every project tab (Overview, Plan, Todos, Files, Git, Settings) can open in a window of its own, whose header has the other tabs to move it to one of them (on the phone too). Open windows come back at the next start.
+- Any session can open in a window of its own (**Open in new window**), with its header, Commands, Improve prompt, Stop, Split and a pin: its terminal moves there without losing or repeating output, and the main window shows "In its own window" with Bring back and Show window. Closing the window brings its sessions back. Session windows close with the main window and are not opened again at the next start. Session windows, the Session Overview and split panes are on the desktop only; the phone is as it was.
 
 ### 8. Under the hood
 
@@ -180,4 +184,4 @@ A new interface (React, TypeScript, Vite), a new brand, light and dark themes, a
 | [#112](https://github.com/doctly/switchboard/pull/112) | open | Share button in the file viewer |
 | [#113](https://github.com/doctly/switchboard/pull/113) | open | Task Manager with each session's RAM |
 
-Not offered yet: phone access and the mobile app, herdr-core, the Git Graph actions, the Files explorer with search and replace, staging, commit compare, separate windows, the resource bar.
+Not offered yet: phone access and the mobile app, herdr-core, the Git Graph actions, the Files explorer with search and replace, staging, commit compare, separate windows, the resource bar, the Session Overview and split panes.
