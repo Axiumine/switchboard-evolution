@@ -291,3 +291,114 @@ test('the page finds the WebGL canvas, leaves layer canvases alone and never thr
   assert.equal(findWebglContextLoser(element([canvas('', null)])), null, 'a context without the extension');
   assert.equal(findWebglContextLoser({ querySelectorAll() { throw new Error('detached'); } }), null);
 });
+
+// A session's id can change while its terminal lives on (Codex's real id, a
+// fork, a plan accepted): app.js moves the terminal in openSessions, and the
+// budget must follow, or the terminal, its observer and its context outlive it.
+test('a terminal whose session changes id stays the budget\'s, and goes with its session', () => {
+  const { budget, active, calls, watchers, make, show } = setup({ max: 1 });
+  const [a, b] = ['temp', 'b'].map(make);
+  for (const item of [a, b]) budget.register(item.id, item.terminal, item.element);
+  show(a);
+  budget.rekey('temp', 'real');
+  assert.deepEqual(active(), ['real']);
+  // Its focus, and a touch under the new id, still count.
+  show(b);
+  assert.deepEqual(active(), ['b']);
+  budget.touch('real');
+  assert.deepEqual(active(), ['real']);
+  show(b, false);
+  calls.length = 0;
+  budget.unregister('real', a.terminal);
+  assert.deepEqual(calls, ['find temp', 'dispose temp', 'free temp'], 'its context is freed at once');
+  assert.equal(watchers.get(a.element).watching, false);
+  assert.equal(a.listeners.length, 0);
+  assert.deepEqual(active(), []);
+});
+
+test('a re-key the budget missed: unregister finds the terminal itself', () => {
+  const { budget, active, watchers, make, show } = setup({ max: 2 });
+  const a = make('temp');
+  budget.register(a.id, a.terminal, a.element);
+  show(a);
+  budget.unregister('real', a.terminal);
+  assert.deepEqual(active(), []);
+  assert.equal(watchers.get(a.element).watching, false);
+  assert.equal(a.terminal.loaded[0].disposed, 1);
+  // Another terminal's id never takes a terminal away.
+  const b = make('b');
+  const c = make('c');
+  budget.register(b.id, b.terminal, b.element);
+  budget.register(c.id, c.terminal, c.element);
+  show(b); show(c);
+  budget.unregister('b', c.terminal);
+  assert.deepEqual(active(), ['b']);
+});
+
+test('the old id used again after a re-key is another terminal', () => {
+  const { budget, active, make, show } = setup({ max: 2 });
+  const first = make('old');
+  budget.register('old', first.terminal, first.element);
+  show(first);
+  budget.rekey('old', 'new');
+  const second = make('old');
+  budget.register('old', second.terminal, second.element);
+  show(second);
+  assert.deepEqual(active().sort(), ['new', 'old']);
+  budget.unregister('old', second.terminal);
+  assert.deepEqual(active(), ['new']);
+  // A re-key onto an id in use leaves both where they are.
+  const third = make('third');
+  budget.register('third', third.terminal, third.element);
+  show(third);
+  budget.rekey('third', 'new');
+  assert.deepEqual(active().sort(), ['new', 'third']);
+});
+
+// A session shown in a window of its own leaves a shadow terminal under a
+// placeholder here (session-window-host.js): on screen, but drawing nothing.
+test('a terminal held back gives its context to one that draws', () => {
+  const { budget, active, calls, make, show } = setup({ max: 1 });
+  const [a, b] = ['a', 'b'].map(make);
+  for (const item of [a, b]) budget.register(item.id, item.terminal, item.element);
+  show(a); show(b);
+  assert.deepEqual(active(), ['b']);
+  calls.length = 0;
+  budget.hold('b', true, b.terminal);
+  assert.deepEqual(calls, ['find b', 'dispose b', 'free b']);
+  assert.deepEqual(active(), ['a'], 'the slot goes to a, on screen');
+  budget.touch('b');
+  assert.deepEqual(active(), ['a'], 'a touch does not bring it back while held');
+  budget.hold('b', false, b.terminal);
+  assert.deepEqual(active(), ['b']);
+  // Held under an id it no longer has, it is still found.
+  budget.rekey('b', 'b2');
+  budget.hold('b', true, b.terminal);
+  assert.deepEqual(active(), ['a']);
+});
+
+test('the page follows the sessions\' re-keys', () => {
+  const listeners = {};
+  const observers = [];
+  const context = vm.createContext({
+    console, setTimeout, clearTimeout,
+    window: {
+      api: {
+        onSessionDetected: fn => { listeners.detected = fn; },
+        onSessionForked: fn => { listeners.forked = fn; },
+      },
+    },
+    IntersectionObserver: class { constructor(cb) { observers.push(cb); } observe() {} disconnect() {} },
+    WebglAddon: { WebglAddon: class { onContextLoss() {} dispose() {} } },
+  });
+  vm.runInContext(SOURCE, context);
+  const gpu = context.window.terminalGpu;
+  const element = { addEventListener() {}, removeEventListener() {}, querySelectorAll: () => [] };
+  gpu.register('temp', { loadAddon() {} }, element);
+  observers[0]([{ isIntersecting: true }]);
+  assert.deepEqual(Array.from(gpu.active()), ['temp']);
+  listeners.detected('temp', 'real');
+  assert.deepEqual(Array.from(gpu.active()), ['real']);
+  listeners.forked('real', 'fork');
+  assert.deepEqual(Array.from(gpu.active()), ['fork']);
+});

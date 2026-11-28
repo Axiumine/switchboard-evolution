@@ -35,8 +35,8 @@
 // refreshTileView, syncTileLayout, refreshTileHeaderButtons
 // (tile-view.js); graftTile, tileIds (tile-layout-model.js); overviewDock,
 // saveOverviewDock (session-overview-dock.js); isSessionOverviewOpen,
-// refreshSessionOverview (session-overview.js); ICONS (icons.js). All are
-// looked up when called.
+// refreshSessionOverview (session-overview.js); terminalGpu (terminal-gpu.js);
+// ICONS (icons.js). All are looked up when called.
 
 function sessionWindowsHere() {
   return typeof window !== 'undefined' && !!window.api?.openSessionWindow
@@ -126,6 +126,8 @@ function markPoppedOut(entry) {
   muteTerminalInput(entry);
   const container = entry.element;
   container.classList.add('popped-out');
+  // On screen under the placeholder, it draws nothing: no WebGL context for it (terminal-gpu.js).
+  window.terminalGpu?.hold(entry.session.sessionId, true, entry.terminal);
   if (!entry.popOutPlaceholder) {
     entry.popOutPlaceholder = buildPopOutPlaceholder(entry);
     container.appendChild(entry.popOutPlaceholder);
@@ -144,6 +146,7 @@ function clearPoppedOut(entry) {
   entry.shadow = false;
   muteTerminalInput(entry);
   entry.element.classList.remove('popped-out');
+  window.terminalGpu?.hold(entry.session.sessionId, false, entry.terminal);
   entry.popOutPlaceholder?.remove();
   entry.popOutPlaceholder = null;
   if (typeof refreshTileHeaderButtons === 'function') refreshTileHeaderButtons();

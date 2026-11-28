@@ -359,6 +359,20 @@ test('Bring back closes the window; with no window left it reattaches here', asy
   assert.equal(gone.entries.get('S1').closed, false, 'its terminal here is the live one again');
 });
 
+test('a shadow under its placeholder holds no WebGL context here', () => {
+  const { context, listeners, entries, log } = mainWindow({ ids: ['S1', 'S2'] });
+  context.terminalGpu = { hold: (id, held, terminal) => log.push(['gpu', id, held, terminal === entries.get(id).terminal]) };
+  listeners.owner('S1', 'window', false);
+  assert.deepEqual(log, [['gpu', 'S1', true, true]]);
+  listeners.owner('S1', 'main', true);
+  assert.deepEqual(log.at(-1), ['gpu', 'S1', false, true]);
+  // Ended in its window: the terminal here shows how, so it draws again.
+  listeners.owner('S2', 'window', false);
+  log.length = 0;
+  listeners.exited('S2', 1, null, false);
+  assert.deepEqual(log, [['gpu', 'S2', false, true]]);
+});
+
 test('the main window takes a session back, or loses it to its end, and the placeholder goes', () => {
   const { listeners, entries } = mainWindow({ ids: ['S1', 'S2'] });
   listeners.owner('S1', 'window', false);

@@ -634,7 +634,7 @@ function destroySession(sessionId, { forgetPersisted = true, preserveHistory = f
   if (forgetPersisted && session?.type === 'terminal') forgetPersistedTerminalSession(sessionId);
   if (!entry) return;
   window.api.closeTerminal(sessionId);
-  window.terminalGpu?.unregister(sessionId);
+  window.terminalGpu?.unregister(sessionId, entry.terminal);
   entry.terminal.dispose();
   entry.element.remove();
   openSessions.delete(sessionId);

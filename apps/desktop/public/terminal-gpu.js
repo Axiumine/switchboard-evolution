@@ -7,7 +7,12 @@
 // DOM renderer and tries again a little later, if it is still on screen.
 //
 // terminal-manager.js only registers a terminal when it makes it and
-// unregisters it when it closes it.
+// unregisters it when it closes it. A session's id can change while its
+// terminal lives on (Codex's real id, a fork, a plan accepted): the budget
+// follows session-detected and session-forked as app.js does, and unregister
+// also finds a terminal by itself. A terminal held back (hold: a session shown
+// in a window of its own leaves one under a placeholder here,
+// session-window-host.js) draws nothing, so it gets no WebGL while on screen.
 
 const TERMINAL_GPU_MAX = 10;
 const TERMINAL_GPU_RETRY_MS = 5000;
@@ -29,7 +34,7 @@ function createGpuBudget({
   max = TERMINAL_GPU_MAX, makeAddon, observe,
   freeContext = () => null, setTimer = setTimeout, clearTimer = clearTimeout, warn = console.warn,
 }) {
-  // id -> { id, terminal, element, visible, touched, addon, waiting, unsupported, retryTimer, stopObserving, onFocus }
+  // id -> { id, terminal, element, visible, held, touched, addon, waiting, unsupported, retryTimer, stopObserving, onFocus }
   const entries = new Map();
   let clock = 0;
 
@@ -72,11 +77,12 @@ function createGpuBudget({
   }
 
   // The visible terminals, most recently touched first, share the budget. A
-  // terminal waiting to retry after a context loss is not asked for one.
+  // terminal waiting to retry after a context loss is not asked for one, nor is
+  // one held back.
   function rebalance() {
     const wanted = new Set(
       [...entries.values()]
-        .filter(entry => entry.visible && !entry.waiting && !entry.unsupported)
+        .filter(entry => entry.visible && !entry.held && !entry.waiting && !entry.unsupported)
         .sort((a, b) => b.touched - a.touched)
         .slice(0, max),
     );
@@ -96,20 +102,52 @@ function createGpuBudget({
     rebalance();
   }
 
-  function touch(id) {
+  /**
+   * The entry of session `id`, or, given its terminal, the entry of that
+   * terminal whatever its id (a re-key the budget did not hear of). Never
+   * another terminal's entry.
+   */
+  function entryOf(id, terminal) {
     const entry = entries.get(id);
-    if (!entry) return;
+    if (!terminal || entry?.terminal === terminal) return entry;
+    return [...entries.values()].find(candidate => candidate.terminal === terminal);
+  }
+
+  function touchEntry(entry) {
+    if (entries.get(entry.id) !== entry) return;
     entry.touched = ++clock;
+    rebalance();
+  }
+
+  function touch(id, terminal) {
+    const entry = entryOf(id, terminal);
+    if (entry) touchEntry(entry);
+  }
+
+  /** The session of a terminal changed id: the entry moves with it, unless the new id is taken. */
+  function rekey(oldId, newId) {
+    const entry = entries.get(oldId);
+    if (!entry || oldId === newId || entries.has(newId)) return;
+    entries.delete(oldId);
+    entry.id = newId;
+    entries.set(newId, entry);
+  }
+
+  /** `held`: the terminal is on screen but draws nothing, and gets no WebGL until it is let go. */
+  function hold(id, held, terminal) {
+    const entry = entryOf(id, terminal);
+    if (!entry || entry.held === !!held) return;
+    entry.held = !!held;
     rebalance();
   }
 
   function register(id, terminal, element) {
     if (entries.has(id)) unregister(id);
     const entry = {
-      id, terminal, element, visible: false, touched: ++clock, addon: null,
+      id, terminal, element, visible: false, held: false, touched: ++clock, addon: null,
       waiting: false, unsupported: false, retryTimer: null, stopObserving: null, onFocus: null,
     };
-    entry.onFocus = () => touch(id);
+    entry.onFocus = () => touchEntry(entry);
     entries.set(id, entry);
     element.addEventListener('focusin', entry.onFocus);
     entry.stopObserving = observe(element, visible => {
@@ -118,10 +156,10 @@ function createGpuBudget({
     });
   }
 
-  function unregister(id) {
-    const entry = entries.get(id);
+  function unregister(id, terminal) {
+    const entry = entryOf(id, terminal);
     if (!entry) return;
-    entries.delete(id);
+    entries.delete(entry.id);
     entry.stopObserving?.();
     entry.element.removeEventListener('focusin', entry.onFocus);
     if (entry.retryTimer !== null) clearTimer(entry.retryTimer);
@@ -133,7 +171,7 @@ function createGpuBudget({
     return [...entries.values()].filter(entry => entry.addon).map(entry => entry.id);
   }
 
-  return { register, unregister, touch, active };
+  return { register, unregister, touch, rekey, hold, active };
 }
 
 // Finds the WebGL canvas of a terminal (the addon adds it to .xterm-screen, with
@@ -170,4 +208,7 @@ if (typeof window !== 'undefined' && typeof IntersectionObserver !== 'undefined'
       return () => observer.disconnect();
     },
   });
+  // As app.js moves the terminal in openSessions.
+  window.api?.onSessionDetected?.((oldId, newId) => window.terminalGpu.rekey(oldId, newId));
+  window.api?.onSessionForked?.((oldId, newId) => window.terminalGpu.rekey(oldId, newId));
 }
